@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: project skeleton (T1) and database schema with fictional seed data (T2). Not yet built: login, campaign features, worker, mock providers, frontend.
+> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3). Not yet built: campaign features, worker, mock providers, frontend.
 
 ## Requirements
 
@@ -28,7 +28,15 @@ No `.env` is needed. To change settings, `cp .env.example .env` and edit it.
 |---|---|
 | `marketer@marketer.com` | `Demo1234!` |
 
-For local use only. The password can be changed with `DEMO_MARKETER_PASSWORD` in `.env`, but only before the first `docker compose up`: the seed runs once and never changes existing rows. (The login page arrives with T3.)
+For local use only. The password can be changed with `DEMO_MARKETER_PASSWORD` in `.env`, but only before the first `docker compose up`: the seed runs once and never changes existing rows. The login page arrives with the frontend (T15); until then, use the API:
+
+```sh
+curl -c cookies.txt -X POST localhost:8080/api/login \
+  -d '{"email":"marketer@marketer.com","password":"Demo1234!"}'
+curl -b cookies.txt localhost:8080/api/me
+```
+
+Every `/api/*` endpoint except `POST /api/login` returns 401 without a session. Sessions last 12 hours and live in an HttpOnly, SameSite=Lax cookie; the database stores only the token's SHA-256 hash. The cookie is not marked `Secure` because the demo runs on plain `http://localhost`.
 
 ## Seed data
 
@@ -51,4 +59,4 @@ Integration tests fail, never skip, when no database is available.
 
 ## Architecture (current)
 
-One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed.
+One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check.
