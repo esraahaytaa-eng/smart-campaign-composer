@@ -1,0 +1,929 @@
+ ▐▛███▛█   Claude Code v2.1.306
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/smart-campaign-composer
+
+  ✔ Using flicker-free rendering · if you want to go back, use /tui default
+    · Click to move your cursor in the text input
+    · Click to expand collapsed tool results
+    · By default, text auto-copies when you select it (/config to change)
+    · Hold Option while selecting to use your terminal's native copy instead
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+  1 more notice hidden
+
+❯ /clear                                                                        
+
+❯ /rename 02-architecture-design 
+  ⎿  Session renamed to: 02-architecture-design
+
+❯ start the architecture and technical design phase.                            
+  please read CASE.md, CLAUDE.md and DECISIONS.md first, and use my approved    
+  decisions as the baseline.                                                    
+  analyze the architecture and compare suitable options for the database,       
+  queue, real-time updates, frameworks, libraries and component boundaries.     
+  explain the trade-offs and recommend the simplest reliable approach.          
+
+⏺ Skill(superpowers:brainstorming)
+  ⎿  Successfully loaded skill
+
+  Read 2 files, recalled 1 memory (ctrl+o to expand)
+
+⏺ Skill(claude-api)
+  ⎿  Successfully loaded skill · 1 tool allowed
+
+❯ please ask me about important technical decisions one at a time before        
+  finalizing them. add approved decisions to DECISIONS.md following the project 
+  rules. don't start implementation yet.                                        
+
+⏺ Since the repo is docs-only and Go is fixed by CASE.md, I have enough context
+  already. I'll write the analysis into the plan file and then work through the
+  decisions one at a time.
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ I've reviewed CASE.md, CLAUDE.md, and DECISIONS.md (D1–D16 fixed) and will
+  walk through remaining decisions one at a time, adding approved ones as D17+
+  once we exit plan mode. First up: I recommend PostgreSQL 16, since it covers
+  message claiming (SKIP LOCKED), Unicode-consistent character counting,
+  schema/user separation for providers, duplicate handling via ON CONFLICT, and
+  mature Go support (pgx).
+
+⏺ User answered Claude's questions:
+  ⎿  · Which database should we use? → PostgreSQL 16 (Recommended)
+
+⏺ I'll log PostgreSQL 16 as D17 when plan mode ends. For the queue mechanism, I
+  recommend using the messages table itself as the queue—leveraging FOR UPDATE 
+  SKIP LOCKED for claims and existing lease/attempt tracking—rather than a
+  separate broker, to avoid dual-write issues and extra machinery, with a note
+  in DECISIONS.md justifying this against reviewer expectations.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which queue mechanism should we use for sending? → Postgres table queue 
+     (Recommended)
+
+⏺ I'll recommend a single worker instance with an in-process rate limiter
+  (golang.org/x/time/rate) per channel to enforce the 100 msg/sec limit exactly,
+  using bounded goroutine pools per channel for concurrency—flagging that
+  scaling to multiple replicas would require a shared limiter.
+
+⏺ User answered Claude's questions:
+  ⎿  · How should the 100 msg/s per-channel limit be enforced? → i want to 
+     clarify one thing. will the campaign api and notification worker run as 
+     separate processes? i want ai generation and campaign management to be 
+     separate from async message sending. does option 1 support this 
+     architecture?
+
+⏺ Confirmed: Option 1 fits, since the single-worker limit only applies to the
+  worker process while the API can scale freely, with both connected only via
+  the shared PostgreSQL message queue. Next I'll ask you to confirm the full
+  component split—API, worker, mock provider, and a one-shot migrate/seed
+  service.
+
+⏺ User answered Claude's questions:
+  ⎿  · With the API and worker as separate processes, how should the 100 msg/s 
+     per-channel limit be enforced inside the worker? → Single worker, 
+     in-process (Recommended)
+
+⏺ I'm proposing a single-module, single-worker architecture with services for
+  postgres, a one-shot migrate step, api (which also serves the built Vue app to
+  avoid CORS/nginx), worker, and mock-provider—rejecting separate
+  frontend/provider containers to keep the service count low, with the trade-off
+  being a multi-stage Docker build.
+
+⏺ User answered Claude's questions:
+  ⎿  · Do you approve these component boundaries? → As proposed (Recommended)
+
+⏺ With component boundaries approved, I'm recommending SSE for live dashboard
+  updates since it reuses the HTTP streaming plumbing already needed for content
+  generation, with the API polling the database for changes rather than using
+  WebSocket, polling, or LISTEN/NOTIFY.
+
+⏺ User answered Claude's questions:
+  ⎿  · How should the dashboard receive live delivery status? → SSE + 1s DB 
+     aggregate (Recommended)
+
+⏺ I've laid out my recommended backend library choices (routing, DB access,
+  migrations, Claude SDK, validation, auth, rate limiting, logging, and seed
+  data), favoring minimal dependencies and justifying each rejection. Metrics
+  will be addressed in the next question.
+
+⏺ User answered Claude's questions:
+  ⎿  · Do you approve this backend library set? → As proposed (Recommended)
+
+⏺ I've laid out the three Claude model options for the two AI calls (audience
+  rules JSON and streaming SMS/email content), recommending Opus 5.5 as the
+  default for accuracy while noting Sonnet 5.5 is a cheaper, faster alternative
+  if preferred.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which default Claude model should the app use (overridable via 
+     ANTHROPIC_MODEL)? → claude-opus-5-5 (Recommended)
+⏺ I'll flag Opus 5.5 as the default for now, then move to question 8: how the
+  app should behave when ANTHROPIC_API_KEY is missing, weighing a
+  clear-failure-with-optional-mock-mode approach against auto-fallback or hard
+  refusal to start.
+
+⏺ User answered Claude's questions:
+  ⎿  · How should the app behave when ANTHROPIC_API_KEY is not set? → Clear 
+     error, opt-in mock (Recommended)
+
+⏺ For Q9 (frontend stack), I'm settling on Vue 3 + Vite + TypeScript +
+  vue-router without Pinia, and weighing UI library options (none, PrimeVue,
+  Tailwind) for the chips, editor, tables, and progress bars—leaning toward
+  PrimeVue for its ready-made accessible components.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which UI approach should the Vue 3 + Vite + TS frontend use? → PrimeVue 
+     (Recommended)
+
+⏺ Noted on PrimeVue. Now I'm presenting three options for metrics endpoints,
+  recommending Option A: Prometheus text format via prometheus/client_golang at
+  /metrics on each service, plus /healthz and /readyz for Docker Compose
+  healthchecks, since it's the industry standard and only costs one dependency.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which metrics format should we expose? → Prometheus /metrics 
+     (Recommended)
+
+⏺ I'll go with Option A: make test builds and runs everything in Docker,
+  including a throwaway Postgres, so the reviewer only needs Docker and
+  make—keeping make test-local for faster iteration, with integration tests
+  failing rather than skipping if no database is available.
+
+⏺ User answered Claude's questions:
+  ⎿  · How should `make test` run? → All in Docker (Recommended)
+
+⏺ All 11 decisions are made. I'll update the plan file with the exact
+  DECISIONS.md changes, then ask for approval to leave plan mode and write them.
+
+⏺ Updated plan
+  ⎿  /plan to preview
+  ⎿  User rejected Claude's plan:
+     ╭─────────────────────────────────────────────────────────────────────────╮
+     │ Architecture & Technical Design — record approved decisions             │
+     │                                                                         │
+     │ Context                                                                 │
+     │                                                                         │
+     │ Requirements phase produced D1–D16. In this session the user approved   │
+     │ 11 architecture decisions, one at a time (2026-10-21). Plan mode        │
+     │ blocked editing DECISIONS.md; this plan records them. No implementation │
+     │ in this phase.                                                          │
+     │                                                                         │
+     │ Change: DECISIONS.md only                                               │
+     │                                                                         │
+     │ 1. Line 7 ("…will be chosen during architecture design") → "Fixed by    │
+     │    CASE.md: Go backend and Vue.js frontend. Stack and component         │
+     │    choices: D17–D27."                                                   │
+     │ 2. Append D17–D27 under Architectural Decisions, same format as D1–D16  │
+     │    (Status · date, Decision, Why, Rejected with one-line reasons,       │
+     │    Trade-offs). Status Accepted · 2026-10-21.                           │
+     │ 3. Open Questions → "None currently." (all five resolved: DB→D17,       │
+     │    queue→D18, live updates→D21, frameworks/libraries→D22/D25,           │
+     │    metrics→D26).                                                        │
+     │ 4. Deferred unchanged. Add one line: multiple worker replicas (needs    │
+     │    shared limiter, see D19).                                            │
+     │                                                                         │
+     │ Decision content (approved)                                             │
+     │                                                                         │
+     │ - D17 — PostgreSQL 16. Why: SKIP LOCKED for leases (D5), char_length =  │
+     │   code points (D2), schemas + roles for provider separation (D6), ON    │
+     │   CONFLICT for D4 and idempotent seed, pgx. Rejected: MySQL 8 (weaker   │
+     │   schema/role split and RETURNING), SQLite (not a server, single        │
+     │   writer). Trade-off: heavier than SQLite.                              │
+     │ - D18 — Queue = the messages table. Workers claim batches with FOR      │
+     │   UPDATE SKIP LOCKED (due pending/retry_scheduled, or sending with      │
+     │   expired lease); result updates are conditional on the current lease   │
+     │   so a stale worker cannot overwrite. Why: D5/D7 state already lives    │
+     │   there; no dual write/outbox; no extra service; 200 msg/s is trivial.  │
+     │   Rejected: Redis+asynq (extra service, dual write), RabbitMQ/NATS      │
+     │   (extra service, awkward delayed retry, dual write), River (duplicates │
+     │   our state machine). Trade-off: polling loop when idle; a reviewer     │
+     │   may expect a broker.                                                  │
+     │ - D19 — One worker replica with in-process per-channel rate limiter.    │
+     │   x/time/rate at 100/s per channel incl. retries (D7), bounded          │
+     │   goroutine pool per channel. API runs as a separate process and can    │
+     │   scale independently. Rejected: shared Postgres token bucket (DB       │
+     │   round-trips, more code), static 100/N split (config must match        │
+     │   replica count). Trade-off: worker cannot scale out without a shared   │
+     │   limiter (Deferred).                                                   │
+     │ - D20 — Component boundaries. One Go module, one image. Compose         │
+     │   services: postgres; migrate (one-shot migrations + deterministic      │
+     │   idempotent seed; others wait for service_completed_successfully); api │
+     │   (campaigns, approval, Claude, SSE, auth, serves built Vue SPA → same  │
+     │   origin); worker (sending only); mock-provider (one service,           │
+     │   /sms/send + /email/send, per-channel env-configured                   │
+     │   delay/5xx/429+Retry-After/timeout, provider schema + own DB role per  │
+     │   D6). API and worker communicate only through the database. Rejected:  │
+     │   nginx frontend container (extra service, SSE proxy buffering config), │
+     │   separate SMS/email provider services (duplicate service), API+worker  │
+     │   in one process (sending would share fate with UI and AI). Trade-off:  │
+     │   multi-stage Docker build (Node → Go); Vite dev proxy for              │
+     │   development.                                                          │
+     │ - D21 — Live updates via SSE. Content generation: POST + fetch          │
+     │   streaming read. Dashboard: EventSource; API queries per-campaign      │
+     │   aggregate counts ~1s and pushes on change. Rejected: WebSocket        │
+     │   (bidirectional not needed, extra library), client polling (second     │
+     │   mechanism, less live), LISTEN/NOTIFY (notification storms at 200      │
+     │   msg/s). Trade-off: ~1s latency; one DB aggregate per open dashboard   │
+     │   per second.                                                           │
+     │ - D22 — Backend libraries. stdlib net/http (1.22 routing), pgx/v5 +     │
+     │   pgxpool with hand-written SQL, goose with embedded migrations,        │
+     │   official anthropic-sdk-go (structured JSON output, streaming for      │
+     │   content) behind a small LLM interface with a mock, hand-written       │
+     │   validation (D12–D15), x/crypto/bcrypt + opaque session token in       │
+     │   HttpOnly SameSite cookie with hash stored in DB, x/time/rate,         │
+     │   log/slog, env-var config, seed from hand-written Turkish name/city    │
+     │   lists with a fixed random seed. Rejected: gin/echo/chi (not needed),  │
+     │   GORM (hides SQL, D14 audits), sqlc (codegen, no dynamic WHERE),       │
+     │   initdb scripts (fresh volume only), raw HTTP to Claude (reimplements  │
+     │   SDK), JSON-schema lib (catalog checks are custom anyway), JWT         │
+     │   (revocation), viper/zap, gofakeit (dependency, not Turkish).          │
+     │ - D23 — Default model claude-opus-5-5, overridable via ANTHROPIC_MODEL. │
+     │   Why: best intent interpretation, ~1–2 cents per campaign. Rejected:   │
+     │   Sonnet 5.5 (cheaper/faster, slightly higher misread risk), Haiku 5.5  │
+     │   (more D15 retries). Trade-off: slower streaming than Sonnet.          │
+     │ - D24 — Missing API key: clear error, opt-in mock. Without              │
+     │   ANTHROPIC_API_KEY the app starts, health and dashboard work, AI       │
+     │   endpoints return "AI not configured". LLM_MODE=mock enables the mock  │
+     │   LLM with a visible "Mock AI" banner. Rejected: automatic fallback     │
+     │   (hides misconfiguration), refuse to start (no demo without key).      │
+     │   Trade-off: reviewers without a key must set one env var.              │
+     │ - D25 — Frontend: Vue 3 + Vite + TypeScript + vue-router + PrimeVue;    │
+     │   native fetch/EventSource; no Pinia; Vitest. Rejected: no UI library   │
+     │   (more hand-built components, accessibility risk), Tailwind (still     │
+     │   hand-built components), Pinia (few screens). Trade-off: large         │
+     │   dependency only partly used.                                          │
+     │ - D26 — Metrics & health. Prometheus text format via                    │
+     │   prometheus/client_golang at /metrics on api, worker and               │
+     │   mock-provider: send attempts by channel/result, 429 and retry counts, │
+     │   provider latency histogram, Claude calls/failures/validation          │
+     │   retries, HTTP requests. /healthz (liveness) and /readyz (DB ping) on  │
+     │   each, used by compose healthchecks. Dashboard counts come from the DB │
+     │   (D16). No Prometheus/Grafana in compose. Rejected: custom JSON        │
+     │   (non-standard, no histograms), expvar (no labels). Trade-off: one     │
+     │   dependency.                                                           │
+     │ - D27 — make test runs in Docker. Compose test profile: throwaway       │
+     │   Postgres + Go and Vitest test containers; reviewer needs only Docker  │
+     │   and make. make test-local for development. Integration tests fail     │
+     │   (never silently skip) without a DB. Rejected: local toolchains        │
+     │   (reviewer must install Go/Node), testcontainers-go (heavy dependency, │
+     │   still needs Go on host). Trade-off: slower first run (image build).   │
+     │                                                                         │
+     │ Not in this change                                                      │
+     │                                                                         │
+     │ - No README.md yet (nothing implemented; avoid describing unfinished    │
+     │   features).                                                            │
+     │ - No code, scaffolding or dependencies.                                 │
+     │                                                                         │
+     │ Next step (separate approval)                                           │
+     │                                                                         │
+     │ Task breakdown with acceptance criteria via superpowers:writing-plans.  │
+     │ Remind user to export this session to ai-sessions/ (e.g.                │
+     │ 02-architecture-design).                                                │
+     │                                                                         │
+     │ Verification                                                            │
+     │                                                                         │
+     │ - Re-read DECISIONS.md: D17–D27 present, format matches D1–D16, every   │
+     │   entry matches what was approved above, Open Questions resolved,       │
+     │   nothing unapproved recorded.                                          │
+     │ - git diff DECISIONS.md reviewed; no commit unless the user asks.       │
+     ╰─────────────────────────────────────────────────────────────────────────╯
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ Updated plan
+  ⎿  /plan to preview
+  ⎿  User rejected Claude's plan:
+     ╭─────────────────────────────────────────────────────────────────────────╮
+     │ Architecture & Technical Design — record approved decisions             │
+     │                                                                         │
+     │ Context                                                                 │
+     │                                                                         │
+     │ Requirements phase produced D1–D16. In this session the user approved   │
+     │ 11 architecture decisions, one at a time (2026-10-21). Plan mode        │
+     │ blocked editing DECISIONS.md; this plan records them. No implementation │
+     │ in this phase.                                                          │
+     │                                                                         │
+     │ Change: DECISIONS.md only                                               │
+     │                                                                         │
+     │ 1. Line 7 ("…will be chosen during architecture design") → "Fixed by    │
+     │    CASE.md: Go backend and Vue.js frontend. Stack and component         │
+     │    choices: D17–D27."                                                   │
+     │ 2. Append D17–D27 under Architectural Decisions, same format as D1–D16  │
+     │    (Status · date, Decision, Why, Rejected with one-line reasons,       │
+     │    Trade-offs). Status Accepted · 2026-10-21.                           │
+     │ 3. Open Questions → "None currently." (all five resolved: DB→D17,       │
+     │    queue→D18, live updates→D21, frameworks/libraries→D22/D25,           │
+     │    metrics→D26).                                                        │
+     │ 4. Deferred unchanged (user: D17–D27 only; the worker-scaling limit     │
+     │    stays in D19's trade-offs).                                          │
+     │                                                                         │
+     │ Decision content (approved)                                             │
+     │                                                                         │
+     │ - D17 — PostgreSQL 16. Why: SKIP LOCKED for leases (D5), char_length =  │
+     │   code points (D2), schemas + roles for provider separation (D6), ON    │
+     │   CONFLICT for D4 and idempotent seed, pgx. Rejected: MySQL 8 (weaker   │
+     │   schema/role split and RETURNING), SQLite (not a server, single        │
+     │   writer). Trade-off: heavier than SQLite.                              │
+     │ - D18 — Queue = the messages table. Workers claim batches with FOR      │
+     │   UPDATE SKIP LOCKED (due pending/retry_scheduled, or sending with      │
+     │   expired lease); result updates are conditional on the current lease   │
+     │   so a stale worker cannot overwrite. Why: D5/D7 state already lives    │
+     │   there; no dual write/outbox; no extra service; 200 msg/s is trivial.  │
+     │   Rejected: Redis+asynq (extra service, dual write), RabbitMQ/NATS      │
+     │   (extra service, awkward delayed retry, dual write), River (duplicates │
+     │   our state machine). Trade-off: polling loop when idle; a reviewer     │
+     │   may expect a broker.                                                  │
+     │ - D19 — One worker replica with in-process per-channel rate limiter.    │
+     │   x/time/rate per channel with limit 100/s and burst 1, so attempt      │
+     │   starts are at least 10 ms apart → never more than 100 provider        │
+     │   requests in any 1-second window, bursts included. Every attempt takes │
+     │   a token right before the HTTP call: first sends, retries (D7) and     │
+     │   lease-expired resends (D5). Bounded goroutine pool per channel; the   │
+     │   limiter, not the pool, sets the rate. A test asserts that no 1-second │
+     │   window of recorded attempt times exceeds 100. API runs as a separate  │
+     │   process and can scale independently. Rejected: shared Postgres token  │
+     │   bucket (DB round-trips, more code), static 100/N split (config must   │
+     │   match replica count). Trade-off: worker cannot scale out without a    │
+     │   shared limiter (Deferred).                                            │
+     │ - D20 — Component boundaries. One Go module, one image. Compose         │
+     │   services: postgres; migrate (one-shot migrations + deterministic      │
+     │   idempotent seed; others wait for service_completed_successfully); api │
+     │   (campaigns, approval, Claude, SSE, auth, serves built Vue SPA → same  │
+     │   origin); worker (sending only); mock-provider (one service,           │
+     │   /sms/send + /email/send, per-channel env-configured                   │
+     │   delay/5xx/429+Retry-After/timeout, provider schema + own DB role per  │
+     │   D6). API and worker communicate only through the database. Rejected:  │
+     │   nginx frontend container (extra service, SSE proxy buffering config), │
+     │   separate SMS/email provider services (duplicate service), API+worker  │
+     │   in one process (sending would share fate with UI and AI). Trade-off:  │
+     │   multi-stage Docker build (Node → Go); Vite dev proxy for              │
+     │   development.                                                          │
+     │ - D21 — Live updates via SSE. Content generation: POST + fetch          │
+     │   streaming read. Dashboard: EventSource; API queries per-campaign      │
+     │   aggregate counts ~1s and pushes on change. Rejected: WebSocket        │
+     │   (bidirectional not needed, extra library), client polling (second     │
+     │   mechanism, less live), LISTEN/NOTIFY (notification storms at 200      │
+     │   msg/s). Trade-off: ~1s latency; one DB aggregate per open dashboard   │
+     │   per second.                                                           │
+     │ - D22 — Backend libraries. stdlib net/http (1.22 routing), pgx/v5 +     │
+     │   pgxpool with hand-written SQL, goose with embedded migrations,        │
+     │   official anthropic-sdk-go (structured JSON output, streaming for      │
+     │   content) behind a small LLM interface with a mock, hand-written       │
+     │   validation (D12–D15), x/crypto/bcrypt + opaque session token in       │
+     │   HttpOnly SameSite cookie with hash stored in DB, x/time/rate,         │
+     │   log/slog, env-var config, seed from hand-written Turkish name/city    │
+     │   lists with a fixed random seed. Rejected: gin/echo/chi (not needed),  │
+     │   GORM (hides SQL, D14 audits), sqlc (codegen, no dynamic WHERE),       │
+     │   initdb scripts (fresh volume only), raw HTTP to Claude (reimplements  │
+     │   SDK), JSON-schema lib (catalog checks are custom anyway), JWT         │
+     │   (revocation), viper/zap, gofakeit (dependency, not Turkish).          │
+     │ - D23 — Default model claude-opus-5-5, overridable via ANTHROPIC_MODEL. │
+     │   Why: best intent interpretation, ~1–2 cents per campaign. Rejected:   │
+     │   Sonnet 5.5 (cheaper/faster, slightly higher misread risk), Haiku 5.5  │
+     │   (more D15 retries). Trade-off: slower streaming than Sonnet.          │
+     │ - D24 — Missing API key: clear error, opt-in mock. Without              │
+     │   ANTHROPIC_API_KEY the app starts, health and dashboard work, AI       │
+     │   endpoints return "AI not configured". LLM_MODE=mock enables the mock  │
+     │   LLM with a visible "Mock AI" banner. Rejected: automatic fallback     │
+     │   (hides misconfiguration), refuse to start (no demo without key).      │
+     │   Trade-off: reviewers without a key must set one env var.              │
+     │ - D25 — Frontend: Vue 3 + Vite + TypeScript + vue-router + PrimeVue;    │
+     │   native fetch/EventSource; no Pinia; Vitest. Rejected: no UI library   │
+     │   (more hand-built components, accessibility risk), Tailwind (still     │
+     │   hand-built components), Pinia (few screens). Trade-off: large         │
+     │   dependency only partly used.                                          │
+     │ - D26 — Metrics & health. Prometheus text format via                    │
+     │   prometheus/client_golang at /metrics on api, worker and               │
+     │   mock-provider: send attempts by channel/result, 429 and retry counts, │
+     │   provider latency histogram, Claude calls/failures/validation          │
+     │   retries, HTTP requests. /healthz (liveness) and /readyz (DB ping) on  │
+     │   each, used by compose healthchecks. Dashboard counts come from the DB │
+     │   (D16). No Prometheus/Grafana in compose. Rejected: custom JSON        │
+     │   (non-standard, no histograms), expvar (no labels). Trade-off: one     │
+     │   dependency.                                                           │
+     │ - D27 — make test runs in Docker. Compose test profile: throwaway       │
+     │   Postgres + Go and Vitest test containers; reviewer needs only Docker  │
+     │   and make. make test-local for development. Integration tests fail     │
+     │   (never silently skip) without a DB. Rejected: local toolchains        │
+     │   (reviewer must install Go/Node), testcontainers-go (heavy dependency, │
+     │   still needs Go on host). Trade-off: slower first run (image build).   │
+     │                                                                         │
+     │ Not in this change                                                      │
+     │                                                                         │
+     │ - No README.md yet (nothing implemented; avoid describing unfinished    │
+     │   features).                                                            │
+     │ - No code, scaffolding or dependencies.                                 │
+     │                                                                         │
+     │ Next step (separate approval)                                           │
+     │                                                                         │
+     │ Task breakdown with acceptance criteria via superpowers:writing-plans.  │
+     │ Remind user to export this session to ai-sessions/ (e.g.                │
+     │ 02-architecture-design).                                                │
+     │                                                                         │
+     │ Verification                                                            │
+     │                                                                         │
+     │ - Re-read DECISIONS.md: D17–D27 present, format matches D1–D16, every   │
+     │   entry matches what was approved above, Open Questions resolved,       │
+     │   nothing unapproved recorded.                                          │
+     │ - git diff DECISIONS.md reviewed; no commit unless the user asks.       │
+     ╰─────────────────────────────────────────────────────────────────────────╯
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/start-the-architecture-and-parallel-harp.md 
+     · /plan to edit
+     Architecture & Technical Design — record approved decisions
+
+     Context
+
+     Requirements phase produced D1–D16. In this session the user approved 11
+     architecture decisions, one at a time (2026-10-21). Plan mode blocked
+     editing DECISIONS.md; this plan records them. No implementation in this
+     phase.
+
+     Change: documentation only (DECISIONS.md, CLAUDE.md)
+
+     0. Rename ## Architectural Decisions → ## Requirements & Business Decisions
+        (D1–D16, content unchanged). Add ## Architecture & Technical Decisions
+        after it for D17–D27.
+        0b. CLAUDE.md → Project Documentation → DECISIONS.md bullet: replace
+        "two separate sections: Architectural Decisions (confirmed only) and
+        Open Questions" with: confirmed decisions go under Requirements & 
+        Business Decisions or Architecture & Technical Decisions;
+        not-yet-decided items under Open Questions. Rest of the rule unchanged.
+     1. Line 7 ("…will be chosen during architecture design") → "Fixed by
+        CASE.md: Go backend and Vue.js frontend. Stack and component choices:
+        D17–D27."
+     2. Add D17–D27 under Architecture & Technical Decisions, same format as
+        D1–D16 (Status · date, Decision, Why, Rejected with one-line reasons,
+        Trade-offs). Status Accepted · 2026-10-21.
+     3. Open Questions → "None currently." (all five resolved: DB→D17,
+        queue→D18, live updates→D21, frameworks/libraries→D22/D25, metrics→D26).
+     4. Deferred unchanged (user: D17–D27 only; the worker-scaling limit stays
+        in D19's trade-offs).
+
+     Decision content (approved)
+
+     - D17 — PostgreSQL 16. Why: SKIP LOCKED for leases (D5), char_length = code
+       points (D2), schemas + roles for provider separation (D6), ON CONFLICT
+       for D4 and idempotent seed, pgx. Rejected: MySQL 8 (weaker schema/role
+       split and RETURNING), SQLite (not a server, single writer). Trade-off:
+       heavier than SQLite.
+     - D18 — Queue = the messages table. Workers claim batches with FOR UPDATE 
+       SKIP LOCKED (due pending/retry_scheduled, or sending with expired lease);
+       result updates are conditional on the current lease so a stale worker
+       cannot overwrite. Why: D5/D7 state already lives there; no dual
+       write/outbox; no extra service; 200 msg/s is trivial. Rejected:
+       Redis+asynq (extra service, dual write), RabbitMQ/NATS (extra service,
+       awkward delayed retry, dual write), River (duplicates our state machine).
+       Trade-off: polling loop when idle; a reviewer may expect a broker.
+     - D19 — One worker replica with in-process per-channel rate limiter.
+       x/time/rate per channel with limit 100/s and burst 1, so attempt starts
+       are at least 10 ms apart → never more than 100 provider requests in any
+       1-second window, bursts included. Every attempt takes a token right
+       before the HTTP call: first sends, retries (D7) and lease-expired resends
+       (D5). Bounded goroutine pool per channel; the limiter, not the pool,
+       sets the rate. A test asserts that no 1-second window of recorded attempt
+       times exceeds 100. API runs as a separate process and can scale
+       independently. Rejected: shared Postgres token bucket (DB round-trips,
+       more code), static 100/N split (config must match replica count).
+       Trade-off: worker cannot scale out without a shared limiter (Deferred).
+     - D20 — Component boundaries. One Go module, one image. Compose services:
+       postgres; migrate (one-shot migrations + deterministic idempotent seed;
+       others wait for service_completed_successfully); api (campaigns,
+       approval, Claude, SSE, auth, serves built Vue SPA → same origin); worker
+       (sending only); mock-provider (one service, /sms/send + /email/send,
+       per-channel env-configured delay/5xx/429+Retry-After/timeout, provider
+       schema + own DB role per D6). API and worker communicate only through the
+       database. Rejected: nginx frontend container (extra service, SSE proxy
+       buffering config), separate SMS/email provider services (duplicate
+       service), API+worker in one process (sending would share fate with UI and
+       AI). Trade-off: multi-stage Docker build (Node → Go); Vite dev proxy for
+       development.
+     - D21 — Live updates via SSE. Content generation: POST + fetch streaming
+       read. Dashboard: EventSource; API queries per-campaign aggregate counts
+       ~1s and pushes on change. Rejected: WebSocket (bidirectional not needed,
+       extra library), client polling (second mechanism, less live),
+       LISTEN/NOTIFY (notification storms at 200 msg/s). Trade-off: ~1s latency;
+       one DB aggregate per open dashboard per second.
+     - D22 — Backend libraries. stdlib net/http (1.22 routing), pgx/v5 + pgxpool
+       with hand-written SQL, goose with embedded migrations, official
+       anthropic-sdk-go (structured JSON output, streaming for content) behind a
+       small LLM interface with a mock, hand-written validation (D12–D15),
+       x/crypto/bcrypt + opaque session token in HttpOnly SameSite cookie with
+       hash stored in DB, x/time/rate, log/slog, env-var config, seed from
+       hand-written Turkish name/city lists with a fixed random seed. Rejected:
+       gin/echo/chi (not needed), GORM (hides SQL, D14 audits), sqlc (codegen,
+       no dynamic WHERE), initdb scripts (fresh volume only), raw HTTP to Claude
+       (reimplements SDK), JSON-schema lib (catalog checks are custom anyway),
+       JWT (revocation), viper/zap, gofakeit (dependency, not Turkish).
+     - D23 — Default model claude-opus-5-5, overridable via ANTHROPIC_MODEL.
+       Why: best at interpreting requests correctly. Rejected: Sonnet 5.5
+       (cheaper/faster, slightly higher misread risk), Haiku 5.5 (more D15
+       retries). Trade-off: higher per-token price and slower streaming than
+       Sonnet; actual cost depends on token usage.
+     - D24 — Mock LLM by default, real mode opt-in. LLM_MODE=mock is the
+       default, so docker compose up runs the full campaign flow without a key;
+       the UI shows a visible "Mock AI" banner. LLM_MODE=real uses
+       ANTHROPIC_API_KEY; if it is missing, the API exits on startup with a
+       clear error naming the variable (fail fast — my call, since real mode is
+       an explicit choice). The mock returns schema-valid output and goes
+       through the same validation (D15). Rejected: real by default with opt-in
+       mock (needs a key or an extra step to try the flow), automatic fallback
+       when no key (hides misconfiguration). Trade-off: someone running the
+       default sees canned AI output; .env.example and README must say how to
+       switch to real mode.
+       - History: 2026-10-21. First approved as "clear error, opt-in mock";
+         changed to mock-by-default in the same session.
+     - D25 — Frontend: Vue 3 + Vite + TypeScript + vue-router + PrimeVue; native
+       fetch/EventSource; no Pinia; Vitest. Rejected: no UI library (more
+       hand-built components, accessibility risk), Tailwind (still hand-built
+       components), Pinia (few screens). Trade-off: large dependency only partly
+       used.
+     - D26 — Metrics & health. Prometheus text format via
+       prometheus/client_golang at /metrics on api, worker and mock-provider:
+       send attempts by channel/result, 429 and retry counts, provider latency
+       histogram, Claude calls/failures/validation retries, HTTP requests.
+       /healthz (liveness) and /readyz (DB ping) on each, used by compose
+       healthchecks. Dashboard counts come from the DB (D16). No
+       Prometheus/Grafana in compose. Rejected: custom JSON (non-standard, no
+       histograms), expvar (no labels). Trade-off: one dependency.
+     - D27 — make test runs in Docker. Compose test profile: throwaway Postgres
+       + Go and Vitest test containers; reviewer needs only Docker and make.
+       make test-local for development. Integration tests fail (never silently
+       skip) without a DB. Rejected: local toolchains (reviewer must install
+       Go/Node), testcontainers-go (heavy dependency, still needs Go on host).
+       Trade-off: slower first run (image build).
+
+     Not in this change
+
+     - No README.md yet (nothing implemented; avoid describing unfinished
+       features).
+     - No code, scaffolding or dependencies.
+
+     Next step (separate approval)
+
+     Task breakdown with acceptance criteria via superpowers:writing-plans.
+     Remind user to export this session to ai-sessions/ (e.g.
+     02-architecture-design).
+
+     Verification
+
+     - Re-read DECISIONS.md: D17–D27 present, format matches D1–D16, every entry
+       matches what was approved above, Open Questions resolved, nothing
+       unapproved recorded.
+     - git diff DECISIONS.md reviewed; no commit unless the user asks.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+      59  
+      60  - **`CASE.md`**: The source of truth for project requirements, 
+          business rules, technical constraints, and delivery requirement
+          s. Refer to it when needed. Do not change mandatory requirement
+          s without approval.
+      61  - **`DECISIONS.md`**: Record every approved architecture, techn
+          ology, business-logic, and scope decision as soon as it is appr
+          oved.
+      62 -  - Keep two separate sections: **Architectural Decisions** (co
+         -nfirmed only) and **Open Questions** (not yet decided). Never r
+         -ecord an unapproved proposal as a decision. Move an item from O
+         -pen Questions only after approval.                             
+      62 +  - Record confirmed decisions under **Requirements & Business 
+         +Decisions** (scope, business rules, product behavior) or **Arch
+         +itecture & Technical Decisions** (stack, libraries, components,
+         + infrastructure). Keep not-yet-decided items under **Open Quest
+         +ions**. Never record an unapproved proposal as a decision. Move
+         + an item from Open Questions only after approval.              
+      63    - Each decision has a numbered ID (`D1`, `D2`, …), date, stat
+          us (`Accepted`, `Superseded`, `Deferred`), the decision itself,
+           reasoning, rejected alternatives with a one-line reason each, 
+          and important trade-offs.
+      64    - Keep records concise and easy to scan. Use short bullets, s
+          tate each fact once, and link related decisions by ID instead o
+          f repeating them.
+      65    - Preserve all agreed behavior. When a decision changes, upda
+          te it and add a dated history note. If it is replaced, mark it 
+          `Superseded` and point to the new ID. Never silently delete it.
+
+⏺ Update(DECISIONS.md)
+  ⎿  Error editing file
+
+⏺ Update(DECISIONS.md)  ⎿  Added 95 lines, removed 7 lines
+      122  - **Rejected:** *Simulated delivery callbacks:* need a webhook
+            endpoint, callback authentication and out-of-order update han
+           dling.
+      123  - **Trade-offs:** "Sent" does not mean the message reached the
+            device or inbox.
+      124  
+      125 -## Open Questions                                             
+      125 +## Architecture & Technical Decisions                         
+      126  
+      127 -To be decided during architecture design:                     
+      127 +### D17 — PostgreSQL 16                                       
+      128 +- **Status:** Accepted · 2026-10-21                           
+      129 +- **Decision:** PostgreSQL 16 is the only database, used by th
+          +e app and (in a separate schema) by the mock providers.       
+      130 +- **Why:** `FOR UPDATE SKIP LOCKED` for leases (D5), `char_len
+          +gth` counts code points (D2), schemas and roles separate the p
+          +roviders (D6), `ON CONFLICT` covers D4 and the idempotent seed
+          +, mature Go driver (pgx).                                     
+      131 +- **Rejected:** *MySQL 8:* weaker schema/role separation and `
+          +RETURNING` support. *SQLite:* not a server (D6), single writer
+          +.                                                             
+      132 +- **Trade-offs:** Heavier to run than SQLite.                 
+      133  
+      129 -- Database                                                    
+      130 -- Queue mechanism                                             
+      131 -- Live dashboard updates (polling, SSE or WebSocket)          
+      132 -- Backend and frontend frameworks and libraries               
+      133 -- Metrics format and endpoints                                
+      134 +### D18 — The messages table is the queue                     
+      135 +- **Status:** Accepted · 2026-10-21                           
+      136 +- **Decision:** No separate broker. Workers claim batches with
+          + `FOR UPDATE SKIP LOCKED`: messages that are `pending` or `ret
+          +ry_scheduled` and due, or `sending` with an expired lease. Res
+          +ult updates only apply while the worker still holds the lease,
+          + so a stale worker cannot overwrite a newer result.           
+      137 +- **Why:** The lease, attempt count and next-attempt time (D5,
+          + D7) already live in this table. No dual write between a datab
+          +ase and a broker, no outbox, no extra service. At most 200 mes
+          +sages/s is light load for Postgres.                           
+      138 +- **Rejected:** *Redis + asynq:* extra service and dual writes
+          +. *RabbitMQ or NATS JetStream:* extra service, dual writes, aw
+          +kward delayed retries. *River:* its job table duplicates our m
+          +essage state machine.                                         
+      139 +- **Trade-offs:** The worker polls when idle. A reviewer may e
+          +xpect a broker, so the reason is documented here.             
+      140  
+      141 +### D19 — One worker with an in-process rate limiter per chann
+          +el                                                            
+      142 +- **Status:** Accepted · 2026-10-21                           
+      143 +- **Decision:** Exactly one worker replica. Each channel has a
+          + `golang.org/x/time/rate` limiter with a limit of 100/s and a 
+          +burst of 1, so attempts start at least 10 ms apart and no 1-se
+          +cond window holds more than 100 provider requests, bursts incl
+          +uded. Every attempt takes a token right before the HTTP call: 
+          +first sends, retries (D7) and resends after an expired lease (
+          +D5). A bounded goroutine pool per channel handles provider del
+          +ays; the limiter, not the pool, sets the rate. A test checks t
+          +hat no 1-second window of recorded attempt times exceeds 100. 
+          +The API runs as a separate process (D20) and can scale on its 
+          +own.                                                          
+      144 +- **Why:** The simplest way to enforce the limit exactly and t
+          +est it.                                                       
+      145 +- **Rejected:** *Shared token bucket in Postgres:* a database 
+          +round-trip per message and more code. *Static split (100/N per
+          + replica):* the config must match the replica count, and capac
+          +ity is wasted when a replica is idle.                         
+      146 +- **Trade-offs:** The worker cannot scale out without a shared
+          + limiter.                                                     
+      147 +                                                              
+      148 +### D20 — Component boundaries                                
+      149 +- **Status:** Accepted · 2026-10-21                           
+      150 +- **Decision:** One Go module and one Docker image, run as sep
+          +arate Compose services:                                       
+      151 +  - `postgres` with a healthcheck.                            
+      152 +  - `migrate`: one-shot migrations and the deterministic, idem
+          +potent seed. The other services wait for it to finish successf
+          +ully.                                                         
+      153 +  - `api`: campaigns, approval, Claude calls, SSE, auth. It al
+          +so serves the built Vue app, so the frontend and API share an 
+          +origin.                                                       
+      154 +  - `worker`: sending only (D18, D19).                        
+      155 +  - `mock-provider`: one service with `/sms/send` and `/email/
+          +send`. Delays, 5xx, 429 with `Retry-After` and timeouts are co
+          +nfigured per channel through environment variables. Its idempo
+          +tency table lives in a `provider` schema with its own database
+          + role (D6).                                                   
+      156 +  - The API and the worker communicate only through the databa
+          +se.                                                           
+      157 +- **Why:** AI generation and campaign management stay independ
+          +ent of sending, a worker crash does not affect the UI, and the
+          + setup has the fewest services. Same origin means no CORS.    
+      158 +- **Rejected:** *Frontend in an nginx container:* one more ser
+          +vice, plus proxy settings so SSE isn't buffered. *Separate SMS
+          + and email provider services:* two services that do the same t
+          +hing. *API and worker in one process:* sending would share fai
+          +lures with the UI and AI calls.                               
+      159 +- **Trade-offs:** Multi-stage Docker build (Node, then Go). Du
+          +ring development, the Vite dev server proxies to the API.     
+      160 +                                                              
+      161 +### D21 — Live updates with SSE                               
+      162 +- **Status:** Accepted · 2026-10-21                           
+      163 +- **Decision:** Content generation is a POST whose streamed re
+          +sponse the browser reads with `fetch`. The dashboard uses `Eve
+          +ntSource`: the API queries the per-campaign counts about once 
+          +a second and pushes them only when they change.               
+      164 +- **Why:** One streaming mechanism for both features, automati
+          +c reconnect, no extra library. It works across processes becau
+          +se the counts come from the database.                         
+      165 +- **Rejected:** *WebSocket:* two-way communication is not need
+          +ed, and it needs an extra library. *Client polling:* a second 
+          +mechanism, and less live. *Postgres LISTEN/NOTIFY:* floods the
+          + API with notifications at 200 messages/s.                    
+      166 +- **Trade-offs:** About 1 s of delay. One aggregate query per 
+          +open dashboard per second.                                    
+      167 +                                                              
+      168 +### D22 — Backend libraries                                   
+      169 +- **Status:** Accepted · 2026-10-21                           
+      170 +- **Decision:**                                               
+      171 +  - stdlib `net/http` with Go 1.22 routing.                   
+      172 +  - `pgx/v5` and `pgxpool` with hand-written SQL.             
+      173 +  - `goose` with embedded migrations.                         
+      174 +  - The official `anthropic-sdk-go` (structured JSON output, s
+          +treaming for content), behind a small `LLM` interface that als
+          +o has a mock implementation.                                  
+      175 +  - Hand-written validation (D12–D15).                        
+      176 +  - `x/crypto/bcrypt`, plus a random session token in an HttpO
+          +nly SameSite cookie, with only its hash stored in the database
+          +.                                                             
+      177 +  - `x/time/rate`, `log/slog`, configuration from environment 
+          +variables.                                                    
+      178 +  - Seed data from hand-written Turkish name and city lists, w
+          +ith a fixed random seed.                                      
+      179 +- **Why:** Few dependencies, and the SQL stays explicit and ea
+          +sy to audit (D14).                                            
+      180 +- **Rejected:** *gin, echo or chi:* no feature we need. *GORM:
+          +* hides the SQL. *sqlc:* a code-generation step, and it cannot
+          + build dynamic WHERE clauses. *Postgres init scripts:* only ru
+          +n on a fresh volume. *Raw HTTP to Claude:* reimplements the SD
+          +K. *A JSON Schema library:* the catalog checks need custom cod
+          +e anyway. *JWT:* hard to revoke, no benefit here. *viper or za
+          +p:* not needed. *gofakeit:* an extra dependency, and its data 
+          +isn't Turkish.                                                
+      181 +- **Trade-offs:** More hand-written SQL and validation code.  
+      182 +                                                              
+      183 +### D23 — Default Claude model                                
+      184 +- **Status:** Accepted · 2026-10-21                           
+      185 +- **Decision:** `claude-opus-5-5` by default, overridable with
+          + `ANTHROPIC_MODEL`.                                           
+      186 +- **Why:** The most reliable at understanding campaign request
+          +s correctly.                                                  
+      187 +- **Rejected:** *`claude-sonnet-5-5`:* cheaper and faster, sli
+          +ghtly higher risk of misreading a request. *`claude-haiku-5-5`
+          +:* more D15 retries.                                          
+      188 +- **Trade-offs:** Higher price per token and slower streaming 
+          +than Sonnet. Actual cost depends on token usage.              
+      189 +                                                              
+      190 +### D24 — Mock LLM by default, real mode opt-in               
+      191 +- **Status:** Accepted · 2026-10-21                           
+      192 +- **Decision:** `LLM_MODE=mock` is the default, so `docker com
+          +pose up` runs the full campaign flow without an API key, and t
+          +he UI shows a visible "Mock AI" banner. The mock returns schem
+          +a-valid output that goes through the same validation (D15). `L
+          +LM_MODE=real` uses `ANTHROPIC_API_KEY`. If the key is missing,
+          + the API exits on startup with a clear error naming the variab
+          +le.                                                           
+      193 +- **Why:** Anyone can try the whole flow with one command, and
+          + real mode is an explicit choice that fails fast when misconfi
+          +gured.                                                        
+      194 +- **Rejected:** *Real mode by default, mock opt-in:* trying th
+          +e flow needs a key or an extra step. *Falling back to the mock
+          + automatically when no key is set:* hides misconfiguration.   
+      195 +- **Trade-offs:** The default run shows canned AI output. `.en
+          +v.example` and README must explain how to switch to real mode.
+      196 +- **History:** 2026-10-21. First approved as "clear error, opt
+          +-in mock". Changed to mock by default in the same session.    
+      197 +                                                              
+      198 +### D25 — Frontend stack                                      
+      199 +- **Status:** Accepted · 2026-10-21                           
+      200 +- **Decision:** Vue 3, Vite, TypeScript, vue-router and PrimeV
+          +ue. Native `fetch` and `EventSource`. Composables for state, n
+          +o Pinia. Vitest for unit tests.                               
+      201 +- **Why:** PrimeVue provides accessible chips (D9), tables, pr
+          +ogress bars and toasts, which speeds up the editors and the da
+          +shboard.                                                      
+      202 +- **Rejected:** *No UI library:* more hand-built components, a
+          +nd accessibility is entirely our responsibility. *Tailwind CSS
+          +:* components are still built by hand. *Pinia:* not needed for
+          + a few screens.                                               
+      203 +- **Trade-offs:** A large dependency that is only partly used.
+      204 +                                                              
+      205 +### D26 — Metrics and health endpoints                        
+      206 +- **Status:** Accepted · 2026-10-21                           
+      207 +- **Decision:** Prometheus text format via `prometheus/client_
+          +golang` at `/metrics` on the API, the worker and the mock prov
+          +ider. Metrics: send attempts by channel and result, 429 and re
+          +try counts, provider latency histogram, Claude calls, failures
+          + and validation retries, and HTTP requests. Each process has `
+          +/healthz` (liveness) and `/readyz` (database ping), used by Co
+          +mpose healthchecks. Dashboard counts come from the database (D
+          +16). No Prometheus or Grafana service in Compose.             
+      208 +- **Why:** The standard format, readable by any monitoring too
+          +l, with histograms.                                           
+      209 +- **Rejected:** *Custom JSON:* a format no tool reads, and no 
+          +histograms. *expvar:* no labels.                              
+      210 +- **Trade-offs:** One more dependency.                        
+      211 +                                                              
+      212 +### D27 — `make test` runs in Docker                          
+      213 +- **Status:** Accepted · 2026-10-21                           
+      214 +- **Decision:** `make test` uses a Compose `test` profile: a t
+          +hrowaway Postgres plus Go and Vitest test containers. `make te
+          +st-local` is for development. Integration tests fail, never si
+          +lently skip, when no database is available.                   
+      215 +- **Why:** A reviewer needs only Docker and make, the same as 
+          +for `docker compose up`. Leases, `SKIP LOCKED` and the unique 
+          +constraints are tested against a real Postgres.               
+      216 +- **Rejected:** *Local toolchains:* the reviewer must install 
+          +Go and Node. *testcontainers-go:* a heavy dependency that stil
+          +l needs Go on the host.                                       
+      217 +- **Trade-offs:** The first run is slower because images are b
+          +uilt.                                                         
+      218 +                                                              
+      219 +## Open Questions                                             
+      220 +                                                              
+      221 +None currently.                                               
+      222 +                                                              
+      223  ## Deferred
+      224  
+      225  - **Resend to recipients skipped for the character limit:** th
+           e marketer approves new, shorter content, which goes only to r
+           ecipients skipped with `character_limit_exceeded` on that chan
+           nel. Recipients who already received a message are never sent 
+           it again. A separate task after the core flow works.
+
+⏺ The file changed on disk since I first read it, so I'll check what's there now
+  before making the remaining edit.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ The section had already been renamed on disk (by you, I assume). Only line 7
+  is still stale:
+
+⏺ Update(DECISIONS.md)
+  ⎿  Added 1 line, removed 1 line
+       4  
+       5  Status values: `Accepted`, `Superseded`, `Deferred`.
+       6  
+       7 -Fixed by `CASE.md`: Go backend and Vue.js frontend. The databas
+         -e, queue, live-update mechanism and libraries will be chosen du
+         -ring architecture design.                                      
+       7 +Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and c
+         +omponent choices: D17–D27.                                     
+       8  
+       9  ## Requirements & Business Decisions
+      10  
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I've updated DECISIONS.md and CLAUDE.md as you asked. Nothing has been
+  implemented or committed.
+
+  DECISIONS.md
+  - D1–D16 are under Requirements & Business Decisions. That section was already
+    renamed in the file on disk, so I didn't touch it.
+  - I added D17–D27 under a new Architecture & Technical Decisions section:
+    - D17: PostgreSQL 16.
+    - D18: the messages table is the queue.
+    - D19: one worker with a rate limiter per channel. The limit is 100 per
+      second with a burst of 1, so attempts start at least 10 ms apart and no
+      1-second window can hold more than 100 requests. That count includes first
+      sends, retries and resends after an expired lease. D19 also requires a
+      test that checks this from the recorded attempt times.
+    - D20: the API and the worker are separate processes that only talk through
+      the database. Docker Compose runs migrate, api, worker, one mock-provider
+      and Postgres.
+    - D21: live updates use SSE.
+    - D22: the backend libraries.
+    - D23: claude-opus-5-5 is the default model. The fixed cost estimate is
+      gone; it now says actual cost depends on token usage.
+    - D24: mock mode is the default. Real mode uses ANTHROPIC_API_KEY, with a
+      history note recording that this changed during the session.
+    - D25: Vue 3 with PrimeVue.
+    - D26: Prometheus metrics, plus /healthz and /readyz.
+    - D27: make test runs in Docker.
+  - Open Questions now says "None currently", since all five are resolved. I
+    updated line 7 so it points to D17–D27 instead of saying they will be chosen
+    later. The Deferred section is unchanged.
+
+  CLAUDE.md: future decisions now go under Requirements & Business Decisions or
+  Architecture & Technical Decisions, and undecided items under Open Questions.
+
+  One call I made myself (D24): in real mode, if ANTHROPIC_API_KEY is missing,
+  the API stops at startup with an error naming the variable. Tell me if you'd
+  rather it keep running and return the error from the AI endpoints only.
+
+  The next step is breaking the work into tasks with acceptance criteria, which
+  needs your approval first. Please export this session to ai-sessions/ (e.g.
+  02-architecture-design) and check it for keys before committing.
+
+  I haven't checked the SDK's exact Go API for streaming structured output. That
+  gets confirmed when we implement it.
+
+✻ Baked for 4m 46s · done 8:47 PM
