@@ -180,3 +180,20 @@ func TestFields_DescribeWhatValidateAccepts(t *testing.T) {
 		}
 	}
 }
+
+// The catalog hands out copies: a caller changing them cannot change validation.
+func TestFieldsAndLimits_AreCopies(t *testing.T) {
+	audience.Fields()[0].Ops[0] = "changed"
+	limits := audience.Limits()
+	limits["max_rules"] = 0
+
+	if f := audience.Fields()[0]; f.Ops[0] == "changed" {
+		t.Fatalf("Fields shares its operator slices: %+v", f)
+	}
+	if audience.Limits()["max_rules"] != 20 {
+		t.Fatal("Limits shares its map")
+	}
+	if _, errs := audience.Validate([]audience.Rule{rule("cart_added", "within", `{"last_days":30}`)}, catalog); len(errs) > 0 {
+		t.Fatalf("validation changed: %v", errs)
+	}
+}

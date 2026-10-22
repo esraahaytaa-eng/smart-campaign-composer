@@ -44,7 +44,7 @@ All endpoints need a login session (see above).
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/catalog` | The rule language for building rules by hand (D39): every field with its operators and value type (`cities`, `window` = `{"last_days"}` or `{"from", "to"?}`, `categories_window`, `count`, `amount`), the current cities and categories, and the rule limits. |
+| `GET /api/catalog` | The rule language for building rules by hand (D39): every field with its operators and value type (`cities`, `window` = `{"last_days"}` or `{"from", "to"?}`, `categories_window`, `count`, `amount`), the current cities and categories, and the rule limits (`max_count` applies to `order_count`, `max_amount` to `total_spend` and `cart_value`). Rules the catalog cannot describe come back as field errors, e.g. `last_order` `before` takes no `to` date. |
 | `POST /api/campaigns` `{"request", "channels", "time_zone"}` | The AI reads the brief and a **draft** is saved with its audience rules, current per-channel counts, and a proposed send time if the brief named one (only a proposal; nothing is scheduled). Add `"rules": [...]` to build the audience by hand without the AI. |
 | `DELETE /api/campaigns/{id}` `{"version"}` | Delete a draft and its content for good (204). Deleting an abandoned resend draft lets that channel be resent again. Approved, sending, completed and cancelled campaigns are never deleted (409); stop a send with cancel (D37). |
 | `PUT /api/campaigns/{id}/request` `{"request", "version"}` | Edit a draft's brief and let the AI read it again (D40). On success the brief, rules and proposed send time are replaced (rules edited by hand are overwritten) and the content is kept, so review or regenerate it before approval. A stale version is refused before the AI is called. Failures return the same errors as create and leave the draft unchanged. Not for resends (409). |
@@ -152,3 +152,4 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 - Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
+- AI calls are not rate-limited. Every create or brief edit can cost up to two AI calls (one retry), parallel edits of the same draft each make their own call before the version check at save rejects all but one, and an unsupported answer can be asked again at once. Mock mode costs nothing; in real mode every call uses API credits.

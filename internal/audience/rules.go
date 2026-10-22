@@ -88,20 +88,23 @@ type FieldSpec struct {
 	Value string   `json:"value"`
 }
 
-// Fields lists every rule field, sorted by name.
+// Fields lists every rule field, sorted by name. The slices are copies.
 func Fields() []FieldSpec {
 	out := make([]FieldSpec, 0, len(fieldOps))
 	for f, ops := range fieldOps {
-		out = append(out, FieldSpec{f, ops, fieldValues[f]})
+		out = append(out, FieldSpec{f, slices.Clone(ops), fieldValues[f]})
 	}
 	slices.SortFunc(out, func(a, b FieldSpec) int { return strings.Compare(a.Field, b.Field) })
 	return out
 }
 
-// Limits are the bounds Validate enforces.
-var Limits = map[string]any{
-	"max_rules": maxRules, "max_days": maxDays, "max_count": maxCount, "max_amount": maxAmount,
-	"min_date": minDate.Format(time.DateOnly),
+// Limits are the bounds Validate enforces, as a fresh map: max_count is for
+// order_count, max_amount for total_spend and cart_value.
+func Limits() map[string]any {
+	return map[string]any{
+		"max_rules": maxRules, "max_days": maxDays, "max_count": maxCount, "max_amount": maxAmount,
+		"min_date": minDate.Format(time.DateOnly),
+	}
 }
 
 // Validate checks rules against the catalog and returns them normalized
