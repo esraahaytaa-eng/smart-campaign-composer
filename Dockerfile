@@ -1,9 +1,12 @@
 FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/scc ./cmd/scc
+# Cache mounts keep downloaded modules and compiled packages between image
+# builds; they never end up in the image.
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -o /out/scc ./cmd/scc
 
 # alpine (not distroless) so compose healthchecks can use busybox wget.
 FROM alpine:3.20

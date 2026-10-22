@@ -73,6 +73,9 @@ services:
     volumes:
       - .:/src
       - gomodcache:/go/pkg/mod
+      # Compiled packages survive between runs; without it every run recompiled
+      # all dependencies (the Anthropic SDK alone took ~1.5 min).
+      - gobuildcache:/root/.cache/go-build
     depends_on:
       test-db:
         condition: service_healthy
@@ -80,3 +83,4 @@ services:
 volumes:
   pgdata:
   gomodcache:
+  gobuildcache:
