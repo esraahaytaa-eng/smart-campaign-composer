@@ -87,7 +87,10 @@ function clearFailure() {
           <span>Use your marketing team account.</span>
         </div>
 
-        <div v-if="failure" role="alert" class="alert alert-error">{{ failure }}</div>
+        <div v-if="failure" role="alert" class="alert alert-error">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a31f15" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></svg>
+          <span>{{ failure }}</span>
+        </div>
 
         <div class="field">
           <label for="email">Work email</label>
@@ -122,6 +125,7 @@ function clearFailure() {
               @input="clearFailure"
             />
             <button type="button" class="reveal" @click="showPassword = !showPassword">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
               {{ showPassword ? 'Hide' : 'Show' }}<span class="sr-only"> password</span>
             </button>
           </div>
@@ -280,6 +284,9 @@ form {
   font: 400 15px var(--font);
 }
 .reveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 38px;
   padding: 0 10px;
   border: 0;

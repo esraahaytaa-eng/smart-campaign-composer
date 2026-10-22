@@ -36,9 +36,10 @@ async function signOut() {
         <BrandMark />
         <span>Smart Campaign<br />Composer</span>
       </div>
+      <RouterLink :to="{ name: 'new-campaign' }" class="new">+ New campaign</RouterLink>
       <div class="links">
         <RouterLink :to="{ name: 'dashboard' }" class="link" exact-active-class="active">Dashboard</RouterLink>
-        <RouterLink :to="{ name: 'campaigns' }" class="link" active-class="active">Campaigns</RouterLink>
+        <RouterLink :to="{ name: 'campaigns' }" class="link" :class="{ active: $route.path.startsWith('/campaigns') }">Campaigns</RouterLink>
       </div>
       <div class="foot">
         <span class="mode-badge" :title="modeTitle">{{ modeLabel }}<span class="sr-only">. {{ modeTitle }}</span></span>
@@ -88,6 +89,18 @@ async function signOut() {
   padding: 0 6px;
   font-weight: 650;
   line-height: 1.2;
+}
+.new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  border-radius: 9px;
+  border: 1px solid #d4d1f6;
+  background: #f6f5fe;
+  color: var(--primary-ink);
+  font-weight: 600;
+  text-decoration: none;
 }
 .links {
   display: flex;

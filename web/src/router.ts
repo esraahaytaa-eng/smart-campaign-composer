@@ -23,6 +23,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
         children: [
           { path: '', name: 'dashboard', component: () => import('./views/DashboardView.vue'), meta: { title: 'Dashboard' } },
           { path: 'campaigns', name: 'campaigns', component: () => import('./views/CampaignsView.vue'), meta: { title: 'Campaigns' } },
+          { path: 'campaigns/new', name: 'new-campaign', component: () => import('./views/NewCampaignView.vue'), meta: { title: 'New campaign' } },
+          { path: 'campaigns/:id(\\d+)', name: 'campaign', component: () => import('./views/CampaignView.vue'), meta: { title: 'Campaign' } },
           { path: ':pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue'), meta: { title: 'Page not found' } },
         ],
       },

@@ -238,3 +238,80 @@ h1 {
 .menu-item-danger[data-highlighted] {
   background: var(--danger-soft);
 }
+
+.btn-danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+.btn-danger-outline {
+  border-color: #e3a49d;
+  color: var(--danger);
+}
+.btn-soft {
+  border-color: #c9c6f3;
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+.btn-sm {
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+/* Dialogs (Reka UI Dialog / AlertDialog) */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 26, 51, 0.45);
+  z-index: 20;
+}
+.dialog {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(500px, calc(100vw - 32px));
+  max-height: 80vh;
+  overflow: auto;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: 0 24px 48px rgba(18, 26, 51, 0.25);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  z-index: 21;
+}
+.dialog .title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+}
+.dialog .body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.dialog .body p {
+  margin: 0 0 8px;
+}
+.dialog .actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.alert-warning {
+  background: #fdf3e2;
+  border: 1px solid var(--notice-line);
+  color: #5a3a0a;
+}
+.alert-info {
+  background: #f4f6fb;
+  border: 1px solid #dce2ee;
+  color: #24324f;
+}
+.alert svg {
+  flex: 0 0 18px;
+  margin-top: 1px;
+}
