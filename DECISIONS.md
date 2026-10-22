@@ -240,11 +240,12 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **History:** 2026-10-21. First approved as "clear error, opt-in mock". Changed to mock by default in the same session.
 
 ### D25 — Frontend stack
-- **Status:** Accepted · 2026-10-21
-- **Decision:** Vue 3, Vite, TypeScript, vue-router and PrimeVue. Native `fetch` and `EventSource`. Composables for state, no Pinia. Vitest for unit tests.
+- **Status:** Accepted, UI library superseded by D41 · 2026-10-21
+- **Decision:** Vue 3, Vite, TypeScript, vue-router and ~~PrimeVue~~ (see D41). Native `fetch` and `EventSource`. Composables for state, no Pinia. Vitest for unit tests.
 - **Why:** PrimeVue provides accessible chips (D9), tables, progress bars and toasts, which speeds up the editors and the dashboard.
 - **Rejected:** *No UI library:* more hand-built components, and accessibility is entirely our responsibility. *Tailwind CSS:* components are still built by hand. *Pinia:* not needed for a few screens.
 - **Trade-offs:** A large dependency that is only partly used.
+- **History:** 2026-10-22: PrimeVue 5 moved to a commercial licence that needs a license key; the UI library is replaced by D41. The rest of D25 stands.
 
 ### D26 — Metrics and health endpoints
 - **Status:** Accepted · 2026-10-21
@@ -315,6 +316,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Rephrasing should not need a new draft. Clearing the content would silently drop manual edits, and it is reviewed before approval anyway.
 - **Rejected:** *Clearing the content:* loses hand edits. *Flagging stale content on the server:* the warning is a UI concern.
 - **Trade-offs:** Content can briefly contradict the brief; the warning and the review before approval cover it.
+
+### D41 — Headless UI components (Reka UI) with our own styles
+- **Status:** Accepted · 2026-10-22
+- **Decision:** Reka UI (MIT) provides the accessible behaviour of dialogs, menus, toasts, comboboxes and tag inputs; all styling is our own CSS, built from the colours and spacing of the design reference in `design/` (README, *UI/UX design*). Tables are plain semantic HTML. Replaces PrimeVue in D25.
+- **Why:** PrimeVue 5 needs a license key, or it shows a licence notice; a key can't be committed, so every reviewer would see the notice. The last MIT release (4.5.5) is frozen. The design is fully custom, so a headless library fits it better than a themed one.
+- **Rejected:** *PrimeVue 4.5.5:* a frozen release line, and heavy theming to match the design. *PrimeVue 5 with a Community key:* a licence notice or a key for every reviewer. *No component library:* accessibility of dialogs and menus entirely hand-built (D25's concern).
+- **Trade-offs:** More CSS to write; no ready-made data table or chart components.
 
 ## Open Questions
 
