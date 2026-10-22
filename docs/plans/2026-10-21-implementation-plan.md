@@ -262,7 +262,7 @@ Recorded in DECISIONS.md: seed (D28), scheduled sending with suggestion from the
 
 Git details (D35): branches named `milestone-a-foundation`, …; commit prefixes `feat:`, `test:`, `docs:`; at the end of each milestone I show the summary and diff before asking to merge. No worktrees.
 
-**Still open, confirm before T10/T12:** default values for mock-provider failure rates (5% 5xx, 3% 429 with Retry-After 1s, 1% timeout, 20–200 ms delay), lease 30s, provider timeout 5s, 20 workers per channel, request text ≤ 1,000 chars, session TTL 12h.
+**Still open, confirm before T10/T12:** default values for mock-provider failure rates (5% 5xx, 3% 429 with Retry-After 1s, 1% timeout, 20–200 ms delay), lease 30s, provider timeout 5s, 20 workers per channel, request text ≤ 1,000 chars. (Session TTL 12h approved 2026-10-22, D10.)
 
 ## Verification (end-to-end)
 
