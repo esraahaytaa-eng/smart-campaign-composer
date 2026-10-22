@@ -295,6 +295,27 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Cancelling drafts:* mixes "stopped a send" with "never sent", and the drafts stay in the list. *Deleting sent campaigns:* messages and attempts are the audit trail and the basis for duplicate prevention (D4, D31).
 - **Trade-offs:** A deleted draft cannot be restored. A content stream still running for it fails to save.
 
+### D38 — Channels can be changed on a draft
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `PUT /api/campaigns/{id}/channels` `{channels, version}` on drafts only, validated as on create. A removed channel's content is deleted in the same transaction; an added channel starts without content, so approval waits for it. Resend drafts keep their channel (D31). The frontend asks for confirmation before removing a channel that has content.
+- **Why:** Changing the channel picker otherwise needs a new draft and a new AI call. Approval rejects content for a channel that is not chosen, so leftover content would block it.
+- **Rejected:** *Keeping the removed channel's content:* blocks approval and shows text that will not be sent.
+- **Trade-offs:** Content for a removed channel is lost; re-adding the channel means writing it again.
+
+### D39 — The rule catalog is served by the API
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `GET /api/catalog` returns every rule field with its operators and value type, the current cities and categories, and the rule limits, from the same definitions the server validates against (D14).
+- **Why:** The chip editor (D9) cannot drift from the server's rule language.
+- **Rejected:** *Copying the fields into the frontend:* two definitions that drift apart.
+- **Trade-offs:** One more endpoint to keep in step with the rule language.
+
+### D40 — The brief can be edited and re-interpreted on a draft
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `PUT /api/campaigns/{id}/request` `{request, version}` on drafts only (not resends). The version is checked before the AI call and again when saving. On success the brief, rules and proposed send time with its note are replaced; manual rule edits are overwritten, and the frontend confirms first. On failure (unsupported, invalid twice, timeout, unavailable) the draft is unchanged, with the same errors as create (D15). The content is kept; the frontend warns clearly that it may no longer match the new brief and should be reviewed or regenerated before approval.
+- **Why:** Rephrasing should not need a new draft. Clearing the content would silently drop manual edits, and it is reviewed before approval anyway.
+- **Rejected:** *Clearing the content:* loses hand edits. *Flagging stale content on the server:* the warning is a UI concern.
+- **Trade-offs:** Content can briefly contradict the brief; the warning and the review before approval cover it.
+
 ## Open Questions
 
 None currently.
