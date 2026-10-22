@@ -21,30 +21,15 @@ import (
 	"smart-campaign-composer/internal/provider"
 )
 
-const providerPassword = "provider-test-password"
-
 // providerDB migrates a fresh database as the app and returns two pools: the
 // admin one and one logged in as the provider's own role (D6).
 func providerDB(t *testing.T) (admin, prov *pgxpool.Pool) {
 	t.Helper()
-	ctx := context.Background()
 	admin = dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, admin); err != nil {
+	if err := db.Migrate(context.Background(), admin); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SetProviderPassword(ctx, admin, providerPassword); err != nil {
-		t.Fatal(err)
-	}
-	cfg := admin.Config().ConnConfig.Copy()
-	cfg.User, cfg.Password = db.ProviderRole, providerPassword
-	pcfg, _ := pgxpool.ParseConfig("")
-	pcfg.ConnConfig = cfg
-	prov, err := pgxpool.NewWithConfig(ctx, pcfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(prov.Close)
-	return admin, prov
+	return admin, dbtest.ProviderPool(t, admin)
 }
 
 var instant = config.ProviderChannel{} // no delay, no failures
