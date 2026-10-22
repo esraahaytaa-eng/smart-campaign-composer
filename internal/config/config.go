@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,9 @@ type Config struct {
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
 	ProviderDBPassword   string // migrate sets it on the mock provider's database role (D6)
+
+	ProviderURL string // where the worker sends messages
+	MaxAttempts int    // provider attempts per message before it fails (D7)
 
 	Provider     map[string]ProviderChannel // mock provider behaviour per channel (D20)
 	ProviderSeed int64                      // seeds the provider's failure injection, so runs repeat
@@ -58,6 +62,9 @@ func Load(process string) (Config, error) {
 	}
 	if process == "mock-provider" {
 		return loadProvider(cfg)
+	}
+	if process == "worker" {
+		return loadWorker(cfg)
 	}
 	if process != "api" {
 		return cfg, nil
@@ -125,5 +132,19 @@ func loadProvider(cfg Config) (Config, error) {
 		}
 		cfg.Provider[ch] = c
 	}
+	return cfg, nil
+}
+
+func loadWorker(cfg Config) (Config, error) {
+	u, err := url.Parse(getenv("PROVIDER_URL", "http://mock-provider:8080"))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return Config{}, fmt.Errorf("PROVIDER_URL must be an http(s) URL such as http://mock-provider:8080, got %q", os.Getenv("PROVIDER_URL"))
+	}
+	cfg.ProviderURL = strings.TrimRight(u.String(), "/")
+	n, err := strconv.Atoi(getenv("MAX_ATTEMPTS", "5"))
+	if err != nil || n < 1 || n > 10 {
+		return Config{}, errors.New("MAX_ATTEMPTS must be a whole number from 1 to 10")
+	}
+	cfg.MaxAttempts = n
 	return cfg, nil
 }

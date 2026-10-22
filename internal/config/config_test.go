@@ -9,7 +9,7 @@ import (
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 	keys := []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "DEMO_MARKETER_PASSWORD",
-		"LLM_TIMEOUT", "PROVIDER_DB_PASSWORD", "PROVIDER_SEED"}
+		"LLM_TIMEOUT", "PROVIDER_DB_PASSWORD", "PROVIDER_SEED", "PROVIDER_URL", "MAX_ATTEMPTS"}
 	for _, ch := range []string{"SMS", "EMAIL"} {
 		for _, suffix := range []string{"_DELAY_MS_MIN", "_DELAY_MS_MAX", "_ERROR_RATE", "_RATE_LIMIT_RATE", "_TIMEOUT_RATE"} {
 			keys = append(keys, ch+suffix)
@@ -71,6 +71,9 @@ func TestLoadConfig_Errors(t *testing.T) {
 		{"provider rates over 1 together", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "SMS_ERROR_RATE": "0.6", "SMS_RATE_LIMIT_RATE": "0.5"}, "SMS"},
 		{"provider delay min over max", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "EMAIL_DELAY_MS_MIN": "300", "EMAIL_DELAY_MS_MAX": "100"}, "EMAIL_DELAY_MS"},
 		{"provider delay negative", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "SMS_DELAY_MS_MIN": "-5"}, "SMS_DELAY_MS_MIN"},
+		{"worker attempts zero", "worker", map[string]string{"DATABASE_URL": "postgres://db", "MAX_ATTEMPTS": "0"}, "MAX_ATTEMPTS"},
+		{"worker attempts too many", "worker", map[string]string{"DATABASE_URL": "postgres://db", "MAX_ATTEMPTS": "11"}, "MAX_ATTEMPTS"},
+		{"worker bad provider url", "worker", map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_URL": "mock-provider:8080"}, "PROVIDER_URL"},
 		{"provider seed", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_SEED": "x"}, "PROVIDER_SEED"},
 		{"bad llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "soon"}, "LLM_TIMEOUT"},
 		{"zero llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "0s"}, "LLM_TIMEOUT"},
@@ -131,5 +134,18 @@ func TestLoadConfig_ProviderOverrides(t *testing.T) {
 	}
 	if cfg.Provider["sms"].ErrorRate != 0.5 || cfg.Provider["email"].DelayMax != 10*time.Millisecond || cfg.Provider["email"].DelayMin != 0 || cfg.ProviderSeed != 42 {
 		t.Fatalf("got %+v seed %d", cfg.Provider, cfg.ProviderSeed)
+	}
+}
+
+func TestLoadConfig_WorkerDefaults(t *testing.T) {
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db"})
+
+	cfg, err := Load("worker")
+	if err != nil || cfg.ProviderURL != "http://mock-provider:8080" || cfg.MaxAttempts != 5 {
+		t.Fatalf("got %q, %d (%v)", cfg.ProviderURL, cfg.MaxAttempts, err)
+	}
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_URL": "http://localhost:9000/", "MAX_ATTEMPTS": "3"})
+	if cfg, err = Load("worker"); err != nil || cfg.ProviderURL != "http://localhost:9000" || cfg.MaxAttempts != 3 {
+		t.Fatalf("overrides: got %q, %d (%v)", cfg.ProviderURL, cfg.MaxAttempts, err)
 	}
 }
