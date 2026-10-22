@@ -24,44 +24,33 @@ func NewAnthropic(apiKey, model string, opts ...option.RequestOption) *Anthropic
 	return &Anthropic{client: anthropic.NewClient(opts...), model: model}
 }
 
-// Models that accept server-side refusal fallbacks in their "default" form.
-var defaultFallbackModels = map[string]bool{
-	"claude-opus-5-5": true, "claude-opus-5": true, "claude-fable-5-1": true, "claude-sonnet-5-5": true,
-}
-
 const refusalReason = "The AI declined this request. Rephrase it or build the rules by hand."
 
 func (a *Anthropic) InterpretRequest(ctx context.Context, in InterpretInput) (json.RawMessage, error) {
-	params := anthropic.BetaMessageNewParams{
+	msg, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     a.model,
 		MaxTokens: 16000,
-		System:    []anthropic.BetaTextBlockParam{{Text: interpretSystemPrompt}},
-		Messages:  []anthropic.BetaMessageParam{anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(interpretPrompt(in)))},
-		Thinking:  anthropic.BetaThinkingConfigParamUnion{OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{}},
-		OutputConfig: anthropic.BetaOutputConfigParam{
+		System:    []anthropic.TextBlockParam{{Text: interpretSystemPrompt}},
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(interpretPrompt(in)))},
+		Thinking:  anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}},
+		OutputConfig: anthropic.OutputConfigParam{
 			// Misreading an audience sends to the wrong people, so accuracy beats cost here.
-			Effort: anthropic.BetaOutputConfigEffortHigh,
-			Format: anthropic.BetaJSONOutputFormatParam{Schema: interpretSchema},
+			Effort: anthropic.OutputConfigEffortHigh,
+			Format: anthropic.JSONOutputFormatParam{Schema: interpretSchema},
 		},
-	}
-	if defaultFallbackModels[a.model] {
-		params.Betas = []anthropic.AnthropicBeta{anthropic.AnthropicBetaServerSideFallback2026_07_01}
-		params.Fallbacks = anthropic.BetaFallbacksParamOfDefault()
-	}
-
-	msg, err := a.client.Beta.Messages.New(ctx, params)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("claude: %w", err)
 	}
 	switch msg.StopReason {
-	case anthropic.BetaStopReasonRefusal:
+	case anthropic.StopReasonRefusal: // no fallback model (D15): the marketer sees "unsupported"
 		return unsupported(refusalReason), nil
-	case anthropic.BetaStopReasonMaxTokens:
+	case anthropic.StopReasonMaxTokens:
 		return nil, errors.New("claude: answer exceeded the token limit")
 	}
 	var text strings.Builder
 	for _, block := range msg.Content {
-		if t, ok := block.AsAny().(anthropic.BetaTextBlock); ok {
+		if t, ok := block.AsAny().(anthropic.TextBlock); ok {
 			text.WriteString(t.Text)
 		}
 	}

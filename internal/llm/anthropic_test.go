@@ -17,6 +17,7 @@ const validOutput = `{"unsupported":false,"reason":"","channels":[],"rules":[{"f
 type captured struct {
 	body   map[string]any
 	header http.Header
+	url    string
 }
 
 // fakeAPI answers every request with one Messages API response.
@@ -27,6 +28,7 @@ func fakeAPI(t *testing.T, status int, stopReason, text string) (*captured, stri
 		b, _ := io.ReadAll(r.Body)
 		json.Unmarshal(b, &got.body)
 		got.header = r.Header.Clone()
+		got.url = r.URL.String()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		if status != http.StatusOK {
@@ -75,22 +77,12 @@ func TestAnthropic_RequestShape(t *testing.T) {
 	if thinking, _ := b["thinking"].(map[string]any); thinking["type"] != "adaptive" {
 		t.Errorf("thinking: %v", b["thinking"])
 	}
-	if b["fallbacks"] != "default" || !strings.Contains(got.header.Get("anthropic-beta"), "server-side-fallback-2026-07-01") {
-		t.Errorf("fallbacks: %v, beta header: %q", b["fallbacks"], got.header.Get("anthropic-beta"))
+	// No beta features: stable endpoint, no fallbacks (a refusal becomes "unsupported").
+	if _, ok := b["fallbacks"]; ok || got.header.Get("anthropic-beta") != "" || got.url != "/v1/messages" {
+		t.Errorf("beta use: fallbacks=%v, beta header=%q, url=%s", b["fallbacks"], got.header.Get("anthropic-beta"), got.url)
 	}
 	if got.header.Get("X-Api-Key") != "test-key" {
 		t.Errorf("api key header missing")
-	}
-}
-
-func TestAnthropic_NoFallbacksForOtherModels(t *testing.T) {
-	got, url := fakeAPI(t, http.StatusOK, "end_turn", validOutput)
-
-	if _, err := interpretVia(t, url, "claude-haiku-5-5", testInput()); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := got.body["fallbacks"]; ok || strings.Contains(got.header.Get("anthropic-beta"), "fallback") {
-		t.Errorf("fallbacks sent for a model without the default form: %v", got.body["fallbacks"])
 	}
 }
 
