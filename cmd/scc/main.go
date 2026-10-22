@@ -96,7 +96,7 @@ func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error 
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
 	api := auth.Routes(mux, pool, cfg.LLMMode)
-	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now}).Routes(api)
+	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}).Routes(api)
 	slog.Info("api starting", "addr", cfg.HTTPAddr, "llm_mode", cfg.LLMMode)
 	return serve(ctx, cfg.HTTPAddr, mux)
 }

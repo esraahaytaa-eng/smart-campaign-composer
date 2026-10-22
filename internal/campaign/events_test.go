@@ -183,6 +183,25 @@ func TestEvents_StopsOnClientDisconnect(t *testing.T) {
 	}
 }
 
+// http.Server.Shutdown waits for handlers, so an open stream must end when the
+// server stops; the browser's EventSource then reconnects.
+func TestEvents_StopsOnServerShutdown(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	s := a.stream(a.sendingCampaign())
+	s.next(t)
+
+	close(a.stopping)
+
+	select {
+	case <-s.handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the stream kept the server from shutting down")
+	}
+	if e, open := s.next(t); open {
+		t.Fatalf("want the stream closed without an event, got %v", e)
+	}
+}
+
 // A cancel leaves messages a worker holds in "sending"; the stream ends only
 // once they are final, so the last snapshot is the true result.
 func TestEvents_EndsAfterFinalSnapshot(t *testing.T) {

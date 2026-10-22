@@ -32,6 +32,9 @@ type Handler struct {
 	Now     func() time.Time
 	// EventsInterval is how often the status stream polls; 0 means 1 s (T14).
 	EventsInterval time.Duration
+	// Stopping is closed when the server shuts down; open status streams then
+	// end, since http.Server.Shutdown waits for every handler to return.
+	Stopping <-chan struct{}
 }
 
 func (h *Handler) Routes(mux *http.ServeMux) {

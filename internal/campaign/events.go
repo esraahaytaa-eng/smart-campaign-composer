@@ -51,6 +51,8 @@ type reasonCount struct {
 // events streams the campaign's status: a snapshot at once, then one on each
 // change, polled every EventsInterval. When the campaign is completed or
 // cancelled and no message is in flight, it sends "end" and closes (D36).
+// On a server shutdown or a database error it just closes, so the browser's
+// EventSource reconnects (an "error" event would clash with its own).
 func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -84,12 +86,13 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-h.Stopping:
+			return
 		case <-ticker.C:
 		}
 		if snap, err = h.snapshot(ctx, id); err != nil {
 			if ctx.Err() == nil {
 				slog.Error("status snapshot", "campaign", id, "err", err)
-				send("error", map[string]string{"message": "internal error"})
 			}
 			return
 		}
@@ -100,10 +103,16 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// snapshot reads everything at one point in time, so counts never mix moments.
 func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error) {
 	var s statusSnapshot
+	tx, err := h.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return s, err
+	}
+	defer tx.Rollback(ctx)
 	var channels []string
-	if err := h.Pool.QueryRow(ctx, `SELECT status, channels, send_at, audience_built_at, completed_at, approval_estimate
+	if err := tx.QueryRow(ctx, `SELECT status, channels, send_at, audience_built_at, completed_at, approval_estimate
 		FROM campaigns WHERE id = $1`, id).Scan(&s.Status, &channels, &s.SendAt, &s.AudienceBuiltAt, &s.CompletedAt,
 		&s.ApprovalEstimate); err != nil {
 		return s, err
@@ -117,7 +126,7 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		s.Channels[ch] = cs
 	}
 
-	rows, err := h.Pool.Query(ctx, `SELECT channel, status, coalesce(skip_reason, ''), count(*), count(*) FILTER (WHERE delivery_uncertain)
+	rows, err := tx.Query(ctx, `SELECT channel, status, coalesce(skip_reason, ''), count(*), count(*) FILTER (WHERE delivery_uncertain)
 		FROM messages WHERE campaign_id = $1 GROUP BY 1, 2, 3`, id)
 	if err != nil {
 		return s, err
@@ -141,7 +150,7 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		return s, err
 	}
 
-	rows, err = h.Pool.Query(ctx, `SELECT m.channel, count(*) FILTER (WHERE a.attempt_no > 1), count(*) FILTER (WHERE a.outcome = 'rate_limited')
+	rows, err = tx.Query(ctx, `SELECT m.channel, count(*) FILTER (WHERE a.attempt_no > 1), count(*) FILTER (WHERE a.outcome = 'rate_limited')
 		FROM delivery_attempts a JOIN messages m ON m.id = a.message_id WHERE m.campaign_id = $1 GROUP BY 1`, id)
 	if err != nil {
 		return s, err
@@ -154,7 +163,7 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		return s, err
 	}
 
-	rows, err = h.Pool.Query(ctx, `SELECT channel, coalesce(last_error, 'unknown'), count(*) FROM messages
+	rows, err = tx.Query(ctx, `SELECT channel, coalesce(last_error, 'unknown'), count(*) FROM messages
 		WHERE campaign_id = $1 AND status = 'failed' GROUP BY 1, 2 ORDER BY 3 DESC, 2`, id)
 	if err != nil {
 		return s, err
@@ -176,10 +185,10 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		if err != nil {
 			return s, err
 		}
-		if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM users u WHERE `+where, args...).Scan(&cs.Resendable); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM users u WHERE `+where, args...).Scan(&cs.Resendable); err != nil {
 			return s, err
 		}
-		err = h.Pool.QueryRow(ctx, `SELECT id FROM campaigns WHERE parent_campaign_id = $1 AND channels = $2
+		err = tx.QueryRow(ctx, `SELECT id FROM campaigns WHERE parent_campaign_id = $1 AND channels = $2
 			AND status <> 'cancelled'`, id, []string{ch}).Scan(&cs.ActiveResendID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return s, err

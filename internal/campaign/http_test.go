@@ -31,6 +31,7 @@ type app struct {
 	mux        *http.ServeMux
 	cookie     *http.Cookie
 	marketerID int64
+	stopping   chan struct{} // closed to simulate a server shutdown
 }
 
 // failingLLM fails the test if the AI is called.
@@ -79,11 +80,12 @@ func newApp(t *testing.T, model llm.LLM) *app {
 
 	mux := http.NewServeMux()
 	api := auth.Routes(mux, pool, "mock")
+	stopping := make(chan struct{})
 	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: 5 * time.Second, Now: func() time.Time { return fixedNow },
-		EventsInterval: 20 * time.Millisecond}
+		EventsInterval: 20 * time.Millisecond, Stopping: stopping}
 	h.Routes(api)
 
-	a := &app{t: t, pool: pool, mux: mux}
+	a := &app{t: t, pool: pool, mux: mux, stopping: stopping}
 	rec := a.do(http.MethodPost, "/api/login", `{"email":"m@example.com","password":"password1"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login: %d", rec.Code)
