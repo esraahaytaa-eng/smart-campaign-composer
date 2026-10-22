@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: backend T1–T14 (login, audience rules, AI interpretation and content with a mock and Claude, drafts, approval, cancel and resend, mock providers, sending worker, metrics and the live status stream) plus the draft endpoints the frontend needs (D37–D40), and the frontend app shell with sign-in (T15). Not yet built: the composer, content and review screens, and the dashboard (T16–T18).
+> **Status: work in progress.** Done: backend T1–T14 (login, audience rules, AI interpretation and content with a mock and Claude, drafts, approval, cancel and resend, mock providers, sending worker, metrics and the live status stream) plus the draft endpoints the frontend needs (D37–D40), the frontend app shell with sign-in (T15), and the composer's audience step with editable campaign names (T16, D42). Not yet built: the content and review screens and the dashboard (T17–T18).
 
 ## Requirements
 
@@ -133,7 +133,9 @@ docker compose down -v && docker compose up
 
 Vue 3, Vite, TypeScript and vue-router (D25), with Reka UI for accessible dialogs and menus and our own CSS (D41), in `web/`. The api serves the built app from `WEB_DIR` (`/srv/web` in the image): page URLs get `index.html` so the router can handle them, hashed assets are cached for good, and a missing asset is a 404. `/api/` routes are unaffected.
 
-So far (T15): sign-in with field validation and a show/hide password toggle; every other page requires a session, and a page opened while signed out returns there after sign-in (only paths on this site are accepted as the return address). An API call that finds the session expired sends the marketer to sign in again. The sidebar shows the AI mode from `GET /api/me` and has a user menu with log out. Dashboard and Campaigns are placeholders until T16–T18.
+So far (T15): sign-in with field validation and a show/hide password toggle; every other page requires a session, and a page opened while signed out returns there after sign-in (only paths on this site are accepted as the return address). An API call that finds the session expired sends the marketer to sign in again. The sidebar shows the AI mode from `GET /api/me` and has a user menu with log out.
+
+The composer (T16): **+ New campaign** takes a brief and the channels, and the AI turns the brief into a draft (an unsupported brief is explained and kept for rephrasing; nothing is saved). The draft's audience step shows the rules as plain-language chips ("Added to cart in the last 30 days (counted from send time)", "Ordered books since 1 Oct 2026"): click a chip to edit it in a dialog built from `GET /api/catalog`, switch a time rule between "last N days" and a fixed date, add rules from the catalog, or remove them; the consent rule is always applied. The estimated audience per channel updates after each change. The name, channels, rules and brief save automatically, one change at a time with the draft's version; if someone else changed the draft, the page says so and asks to reload. Removing a channel that has content, re-interpreting the brief and deleting the draft each ask for confirmation first. The dashboard, the campaign list and the content step are still placeholders (T17–T18).
 
 Development with hot reload, against the api from `docker compose up`, without a local Node:
 
@@ -161,12 +163,14 @@ Changes from the design so far:
 
 - **Sign in:** no demo email and password on the page and no "fill" button. The design's own notes say not to hard-code them, and the backend never exposes a password; the page points to this README instead. The badge mentions only the mock providers, because the AI mode is known only after sign-in.
 - **User menu:** the email under the name instead of a role, since all marketers share one role (D10).
-- **"+ New campaign"** in the sidebar arrives with the composer (T16), so it never leads to an empty page.
+- **Saving drafts:** every change saves itself through the API with the draft's version, so a "Saving… / All changes saved" indicator replaces the *Save draft* button and the unsaved-changes dialog. Only the brief text waits for *Re-interpret*.
+- **Rule preview:** the design previews the count while a rule is edited; counting unsaved rules would need another endpoint, so the count updates when the rule is applied and shows the change ("−82 since your last edit").
+- **Dropped notes:** "‘20% discount’ was used for the content, not the audience" (the AI gives no such explanation) and "N without consent" (the counts already exclude anyone without consent).
+- **Campaign names** are real and editable (D42), with a default from the brief.
+- **Building rules without the AI** for a new campaign is not offered yet: an unreadable brief is rephrased.
 
 Differences to settle when the later screens are built (not decided yet):
 
-- **Saving drafts:** every edit is saved through the API with its version, so a "Saved" indicator may replace the design's *Save draft* button and unsaved-changes dialog (T16).
-- **Campaign names:** the design names campaigns, but the backend has no name field, only the brief (T16).
 - **"Uncertain":** in the backend it is a flag on a message (D5), not a status; a message ends as sent, failed, skipped or cancelled, so the dashboard shows uncertain deliveries as a separate count (T18).
 - **Recipient details:** no API lists recipients or their attempt history yet (T18).
 - **429 counts:** the status stream has totals per channel, not "in the last 5 minutes" (T18).
