@@ -110,6 +110,33 @@ func (l *life) requests(messageID int64) int {
 	return n
 }
 
+// waitUntil polls cond until it holds; after 10 s the test fails. It replaces
+// fixed sleeps, which a loaded machine can outlast.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for give := time.Now().Add(10 * time.Second); !cond(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(give) {
+			t.Fatalf("timed out waiting until %s", what)
+		}
+	}
+}
+
+// shutdownWhen returns a context cancelled as soon as cond holds, so a test
+// stops the worker at a known step rather than after a guessed delay, which a
+// slow database read could use up. After 5 s it is cancelled anyway, and the
+// test's own checks fail.
+func shutdownWhen(t *testing.T, cond func() bool) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() {
+		for give := time.Now().Add(5 * time.Second); !cond() && ctx.Err() == nil && time.Now().Before(give); {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	return ctx
+}
+
 func (l *life) worker(url string, timeout time.Duration) *worker.Worker {
 	return &worker.Worker{Queue: l.q, ProviderURL: url, Client: worker.NewClient(timeout), MaxAttempts: 5, Poll: 20 * time.Millisecond}
 }
@@ -216,7 +243,7 @@ func TestLifecycle_TimeoutThenRetry_DeliveredOnce(t *testing.T) {
 	if status, _, uncertain := l.state(mid); status != "retry_scheduled" || !uncertain {
 		t.Fatalf("after a timeout: want retry_scheduled and uncertain, got %s %v", status, uncertain)
 	}
-	time.Sleep(400 * time.Millisecond) // the provider accepts the hung request meanwhile
+	waitUntil(t, "the provider accepts the hung request", func() bool { return l.processed(mid) == 1 })
 
 	l.worker(l.provider(instant, 0), time.Second).Process(context.Background(), l.claim(mid, time.Now().Add(2*time.Second)))
 
@@ -237,8 +264,7 @@ func TestLifecycle_ShutdownDuringLastAttempt_NotFailed(t *testing.T) {
 	l.exec(`UPDATE messages SET attempt_count = 4 WHERE id = $1`, mid)
 	url := l.provider(hangs, 300*time.Millisecond)
 
-	ctx, shutdown := context.WithTimeout(context.Background(), 80*time.Millisecond)
-	defer shutdown()
+	ctx := shutdownWhen(t, func() bool { return l.requests(mid) > 0 }) // the attempt is at the provider
 	l.worker(url, 2*time.Second).Process(ctx, l.claim(mid, time.Now()))
 
 	status, _, uncertain := l.state(mid)
@@ -251,7 +277,7 @@ func TestLifecycle_ShutdownDuringLastAttempt_NotFailed(t *testing.T) {
 	if l.int(`SELECT count(*) FROM messages WHERE id = $1 AND next_attempt_at <= now()`, mid) != 1 {
 		t.Fatal("an interrupted message is retried at once")
 	}
-	time.Sleep(400 * time.Millisecond) // the provider accepted it anyway
+	waitUntil(t, "the provider accepts it anyway", func() bool { return l.processed(mid) == 1 })
 
 	l.worker(l.provider(instant, 0), time.Second).Process(context.Background(), l.claim(mid, time.Now()))
 
@@ -323,7 +349,7 @@ func TestLifecycle_TimeoutThenCancelledResend_NewResendSkipsUncertain(t *testing
 	timedOut, untouched := l.message(r1, 1, "sms"), l.message(r1, 2, "sms")
 	l.worker(l.provider(hangs, 300*time.Millisecond), 100*time.Millisecond).Process(context.Background(), l.claim(timedOut, time.Now()))
 	l.cancel(r1)
-	time.Sleep(400 * time.Millisecond) // the hung request is accepted after all
+	waitUntil(t, "the hung request is accepted after all", func() bool { return l.processed(timedOut) == 1 })
 
 	r2 := l.campaign("{sms}", "Kısa {{first_name}}", &parent)
 
@@ -397,7 +423,9 @@ func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
 	ctx, stop := context.WithCancel(context.Background())
 	done := make(chan error)
 	go func() { done <- w.Run(ctx) }()
-	time.Sleep(700 * time.Millisecond)
+	waitUntil(t, "some messages are sent", func() bool {
+		return l.int(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status = 'sent'`, cid) > 0
+	})
 	l.cancel(cid)
 	cancelledAt := time.Now()
 	// Messages already claimed reach their cancel check as rate-limit slots come up.
@@ -506,8 +534,9 @@ func TestLifecycle_ShutdownWhileWaiting_ReleasesTheMessage(t *testing.T) {
 	empty.Allow()
 	w.Limiters = map[string]*rate.Limiter{"sms": empty, "email": rate.NewLimiter(rate.Inf, 1)}
 
-	ctx, shutdown := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer shutdown()
+	// Waiting reserves the only token, so Tokens drops below 0. (A deadline
+	// would not do: Wait refuses at once a deadline it cannot meet.)
+	ctx := shutdownWhen(t, func() bool { return empty.Tokens() < -0.5 })
 	w.Process(ctx, l.claim(mid, time.Now()))
 
 	if n := l.int(`SELECT count(*) FROM messages WHERE id = $1 AND status IN ('pending', 'retry_scheduled')
