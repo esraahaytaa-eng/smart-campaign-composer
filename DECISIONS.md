@@ -281,6 +281,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Committing directly to `main`:* no review point. *One branch for everything:* one large review at the end.
 - **Trade-offs:** One merge approval per milestone.
 
+### D36 — Live status stream ends with the campaign
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `GET /api/campaigns/{id}/events` sends a status snapshot when the counts change (polled ~1s, D16). Once the campaign is `completed` or `cancelled` and no message is still in flight (after a cancel, messages a worker holds finish later), it sends the final snapshot, then an `end` event, and closes.
+- **Why:** A finished campaign never changes, so no database polling for open dashboards of old campaigns.
+- **Rejected:** *Keep the stream open until the client leaves:* one query per second per open tab for nothing.
+- **Trade-offs:** The frontend must close its `EventSource` on `end`, or the browser reconnects every few seconds.
+
 ## Open Questions
 
 None currently.
