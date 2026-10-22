@@ -80,6 +80,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Prevents unauthenticated sends and wasted API credits, and records who approved what, at minimal cost.
 - **Rejected:** *No authentication:* anyone could trigger sends. *Roles such as editor and approver:* beyond the case.
 - **Trade-offs:** No four-eyes approval. The demo login details are not suitable for production.
+- **History:** 2026-10-22. The seed creates a single demo login, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWORD`, default documented in the README), at the engineer's request. The schema still supports several marketers.
 
 ### D11 — Campaign lifecycle with cancel only
 - **Status:** Accepted · 2026-10-21
