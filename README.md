@@ -147,7 +147,7 @@ Then open `http://localhost:5173`. The Vite server proxies `/api` to the api, so
 
 ### Languages (D44)
 
-The UI is in English by default and in Turkish on request: the switch is on the sign-in page and at the bottom of the sidebar, and the choice is kept in the browser. Numbers, amounts and dates follow the language (`10,000` / `10.000`, `1 Oct 2026` / `1 Eki 2026`). Only interface text is translated. Briefs, customer and seed data (names, cities, categories) and anything the AI wrote (rules, messages, an unsupported brief's reason) are shown exactly as stored, in whatever language they were written. Errors are explained in the UI language; validation details the UI can't foresee are shown in the server's English under a translated heading.
+The UI is in English by default and in Turkish on request: the switch is on the sign-in page and at the bottom of the sidebar, and the choice is kept in the browser. Numbers, amounts and dates follow the language (`10,000` / `10.000`, `1 Oct 2026` / `1 Eki 2026`). Only interface text is translated. Briefs, customer and seed data (names, cities, categories) and anything the AI wrote (messages, an unsupported brief's reason) are shown exactly as stored, in whatever language they were written; rule chips phrase a rule in the UI language without changing its values. Errors are explained in the UI language for the situations the UI knows; anything else (including most 409 conflicts) keeps the server's English details under a translated heading.
 
 Adding UI text in any screen:
 
@@ -155,7 +155,7 @@ Adding UI text in any screen:
 2. In a component, `import { t } from '../i18n'` and write `{{ t('my.key', { name }) }}`; format with `formatNumber`, `formatAmount`, `formatDate`, `formatOr` and `formatAnd`. Show API errors with `errorText(err)` from `web/src/i18n/errors.ts`, and an unsupported brief's reason with `aiReason(err)`, unchanged.
 3. Pass data through placeholders; never put it in a dictionary.
 
-`make test` fails if a component's template or script contains user-visible text that doesn't come from `t()` (`web/src/i18n/coverage.test.ts`).
+`make test` scans every component (text, user-facing attributes, literals in template expressions) and module for phrases that don't come from `t()` (`web/src/i18n/coverage.test.ts`, which also tests the scanner against known patterns). It is a heuristic: it catches phrases and capitalised words. A developer-only message, never shown to marketers, is marked with an `i18n-ignore` comment on its line.
 
 ## UI/UX design
 
