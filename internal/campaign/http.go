@@ -47,7 +47,6 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
 	mux.HandleFunc("PUT /api/campaigns/{id}/channels", h.updateChannels)
 	mux.HandleFunc("PUT /api/campaigns/{id}/request", h.updateRequest)
-	mux.HandleFunc("PUT /api/campaigns/{id}/name", h.updateName)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
@@ -62,7 +61,6 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 // audience per channel, shown for drafts only.
 type campaignJSON struct {
 	ID           int64           `json:"id"`
-	Name         string          `json:"name"`
 	RequestText  string          `json:"request_text"`
 	Channels     []string        `json:"channels"`
 	Rules        []audience.Rule `json:"rules"`
@@ -87,18 +85,15 @@ type campaignJSON struct {
 	Content          *content.Content `json:"content"` // in single-campaign responses
 }
 
-const campaignColumns = `id, name, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
+const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
 	created_at, updated_at, parent_campaign_id, approval_estimate, approved_by, approved_at, cancelled_by, cancelled_at,
 	audience_built_at, completed_at`
 
 func scanCampaign(row pgx.Row) (campaignJSON, error) {
 	var c campaignJSON
-	err := row.Scan(&c.ID, &c.Name, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
+	err := row.Scan(&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
 		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &c.ParentCampaignID, &c.ApprovalEstimate,
 		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt)
-	if c.Name == "" { // stored before names existed (D42)
-		c.Name = defaultName(c.RequestText)
-	}
 	return c, err
 }
 
@@ -159,8 +154,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	marketer, _ := auth.MarketerID(r.Context())
 	rulesJSON, _ := json.Marshal(rules)
 	var id int64
-	err = h.Pool.QueryRow(r.Context(), `INSERT INTO campaigns (request_text, channels, rules, send_at, schedule_note, time_zone, created_by, name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`, text, in.Channels, rulesJSON, sendAt, note, in.TimeZone, marketer, defaultName(text)).Scan(&id)
+	err = h.Pool.QueryRow(r.Context(), `INSERT INTO campaigns (request_text, channels, rules, send_at, schedule_note, time_zone, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`, text, in.Channels, rulesJSON, sendAt, note, in.TimeZone, marketer).Scan(&id)
 	if err != nil {
 		serverError(w, "insert campaign", err)
 		return
@@ -293,8 +288,8 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var version int
-	var zone, oldBrief string
-	if err := h.Pool.QueryRow(ctx, `SELECT version, time_zone, request_text FROM campaigns WHERE id = $1`, id).Scan(&version, &zone, &oldBrief); err != nil {
+	var zone string
+	if err := h.Pool.QueryRow(ctx, `SELECT version, time_zone FROM campaigns WHERE id = $1`, id).Scan(&version, &zone); err != nil {
 		serverError(w, "load campaign", err)
 		return
 	}
@@ -321,12 +316,9 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 		note = &got.ScheduleNote
 	}
 	rulesJSON, _ := json.Marshal(got.Rules)
-	brief := strings.TrimSpace(in.Request)
-	// A name still at the old brief's default follows the new brief (D42).
 	tag, err := h.Pool.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
-		name = CASE WHEN name IN ('', $7) THEN $8 ELSE name END,
 		version = version + 1, updated_at = now() WHERE id = $1 AND version = $2 AND status = 'draft'`,
-		id, *in.Version, brief, rulesJSON, got.SuggestedSendAt, note, defaultName(oldBrief), defaultName(brief))
+		id, *in.Version, strings.TrimSpace(in.Request), rulesJSON, got.SuggestedSendAt, note)
 	if err != nil {
 		serverError(w, "update request", err)
 		return
@@ -336,27 +328,6 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.respond(w, ctx, http.StatusOK, id)
-}
-
-// updateName renames a draft (D42).
-func (h *Handler) updateName(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var in struct {
-		Version *int   `json:"version"`
-		Name    string `json:"name"`
-	}
-	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
-		return
-	}
-	name, err := checkName(in.Name)
-	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	h.update(w, r.Context(), id, *in.Version, `name = $4`, name)
 }
 
 // isResend answers 409 with msg if the campaign is a resend, whose audience
