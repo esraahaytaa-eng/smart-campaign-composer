@@ -98,6 +98,8 @@ make lint         # in Docker: gofmt check + go vet
 
 Integration tests fail, never skip, when no database is available.
 
+The first run compiles all dependencies and takes a few minutes; compiled packages are kept in the `gobuildcache` volume (and in BuildKit cache mounts for image builds), so later runs take seconds. `docker compose down -v` also clears these caches.
+
 ## Architecture (current)
 
 One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments.
