@@ -53,6 +53,7 @@ docker compose down -v && docker compose up
 ```sh
 make test         # in Docker: throwaway Postgres + Go tests
 make test-local   # needs local Go and DATABASE_URL pointing to a Postgres
+make lint         # in Docker: gofmt check + go vet
 ```
 
 Integration tests fail, never skip, when no database is available.
