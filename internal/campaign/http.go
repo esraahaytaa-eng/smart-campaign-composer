@@ -17,6 +17,7 @@ import (
 
 	"smart-campaign-composer/internal/audience"
 	"smart-campaign-composer/internal/auth"
+	"smart-campaign-composer/internal/content"
 	"smart-campaign-composer/internal/llm"
 )
 
@@ -37,6 +38,8 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/campaigns/{id}", h.get)
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
+	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
+	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
 }
 
 // campaignJSON is a campaign as the API returns it. Counts are the current
@@ -55,6 +58,7 @@ type campaignJSON struct {
 	CreatedAt    time.Time        `json:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at"`
 	Counts       *audience.Counts `json:"counts,omitempty"`
+	Content      *content.Content `json:"content"` // in single-campaign responses
 }
 
 const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by, created_at, updated_at`
@@ -253,6 +257,10 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 	}
 	if err != nil {
 		serverError(w, "load campaign", err)
+		return
+	}
+	if c.Content, err = h.loadContent(ctx, id); err != nil {
+		serverError(w, "load content", err)
 		return
 	}
 	if c.Status == "draft" && len(c.Rules) > 0 {
