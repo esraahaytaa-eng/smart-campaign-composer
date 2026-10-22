@@ -73,9 +73,16 @@ export function formatDate(iso: string): string {
   )
 }
 
-// An instant in the browser's zone: "23 Oct 2026, 10:00" / "23 Eki 2026 10:00".
+// An instant in the browser's zone, with the zone: "23 Oct 2026, 10:00 GMT+3".
 export const formatDateTime = (iso: string) =>
-  new Intl.DateTimeFormat(formats[current.value], { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso))
+  new Intl.DateTimeFormat(formats[current.value], {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(new Date(iso))
 
 export const formatOr = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'disjunction' }).format(items)
 export const formatAnd = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'conjunction' }).format(items)

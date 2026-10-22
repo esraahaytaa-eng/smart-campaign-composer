@@ -108,6 +108,11 @@ describe('formatting', () => {
     expect(i18n.formatDate('2026-10-01')).toBe('1 Eki 2026')
   })
 
+  // T17 review 6: a scheduled time is never shown without its zone.
+  it('shows date-times with their time zone', () => {
+    expect(i18n.formatDateTime('2026-10-23T07:00:00Z')).toMatch(/UTC|GMT/)
+  })
+
   it('shows a gap for a missing date, not 1900', () => {
     expect(i18n.formatDate('')).toBe('—')
   })

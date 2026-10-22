@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { campaigns, type Estimate } from '../campaign/client'
 import { ruleLabel } from '../campaign/rules'
@@ -13,6 +13,7 @@ import MessagePreview from '../components/MessagePreview.vue'
 import StepBar from '../components/StepBar.vue'
 import { formatDateTime, formatNumber, t } from '../i18n'
 import { errorText } from '../i18n/errors'
+import { ApiError } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +34,12 @@ const reviewed = ref(false)
 const tried = ref(false)
 const confirmOpen = ref(false)
 const busy = ref(false)
+// The clock the schedule checks use: it ticks, and is refreshed on every
+// click, so a time that goes stale while the page is open is caught (review 5).
+const now = ref(new Date())
+const tick = setInterval(() => (now.value = new Date()), 15_000)
+onBeforeUnmount(() => clearInterval(tick))
+const conflict = computed(() => approveError.value instanceof ApiError && approveError.value.status === 409)
 
 async function load() {
   try {
@@ -66,7 +73,7 @@ const blockers = computed<Blocker[]>(() =>
         when: when.value,
         at: at.value,
         reviewed: reviewed.value,
-        scheduleProblem: at.value ? scheduleProblem(at.value, new Date()) : null,
+        scheduleProblem: at.value ? scheduleProblem(at.value, now.value) : null,
       })
     : [],
 )
@@ -76,6 +83,7 @@ const isResend = computed(() => campaign.value?.parent_campaign_id != null)
 const blockerList = ref<HTMLElement>()
 
 async function openConfirm() {
+  now.value = new Date()
   tried.value = true
   if (blockers.value.length) {
     await nextTick()
@@ -87,6 +95,7 @@ async function openConfirm() {
 
 async function approve() {
   confirmOpen.value = false
+  now.value = new Date()
   if (!campaign.value || blockers.value.length || busy.value) return
   busy.value = true
   approveError.value = null
@@ -99,6 +108,10 @@ async function approve() {
   } finally {
     busy.value = false
   }
+}
+
+function reload() {
+  window.location.reload()
 }
 </script>
 
@@ -122,7 +135,12 @@ async function approve() {
 
       <template v-else>
         <StepBar :current="3" :campaign-id="id" />
-        <div v-if="approveError" role="alert" class="alert alert-error">{{ errorText(approveError) }}</div>
+        <!-- 409: approved or edited elsewhere since this page loaded (review 4). -->
+        <div v-if="conflict" role="alert" class="alert alert-warning">
+          <span>{{ t('error.changed') }}</span>
+          <button type="button" class="btn btn-sm" @click="reload">{{ t('campaign.reload') }}</button>
+        </div>
+        <div v-else-if="approveError" role="alert" class="alert alert-error">{{ errorText(approveError) }}</div>
 
         <div class="columns">
           <div class="main">
@@ -192,7 +210,9 @@ async function approve() {
                 <input v-model="reviewed" type="checkbox" />
                 {{ t('review.reviewed') }}
               </label>
-              <ul v-if="tried && blockers.length" ref="blockerList" class="blockers" role="alert" tabindex="-1">
+              <!-- Focused (not role=alert) so it is read once, with its label. -->
+              <span v-if="tried && blockers.length" id="missing-label" class="sr-only">{{ t('review.missing') }}</span>
+              <ul v-if="tried && blockers.length" ref="blockerList" class="blockers" tabindex="-1" aria-labelledby="missing-label">
                 <li v-for="b in blockers" :key="b">{{ t(`blocker.${b}`) }}</li>
               </ul>
               <button type="button" class="btn btn-primary btn-lg" :class="{ busy: busy || blockers.length > 0 }" :aria-disabled="busy || blockers.length > 0" @click="openConfirm">
