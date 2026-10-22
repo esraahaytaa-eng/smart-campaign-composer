@@ -1,4 +1,4 @@
-.PHONY: test test-local lint
+.PHONY: test test-local lint e2e
 
 # Runs all tests in Docker (Go, then Vitest); only Docker and make are needed (D27).
 # The test database is removed afterwards; the app's pgdata volume is never touched.
@@ -17,3 +17,9 @@ test-local:
 lint:
 	docker compose --profile test run --rm --no-deps go-test \
 		sh -c 'files=$$(gofmt -l .); if [ -n "$$files" ]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi; go vet ./...'
+
+# Opt-in browser tests (Playwright) against the app from `docker compose up`.
+# They create campaigns and clean up after themselves (drafts deleted,
+# approved ones cancelled, so nothing is sent).
+e2e:
+	docker compose --profile e2e run --rm e2e
