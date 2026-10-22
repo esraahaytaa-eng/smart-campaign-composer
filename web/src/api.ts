@@ -12,6 +12,7 @@ export class ApiError extends Error {
 }
 
 let onUnauthorized: () => void = () => {}
+const sessionPaths = ['/api/login', '/api/me', '/api/logout']
 
 // The router registers how to react when the session has expired.
 export function setUnauthorizedHandler(fn: () => void) {
@@ -35,9 +36,9 @@ export async function api<T = unknown>(path: string, { method = 'GET', body }: O
   if (res.status === 204) return undefined as T
   const data: unknown = await res.json().catch(() => undefined)
   if (res.ok) return data as T
-  // A 401 from login is a wrong password, and from /api/me "signed out",
-  // which the login guard handles; elsewhere the session has expired.
-  if (res.status === 401 && path !== '/api/login' && path !== '/api/me') onUnauthorized()
+  // A 401 from login is a wrong password, from /api/me "signed out" (the login
+  // guard handles it), and from logout harmless; elsewhere the session expired.
+  if (res.status === 401 && !sessionPaths.includes(path)) onUnauthorized()
   const message =
     typeof data === 'object' && data !== null && typeof (data as { error?: unknown }).error === 'string'
       ? (data as { error: string }).error

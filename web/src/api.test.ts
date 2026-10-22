@@ -49,6 +49,16 @@ describe('api', () => {
     expect(unauthorized).not.toHaveBeenCalled()
   })
 
+  // Logging out with an expired session is still a logout, not a second redirect.
+  it('does not report an expired session when logging out', async () => {
+    vi.stubGlobal('fetch', reply(401, { error: 'login required' }))
+    const unauthorized = vi.fn()
+    setUnauthorizedHandler(unauthorized)
+
+    await expect(api('/api/logout', { method: 'POST' })).rejects.toMatchObject({ status: 401 })
+    expect(unauthorized).not.toHaveBeenCalled()
+  })
+
   // The login guard asks /api/me itself; a 401 there just means signed out.
   it('leaves the session check to the guard', async () => {
     vi.stubGlobal('fetch', reply(401, { error: 'login required' }))
