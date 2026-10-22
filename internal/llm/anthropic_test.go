@@ -3,6 +3,8 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -187,5 +189,106 @@ func TestAnthropic_NoSDKRetries(t *testing.T) {
 	}
 	if got.calls != 1 {
 		t.Fatalf("want exactly 1 HTTP call for a failing API, got %d", got.calls)
+	}
+}
+
+// fakeStream answers with Anthropic streaming events carrying the given text
+// pieces and stop reason.
+func fakeStream(t *testing.T, pieces []string, stopReason string) (*captured, string) {
+	t.Helper()
+	got := &captured{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &got.body)
+		got.header = r.Header.Clone()
+		got.url = r.URL.String()
+		got.calls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		send := func(event, data string) { fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data) }
+		send("message_start", `{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`)
+		send("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
+		for _, p := range pieces {
+			text, _ := json.Marshal(p)
+			send("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":`+string(text)+`}}`)
+		}
+		send("content_block_stop", `{"type":"content_block_stop","index":0}`)
+		send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"`+stopReason+`","stop_sequence":null},"usage":{"output_tokens":5}}`)
+		send("message_stop", `{"type":"message_stop"}`)
+	}))
+	t.Cleanup(srv.Close)
+	return got, srv.URL
+}
+
+func streamVia(t *testing.T, url string, in ContentInput) (json.RawMessage, []string, error) {
+	t.Helper()
+	var chunks []string
+	raw, err := NewAnthropic("test-key", "claude-opus-5-5", option.WithBaseURL(url)).
+		StreamContent(context.Background(), in, func(s string) { chunks = append(chunks, s) })
+	return raw, chunks, err
+}
+
+func TestAnthropicContent_StreamsTextAndRequestShape(t *testing.T) {
+	pieces := []string{`{"sms":{"bo`, `dy":"Merhaba {{first_`, `name}} İndirim!"}}`}
+	got, url := fakeStream(t, pieces, "end_turn")
+
+	raw, chunks, err := streamVia(t, url, ContentInput{Text: "İndirim gönder", Channels: []string{"sms"}})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(chunks, "") != strings.Join(pieces, "") || string(raw) != strings.Join(pieces, "") {
+		t.Fatalf("chunks %q, raw %s", chunks, raw)
+	}
+	b := got.body
+	oc, _ := b["output_config"].(map[string]any)
+	format, _ := oc["format"].(map[string]any)
+	schema, _ := format["schema"].(map[string]any)
+	props, _ := schema["properties"].(map[string]any)
+	if b["stream"] != true || oc["effort"] != "medium" || len(props) != 1 || props["sms"] == nil {
+		t.Errorf("request: stream=%v effort=%v schema properties=%v", b["stream"], oc["effort"], props)
+	}
+	if thinking, _ := b["thinking"].(map[string]any); thinking["type"] != "adaptive" {
+		t.Errorf("thinking: %v", b["thinking"])
+	}
+	if got.header.Get("anthropic-beta") != "" || got.url != "/v1/messages" {
+		t.Errorf("beta use: header %q, url %s", got.header.Get("anthropic-beta"), got.url)
+	}
+}
+
+func TestAnthropicContent_RefusalAndTruncationAreErrors(t *testing.T) {
+	_, url := fakeStream(t, nil, "refusal")
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); !errors.Is(err, ErrRefused) {
+		t.Errorf("refusal: want ErrRefused, got %v", err)
+	}
+	_, url = fakeStream(t, []string{`{"sms":{"body":"cut`}, "max_tokens")
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); err == nil {
+		t.Error("max_tokens: want error")
+	}
+	got, url := fakeAPI(t, http.StatusInternalServerError, "", "")
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); err == nil || got.calls != 1 {
+		t.Errorf("HTTP 500: want an error after exactly 1 call, got %v after %d", err, got.calls)
+	}
+}
+
+func TestContentPrompt(t *testing.T) {
+	prompt := contentPrompt(ContentInput{Text: "Sepette ürün bırakanlara indirim", Channels: []string{"sms", "email"}, Errors: []string{"sms.body: the fixed text alone is 172 characters"}})
+
+	for _, want := range []string{"<brief>\nSepette ürün bırakanlara indirim\n</brief>", "sms, email", "172 characters"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt is missing %q:\n%s", want, prompt)
+		}
+	}
+	for _, want := range []string{"{{first_name}}", "{{last_name}}", "{{city}}", "160", "80", "2000", "language of the brief"} {
+		if !strings.Contains(contentSystemPrompt, want) {
+			t.Errorf("system prompt is missing %q", want)
+		}
+	}
+	if strings.Contains(prompt, "@") || strings.Contains(prompt, "+90") {
+		t.Errorf("prompt looks like it contains user records:\n%s", prompt)
+	}
+	schema := contentSchema([]string{"email"})
+	props := schema["properties"].(map[string]any)
+	if len(props) != 1 || props["email"] == nil {
+		t.Errorf("schema for email only: %v", props)
 	}
 }

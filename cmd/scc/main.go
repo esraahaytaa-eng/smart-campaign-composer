@@ -78,7 +78,8 @@ func migrate(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 }
 
 func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
-	model := llm.LLM(llm.NewMock())
+	// A short pause between mock chunks makes streaming visible in the UI.
+	model := llm.LLM(&llm.Mock{ChunkDelay: 30 * time.Millisecond})
 	if cfg.LLMMode == "real" {
 		model = llm.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
 	}

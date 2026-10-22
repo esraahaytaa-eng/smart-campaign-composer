@@ -16,6 +16,17 @@ type LLM interface {
 	// InterpretRequest turns a campaign brief into audience rules and an
 	// optional send-time suggestion, as JSON matching interpretSchema.
 	InterpretRequest(ctx context.Context, in InterpretInput) (json.RawMessage, error)
+	// StreamContent writes message templates for the chosen channels as JSON
+	// matching contentSchema, passing each piece of raw JSON text to onText as
+	// it arrives (D34), and returns the complete JSON.
+	StreamContent(ctx context.Context, in ContentInput, onText func(string)) (json.RawMessage, error)
+}
+
+// ContentInput, like InterpretInput, never contains user records (D15).
+type ContentInput struct {
+	Text     string   // the brief; content is written in its language (D32)
+	Channels []string // "sms" and/or "email"
+	Errors   []string // validation errors of the previous answer, on the retry
 }
 
 // InterpretInput never contains user records (D15): only the brief, the

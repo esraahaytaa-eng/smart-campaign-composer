@@ -37,6 +37,10 @@ func (s *scripted) InterpretRequest(ctx context.Context, in llm.InterpretInput) 
 	return json.RawMessage(s.outputs[len(s.calls)-1]), nil
 }
 
+func (s *scripted) StreamContent(context.Context, llm.ContentInput, func(string)) (json.RawMessage, error) {
+	return nil, errors.New("not used by interpretation tests")
+}
+
 func output(rules, sendAt, note string) string {
 	return `{"unsupported":false,"reason":"","rules":` + rules +
 		`,"suggested_send_at":` + sendAt + `,"schedule_note":` + note + `}`

@@ -20,7 +20,9 @@ const MockUnsupportedReason = "Mock AI only understands the example briefs liste
 // A pattern must match the whole first sentence; every further sentence must
 // be a tone or schedule phrase. Anything else is "unsupported": the mock never
 // guesses, drops or broadens a condition.
-type Mock struct{}
+type Mock struct {
+	ChunkDelay time.Duration // pause between streamed content chunks, so the UI shows streaming
+}
 
 func NewMock() *Mock { return &Mock{} }
 
