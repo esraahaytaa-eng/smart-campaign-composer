@@ -339,6 +339,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Editable name (D42):* more scope than the case needs. *AI-suggested name in the interpretation answer:* better titles at almost no cost, but it grows the AI answer format; revisit if time permits.
 - **Trade-offs:** Titles read like the start of a sentence, and two campaigns with similar briefs look alike in a list.
 
+### D44 — The UI in English and Turkish
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The interface is available in English (default) and Turkish, with a switch on the sign-in page and in the sidebar; the choice is kept in the browser (localStorage) and sets `<html lang>`. A small typed module in `web/src/i18n` holds two dictionaries with the same keys, fills `{placeholders}` and formats numbers, amounts, dates and lists with `Intl` (en-GB, tr-TR). Only UI text is translated: briefs, customer and seed data (names, cities, categories) and AI output (rules as the AI wrote them, message content, an unsupported brief's reason) are shown exactly as stored. Errors are localized by situation in the frontend (unreachable, 401, 404, 409, 502/504, 5xx); validation the UI can't foresee keeps the server's English text as details under a localized heading. A test fails when a component shows text that doesn't come from the dictionaries.
+- **Why:** The marketers work in Turkish and English; keeping data and AI output untouched means what is approved is exactly what is sent.
+- **Rejected:** *vue-i18n:* a dependency for two languages and a handful of screens. *Error codes from the backend:* cleaner, but every handler and many tests change; revisit if more languages are added. *Storing the language on the server:* needs an endpoint and a column; per-browser is enough here.
+- **Trade-offs:** Server validation details stay in English; the language is per browser, not per account.
+
 ## Open Questions
 
 None currently.
