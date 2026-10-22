@@ -1,7 +1,10 @@
 package campaign_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -125,5 +128,151 @@ func TestCatalog(t *testing.T) {
 	a.cookie = nil
 	if rec := a.do(http.MethodGet, "/api/catalog", ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("without login: want 401, got %d", rec.Code)
+	}
+}
+
+const ankaraBrief = "Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00."
+
+// hookLLM is the mock with a hook that runs while the AI is reading a brief.
+type hookLLM struct {
+	*llm.Mock
+	during func()
+	calls  int
+}
+
+func (h *hookLLM) InterpretRequest(ctx context.Context, in llm.InterpretInput) (json.RawMessage, error) {
+	h.calls++
+	if h.during != nil {
+		h.during()
+	}
+	return h.Mock.InterpretRequest(ctx, in)
+}
+
+func (a *app) putRequest(id int64, body string) (int, map[string]any) {
+	a.t.Helper()
+	rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(id)+"/request", body)
+	return rec.Code, decode[map[string]any](a.t, rec)
+}
+
+func requestBody(text string, version int) string {
+	return body(map[string]any{"request": text, "version": version})
+}
+
+func TestRequest_ReinterpretsAndKeepsContent(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	d := a.readyDraft() // the case example: İstanbul cart abandoners, no time, content, version 2
+	before := decode[editedDraft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+
+	code, got := a.putRequest(d.ID, requestBody(ankaraBrief, 2))
+
+	if code != http.StatusOK || got["request_text"] != ankaraBrief || got["version"] != float64(3) || got["status"] != "draft" {
+		t.Fatalf("want the new brief at version 3, got %d %v", code, got)
+	}
+	rules, _ := json.Marshal(got["rules"])
+	if string(rules) != `[{"field":"city","op":"in","value":["Ankara"]}]` {
+		t.Fatalf("want the new rules replacing the old ones, got %s", rules)
+	}
+	if got["send_at"] == nil || got["schedule_note"] == nil {
+		t.Fatalf("want the brief's send time proposed, got %v %v", got["send_at"], got["schedule_note"])
+	}
+	counts := got["counts"].(map[string]any)
+	if counts["total"] != float64(1) || counts["sms"] != float64(1) || counts["email"] != float64(0) {
+		t.Fatalf("want counts for the new rules (user 2 in Ankara, SMS only), got %v", counts)
+	}
+	if !reflect.DeepEqual(got["content"], before.Content) {
+		t.Fatalf("the content must be kept as it was:\n got %v\nwant %v", got["content"], before.Content)
+	}
+}
+
+func TestRequest_BriefWithoutTimeClearsTheProposal(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	_, d := a.create(map[string]any{"request": ankaraBrief, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
+	if d.SendAt == nil {
+		t.Fatal("fixture: want a proposed time")
+	}
+
+	code, got := a.putRequest(d.ID, requestBody(caseExample, 1))
+
+	if code != http.StatusOK || got["send_at"] != nil || got["schedule_note"] != nil {
+		t.Fatalf("want the old proposal cleared, got %d %v %v", code, got["send_at"], got["schedule_note"])
+	}
+}
+
+// A failed or unsupported interpretation leaves the draft as it was (D15).
+func TestRequest_FailuresLeaveTheDraftUnchanged(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		model llm.LLM
+		brief string
+		want  int
+	}{
+		{"unsupported", llm.NewMock(), "Send a birthday note to users older than 40.", http.StatusUnprocessableEntity},
+		{"invalid twice", garbageLLM{}, ankaraBrief, http.StatusBadGateway},
+		{"empty brief", llm.NewMock(), "   ", http.StatusUnprocessableEntity},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newApp(t, tc.model)
+			_, d := a.create(map[string]any{"request": "manual", "channels": []string{"sms"}, "time_zone": "Europe/Istanbul",
+				"rules": []map[string]any{{"field": "city", "op": "in", "value": []string{"Ankara"}}}})
+
+			if code, _ := a.putRequest(d.ID, requestBody(tc.brief, 1)); code != tc.want {
+				t.Fatalf("want %d, got %d", tc.want, code)
+			}
+			got := decode[draft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+			if got.Version != 1 || got.RequestText != "manual" || len(got.Rules) != 1 {
+				t.Fatalf("the draft changed: %+v", got)
+			}
+		})
+	}
+}
+
+// Stale, approved and resend drafts are refused before the AI is called.
+func TestRequest_RejectsWithoutCallingTheAI(t *testing.T) {
+	model := &hookLLM{Mock: llm.NewMock()}
+	a := newApp(t, model)
+	d := a.readyDraft()
+	approved := a.readyDraft()
+	a.approve(approved.ID, `{"version":2,"send":"now"}`)
+	parent := a.parentWithSkips()
+	resend := decode[draft](t, a.do(http.MethodPost, "/api/campaigns/"+itoa(parent)+"/resend", `{"channel":"sms"}`))
+	model.calls = 0
+
+	for _, tc := range []struct {
+		name string
+		id   int64
+		body string
+		want int
+	}{
+		{"stale version", d.ID, requestBody(ankaraBrief, 1), http.StatusConflict},
+		{"no version", d.ID, `{"request":"x"}`, http.StatusUnprocessableEntity},
+		{"approved", approved.ID, requestBody(ankaraBrief, 3), http.StatusConflict},
+		{"resend draft", resend.ID, requestBody(ankaraBrief, 1), http.StatusConflict},
+		{"unknown", 999, requestBody(ankaraBrief, 1), http.StatusNotFound},
+	} {
+		if code, _ := a.putRequest(tc.id, tc.body); code != tc.want {
+			t.Errorf("%s: want %d, got %d", tc.name, tc.want, code)
+		}
+	}
+	if model.calls != 0 {
+		t.Fatalf("the AI was called %d times for refused requests", model.calls)
+	}
+}
+
+// Another edit lands while the AI is reading the brief: the stale answer is
+// not saved over it.
+func TestRequest_EditDuringInterpretation_409(t *testing.T) {
+	model := &hookLLM{Mock: llm.NewMock()}
+	a := newApp(t, model)
+	d := a.readyDraft()
+	model.during = func() {
+		a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
+	}
+
+	if code, _ := a.putRequest(d.ID, requestBody(ankaraBrief, 2)); code != http.StatusConflict {
+		t.Fatalf("want 409, got %d", code)
+	}
+	got := decode[draft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	if got.Version != 3 || got.RequestText != caseExample {
+		t.Fatalf("want the concurrent edit kept and the brief unchanged, got %+v", got)
 	}
 }

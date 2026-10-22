@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -45,6 +46,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/campaigns/{id}", h.deleteDraft)
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
 	mux.HandleFunc("PUT /api/campaigns/{id}/channels", h.updateChannels)
+	mux.HandleFunc("PUT /api/campaigns/{id}/request", h.updateRequest)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
@@ -262,6 +264,67 @@ func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		serverError(w, "commit", err)
+		return
+	}
+	h.respond(w, ctx, http.StatusOK, id)
+}
+
+// updateRequest replaces a draft's brief and re-interprets it (D40): the rules
+// and proposed send time are replaced, the content is kept. The version is
+// checked before the AI call, so a stale draft costs no AI call, and again
+// when saving, so an edit made meanwhile is not overwritten.
+func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version *int   `json:"version"`
+		Request string `json:"request"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) ||
+		h.isResend(w, ctx, id, "a resend has no brief to interpret: its recipients come from the original campaign") {
+		return
+	}
+	var version int
+	var zone string
+	if err := h.Pool.QueryRow(ctx, `SELECT version, time_zone FROM campaigns WHERE id = $1`, id).Scan(&version, &zone); err != nil {
+		serverError(w, "load campaign", err)
+		return
+	}
+	if version != *in.Version {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	cat, err := audience.LoadCatalog(ctx, h.Pool)
+	if err != nil {
+		serverError(w, "load catalog", err)
+		return
+	}
+	got, err := Interpret(ctx, h.LLM, llm.InterpretInput{Text: in.Request, Now: h.Now(), TimeZone: zone, Catalog: cat}, h.Timeout)
+	if err != nil {
+		writeAIError(w, err)
+		return
+	}
+	if got.Unsupported {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": got.Reason, "unsupported": true})
+		return
+	}
+	var note *string
+	if got.ScheduleNote != "" {
+		note = &got.ScheduleNote
+	}
+	rulesJSON, _ := json.Marshal(got.Rules)
+	tag, err := h.Pool.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
+		version = version + 1, updated_at = now() WHERE id = $1 AND version = $2 AND status = 'draft'`,
+		id, *in.Version, strings.TrimSpace(in.Request), rulesJSON, got.SuggestedSendAt, note)
+	if err != nil {
+		serverError(w, "update request", err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, errStale.Error())
 		return
 	}
 	h.respond(w, ctx, http.StatusOK, id)
