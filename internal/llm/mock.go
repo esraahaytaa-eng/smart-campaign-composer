@@ -173,7 +173,7 @@ var (
 	sentenceEnd = regexp.MustCompile(`[.!?]+\s+`)
 	toneRe      = regexp.MustCompile(`(?i)^(?:keep (?:the messages?|it) (?:short|friendly|formal|casual|fun)(?:(?:,| and) (?:short|friendly|formal|casual|fun))*|mesaj(?:lar)?ı? (?:kısa|samimi|resmi|eğlenceli)(?:(?:,| ve) (?:kısa|samimi|resmi|eğlenceli))* olsun)$`)
 	atTimeRe    = regexp.MustCompile(`(?i)^(?:(?:send it )?(?P<day>tomorrow|today) at (?P<h>\d{1,2})(?::(?P<m>\d{2}))?|(?P<day>yarın|bugün) saat (?P<h>\d{1,2})(?::(?P<m>\d{2}))?(?:['’](?:da|de|ta|te))? gönder)$`)
-	inHoursRe   = regexp.MustCompile(`(?i)^(?:(?:send it )?in (?P<hours>\d{1,2}) hours?|(?P<hours>\d{1,2}) saat sonra gönder)$`)
+	inHoursRe   = regexp.MustCompile(`(?i)^(?:(?:send it )?in (?P<hours>[1-9]\d?) hours?|(?P<hours>[1-9]\d?) saat sonra gönder)$`)
 )
 
 func (m *Mock) InterpretRequest(ctx context.Context, in InterpretInput) (json.RawMessage, error) {

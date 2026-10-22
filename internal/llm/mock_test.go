@@ -154,6 +154,14 @@ func TestMock_Schedule(t *testing.T) {
 			t.Errorf("%q: want %s / %q, got %+v", tc.brief, tc.sendAt, tc.note, out)
 		}
 	}
+	for _, zero := range []string{
+		"Send a weekend sale announcement to all users in Ankara. Send it in 0 hours.",
+		"Ankara'daki tüm kullanıcılara hafta sonu indirimi duyurusu gönder. 0 saat sonra gönder.",
+	} {
+		if out := runMock(t, zero); !out.Unsupported {
+			t.Errorf("%q: zero hours is not a send time, want unsupported, got %+v", zero, out)
+		}
+	}
 	if out := runMock(t, "Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 25:00."); !out.Unsupported {
 		t.Errorf("hour 25: want unsupported, got %+v", out)
 	}
