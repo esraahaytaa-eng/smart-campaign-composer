@@ -76,7 +76,9 @@ func Parse(tpl string) ([]Var, error) {
 
 // Render personalizes a valid template: variables are replaced in a fixed
 // order, runs of spaces left by empty values collapse to one, and leading and
-// trailing spaces are trimmed. Line breaks are kept (D13).
+// trailing spaces are trimmed. Line breaks are kept (D13). Values are used as
+// stored, so a value containing a later token (a first name "{{city}}") is
+// expanded too; renderSQL does exactly the same, keeping the estimate exact.
 func Render(tpl string, u UserVars) string {
 	s := tpl
 	for _, v := range renderOrder {
