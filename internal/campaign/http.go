@@ -40,33 +40,49 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
+	mux.HandleFunc("POST /api/campaigns/{id}/approve", h.approve)
+	mux.HandleFunc("POST /api/campaigns/{id}/cancel", h.cancel)
+	mux.HandleFunc("GET /api/campaigns/{id}/estimate", h.estimate)
+	mux.HandleFunc("POST /api/campaigns/{id}/resend", h.resend)
 }
 
 // campaignJSON is a campaign as the API returns it. Counts are the current
 // audience per channel, shown for drafts only.
 type campaignJSON struct {
-	ID           int64            `json:"id"`
-	RequestText  string           `json:"request_text"`
-	Channels     []string         `json:"channels"`
-	Rules        []audience.Rule  `json:"rules"`
-	Status       string           `json:"status"`
-	Version      int              `json:"version"`
-	SendAt       *time.Time       `json:"send_at"`
-	ScheduleNote *string          `json:"schedule_note"`
-	TimeZone     string           `json:"time_zone"`
-	CreatedBy    int64            `json:"created_by"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
-	Counts       *audience.Counts `json:"counts,omitempty"`
-	Content      *content.Content `json:"content"` // in single-campaign responses
+	ID           int64           `json:"id"`
+	RequestText  string          `json:"request_text"`
+	Channels     []string        `json:"channels"`
+	Rules        []audience.Rule `json:"rules"`
+	Status       string          `json:"status"`
+	Version      int             `json:"version"`
+	SendAt       *time.Time      `json:"send_at"`
+	ScheduleNote *string         `json:"schedule_note"`
+	TimeZone     string          `json:"time_zone"`
+	CreatedBy    int64           `json:"created_by"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	// Set on a resend: its audience is the parent's skipped recipients (D31).
+	ParentCampaignID *int64           `json:"parent_campaign_id"`
+	ApprovalEstimate json.RawMessage  `json:"approval_estimate"`
+	ApprovedBy       *int64           `json:"approved_by"`
+	ApprovedAt       *time.Time       `json:"approved_at"`
+	CancelledBy      *int64           `json:"cancelled_by"`
+	CancelledAt      *time.Time       `json:"cancelled_at"`
+	AudienceBuiltAt  *time.Time       `json:"audience_built_at"`
+	CompletedAt      *time.Time       `json:"completed_at"`
+	Counts           *audience.Counts `json:"counts,omitempty"`
+	Content          *content.Content `json:"content"` // in single-campaign responses
 }
 
-const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by, created_at, updated_at`
+const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
+	created_at, updated_at, parent_campaign_id, approval_estimate, approved_by, approved_at, cancelled_by, cancelled_at,
+	audience_built_at, completed_at`
 
 func scanCampaign(row pgx.Row) (campaignJSON, error) {
 	var c campaignJSON
 	err := row.Scan(&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
-		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt)
+		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &c.ParentCampaignID, &c.ApprovalEstimate,
+		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt)
 	return c, err
 }
 
@@ -163,6 +179,15 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 		Rules   []audience.Rule `json:"rules"`
 	}
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
+		return
+	}
+	var isResend bool
+	if err := h.Pool.QueryRow(r.Context(), `SELECT parent_campaign_id IS NOT NULL FROM campaigns WHERE id = $1`, id).Scan(&isResend); err != nil {
+		serverError(w, "load campaign", err)
+		return
+	}
+	if isResend {
+		writeError(w, http.StatusConflict, "a resend's audience is fixed: the skipped recipients of the original campaign")
 		return
 	}
 	cat, err := audience.LoadCatalog(r.Context(), h.Pool)
@@ -263,13 +288,8 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 		serverError(w, "load content", err)
 		return
 	}
-	if c.Status == "draft" && len(c.Rules) > 0 {
-		loc, err := loadZone(c.TimeZone)
-		if err != nil {
-			serverError(w, "campaign time zone", err)
-			return
-		}
-		counts, err := audience.Count(ctx, h.Pool, c.Rules, c.Channels, h.Now(), loc)
+	if c.Status == "draft" {
+		counts, err := h.countAudience(ctx, c, h.Now())
 		if err != nil {
 			serverError(w, "count audience", err)
 			return
