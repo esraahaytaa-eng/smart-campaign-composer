@@ -30,6 +30,8 @@ type Handler struct {
 	LLM     llm.LLM
 	Timeout time.Duration // per AI call
 	Now     func() time.Time
+	// EventsInterval is how often the status stream polls; 0 means 1 s (T14).
+	EventsInterval time.Duration
 }
 
 func (h *Handler) Routes(mux *http.ServeMux) {
@@ -44,6 +46,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/campaigns/{id}/cancel", h.cancel)
 	mux.HandleFunc("GET /api/campaigns/{id}/estimate", h.estimate)
 	mux.HandleFunc("POST /api/campaigns/{id}/resend", h.resend)
+	mux.HandleFunc("GET /api/campaigns/{id}/events", h.events)
 }
 
 // campaignJSON is a campaign as the API returns it. Counts are the current

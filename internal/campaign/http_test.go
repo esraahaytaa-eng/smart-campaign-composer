@@ -79,7 +79,8 @@ func newApp(t *testing.T, model llm.LLM) *app {
 
 	mux := http.NewServeMux()
 	api := auth.Routes(mux, pool, "mock")
-	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: 5 * time.Second, Now: func() time.Time { return fixedNow }}
+	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: 5 * time.Second, Now: func() time.Time { return fixedNow },
+		EventsInterval: 20 * time.Millisecond}
 	h.Routes(api)
 
 	a := &app{t: t, pool: pool, mux: mux}

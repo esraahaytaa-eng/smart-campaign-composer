@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -48,17 +47,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	send := func(name string, data any) {
-		b, _ := json.Marshal(data)
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, b)
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
-	}
+	send := startSSE(w)
 
 	input := llm.ContentInput{Text: brief, Channels: channels, Resend: isResend}
 	for attempt := 0; attempt < 2; attempt++ {
