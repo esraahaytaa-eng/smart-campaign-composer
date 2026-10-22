@@ -145,6 +145,18 @@ docker run --rm -it -p 5173:5173 -v "$PWD/web":/web -v scc-web-node-modules:/web
 
 Then open `http://localhost:5173`. The Vite server proxies `/api` to the api, so the session cookie stays same-origin. On Linux, add `--add-host=host.docker.internal:host-gateway` to the `docker run` command (Docker Desktop provides that name itself; checked on macOS).
 
+### Languages (D44)
+
+The UI is in English by default and in Turkish on request: the switch is on the sign-in page and at the bottom of the sidebar, and the choice is kept in the browser. Numbers, amounts and dates follow the language (`10,000` / `10.000`, `1 Oct 2026` / `1 Eki 2026`). Only interface text is translated. Briefs, customer and seed data (names, cities, categories) and anything the AI wrote (rules, messages, an unsupported brief's reason) are shown exactly as stored, in whatever language they were written. Errors are explained in the UI language; validation details the UI can't foresee are shown in the server's English under a translated heading.
+
+Adding UI text in any screen:
+
+1. Add a key to `web/src/i18n/en.ts` and the same key to `web/src/i18n/tr.ts` (the type check fails if one is missing). Use `{name}` placeholders for values, and `{ one, other }` for text that depends on `{count}`.
+2. In a component, `import { t } from '../i18n'` and write `{{ t('my.key', { name }) }}`; format with `formatNumber`, `formatAmount`, `formatDate`, `formatOr` and `formatAnd`. Show API errors with `errorText(err)` from `web/src/i18n/errors.ts`, and an unsupported brief's reason with `aiReason(err)`, unchanged.
+3. Pass data through placeholders; never put it in a dictionary.
+
+`make test` fails if a component's template or script contains user-visible text that doesn't come from `t()` (`web/src/i18n/coverage.test.ts`).
+
 ## UI/UX design
 
 The reference design is `design/smart-campaign-composer-reference.html`, a Claude Artifact (a self-contained HTML page; open it in a browser). It has ten boards: the journey overview with the status vocabulary, sign in, dashboard, campaigns, the composer's audience, content and review steps, live delivery, recipient details, and resend.
@@ -162,6 +174,7 @@ Changes from the design so far:
 
 - **Sign in:** no demo email and password on the page and no "fill" button. The design's own notes say not to hard-code them, and the backend never exposes a password; the page points to this README instead. The badge mentions only the mock providers, because the AI mode is known only after sign-in.
 - **User menu:** the email under the name instead of a role, since all marketers share one role (D10).
+- **Language switch** (D44): the design has none; it sits above the sign-in form and at the bottom of the sidebar.
 - **Saving drafts:** every change saves itself through the API with the draft's version, so a "Saving… / All changes saved" indicator replaces the *Save draft* button and the unsaved-changes dialog. Only the brief text waits for *Re-interpret*.
 - **Rule preview:** the design previews the count while a rule is edited; counting unsaved rules would need another endpoint, so the count updates when the rule is applied and shows the change ("−82 since your last edit").
 - **Dropped notes:** "‘20% discount’ was used for the content, not the audience" (the AI gives no such explanation) and "N without consent" (the counts already exclude anyone without consent).
