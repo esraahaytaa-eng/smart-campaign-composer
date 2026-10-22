@@ -233,18 +233,22 @@ func TestEstimate(t *testing.T) {
 }
 
 // parentWithSkips makes a completed SMS campaign: users 1 and 2 were skipped
-// for the character limit, user 3 was sent. An earlier, cancelled resend
-// already reached user 2.
+// for the character limit, user 3 was sent, user 4 failed and user 5 was
+// skipped for missing consent (and has opted in since). An earlier, cancelled
+// resend already reached user 2. Only user 1 qualifies for a resend.
 func (a *app) parentWithSkips() int64 {
 	a.t.Helper()
-	a.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
-		VALUES (3, 'C', 'c@example.com', '+905000000003', 'Ankara', 'tr', true, false, now())`)
+	a.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at) VALUES
+		(3, 'C', 'c@example.com', '+905000000003', 'Ankara', 'tr', true, false, now()),
+		(4, 'D', 'd@example.com', '+905000000004', 'Ankara', 'tr', true, false, now()),
+		(5, 'E', 'e@example.com', '+905000000005', 'Ankara', 'tr', true, false, now())`)
 	var parent, oldResend int64
 	ctx := context.Background()
 	a.pool.QueryRow(ctx, `INSERT INTO campaigns (request_text, channels, rules, status, time_zone, created_by)
 		VALUES ('brief', '{sms}', '[{"field":"city","op":"in","value":["Ankara"]}]', 'completed', 'Europe/Istanbul', $1) RETURNING id`, a.marketerID).Scan(&parent)
 	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason) VALUES
-		($1, 1, 'sms', 'skipped', 'character_limit_exceeded'), ($1, 2, 'sms', 'skipped', 'character_limit_exceeded'), ($1, 3, 'sms', 'sent', NULL)`, parent)
+		($1, 1, 'sms', 'skipped', 'character_limit_exceeded'), ($1, 2, 'sms', 'skipped', 'character_limit_exceeded'), ($1, 3, 'sms', 'sent', NULL),
+		($1, 4, 'sms', 'failed', NULL), ($1, 5, 'sms', 'skipped', 'no_consent')`, parent)
 	a.pool.QueryRow(ctx, `INSERT INTO campaigns (request_text, channels, status, time_zone, created_by, parent_campaign_id)
 		VALUES ('brief', '{sms}', 'cancelled', 'Europe/Istanbul', $1, $2) RETURNING id`, a.marketerID, parent).Scan(&oldResend)
 	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status) VALUES ($1, 2, 'sms', 'sent')`, oldResend)
@@ -263,7 +267,7 @@ func TestResend_AudienceIsExactlyTheSkippedNotYetSent(t *testing.T) {
 		t.Fatalf("want a draft follow-up without rules, got %d %s", rec.Code, rec.Body)
 	}
 	if counts["total"] != float64(1) || counts["sms"] != float64(1) {
-		t.Fatalf("want exactly user 1 (user 2 was reached by the earlier resend, user 3 was sent), got %v", counts)
+		t.Fatalf("want exactly user 1 (2 was reached by the earlier resend, 3 sent, 4 failed, 5 skipped for consent), got %v", counts)
 	}
 	id := int64(got["id"].(float64))
 	if rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(id)+"/rules", `{"version":1,"rules":[{"field":"city","op":"in","value":["Ankara"]}]}`); rec.Code != http.StatusConflict {

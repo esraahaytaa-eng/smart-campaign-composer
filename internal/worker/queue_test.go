@@ -164,7 +164,7 @@ func TestBuildAudience_Resend(t *testing.T) {
 	parent := f.approved(cartAbandoners, "{sms}", now)
 	f.exec(`UPDATE campaigns SET status = 'completed' WHERE id = $1`, parent)
 	f.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason) VALUES
-		($1, 1, 'sms', 'skipped', 'character_limit_exceeded'), ($1, 2, 'sms', 'sent', NULL)`, parent)
+		($1, 1, 'sms', 'skipped', 'character_limit_exceeded'), ($1, 2, 'sms', 'sent', NULL), ($1, 3, 'sms', 'failed', NULL)`, parent)
 	var resend int64
 	f.pool.QueryRow(context.Background(), `INSERT INTO campaigns (request_text, channels, status, send_at, time_zone, created_by, parent_campaign_id)
 		VALUES ('brief', '{sms}', 'approved', $1, 'Europe/Istanbul', 1, $2) RETURNING id`, now, parent).Scan(&resend)
