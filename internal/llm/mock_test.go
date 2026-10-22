@@ -109,6 +109,14 @@ func TestMock_ExtraCondition_Unsupported(t *testing.T) {
 		"Send a 30% discount reminder to users in Istanbul who added products to their cart in the last 30 days but did not buy anything. Only women.",
 		"Send a coupon for customers who like hiking to all users in Ankara.",
 		"Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00. Send it today at 9:00.",
+		// Conditions hidden in the free-text offer (Milestone B review).
+		"Send a discount to everyone in Izmir and to users in Istanbul.",
+		"Ankara'daki tüm kullanıcılara 30 gündür sipariş vermeyenler için indirim gönder.",
+		"Ankara'daki tüm kullanıcılara sadece kadınlar için indirim gönder.",
+		"Send a 20% discount valid only for women to users in istanbul.",
+		"Send a coupon except for VIPs to customers whose last order was more than 90 days ago.",
+		"Send a coupon for VIPs to all users in Ankara.",
+		"Ankara'daki tüm kullanıcılara VIP hariç indirim gönder.",
 	} {
 		if out := runMock(t, brief); !out.Unsupported || len(out.Rules) != 0 {
 			t.Errorf("%q: want unsupported, got %+v", brief, out)

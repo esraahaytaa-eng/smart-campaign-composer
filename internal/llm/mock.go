@@ -65,7 +65,9 @@ var MockExamples = []MockExample{
 
 // slots are the variable parts of a pattern.
 var slots = strings.NewReplacer(
-	"{offer}", `(?P<offer>.{1,100}?)`,
+	// The offer is a short phrase ("30% discount reminder"): at most 4 words,
+	// so it cannot carry a hidden audience condition.
+	"{offer}", `(?P<offer>(?:%?\d{1,3}%? )?[\pL'’-]+(?: [\pL'’-]+){0,3})`,
 	"{city}", `(?P<city>\pL+(?: \pL+)?)`,
 	"{n}", `(?P<n>\d{1,3})`,
 	"{amount}", `(?P<amount>\d{1,3}(?:[.,]\d{3})+|\d{1,7})`,
@@ -147,9 +149,25 @@ func cartSince(m map[string]string) (string, error) {
 	return fmt.Sprintf(`[{"field":"cart_added","op":"within","value":{"from":%q}},{"field":"no_order","op":"within","value":{"from":%[1]q}}]`, m["date"]), nil
 }
 
-// The offer slot is free text, so it must not smuggle in audience conditions.
-// (\b only knows ASCII, so the Turkish words are matched without it.)
-var audienceWords = regexp.MustCompile(`(?i)\b(?:who|whose|which|users?|customers?|people|members)\b|(?:^|\s)(?:olan|yapan|eden)(?:\s|$)|kullanıcı|müşteri`)
+// offerWords may not appear in the offer: they name people or start a
+// condition ("only for women", "VIP hariç"). Matched per word, in lower case.
+var offerWords = map[string]bool{
+	"who": true, "whose": true, "which": true, "that": true, "user": true, "users": true, "customer": true,
+	"customers": true, "people": true, "members": true, "everyone": true, "everybody": true, "all": true,
+	"for": true, "to": true, "in": true, "only": true, "except": true, "and": true, "or": true, "with": true,
+	"without": true, "not": true, "but": true, "if": true, "unless": true,
+	"olan": true, "yapan": true, "eden": true, "için": true, "sadece": true, "yalnızca": true, "hariç": true,
+	"ve": true, "veya": true, "ya": true, "ile": true, "değil": true, "tüm": true, "herkes": true, "herkese": true,
+}
+
+func offerHasCondition(offer string) bool {
+	for _, w := range strings.Fields(strings.ToLower(offer)) {
+		if offerWords[w] || strings.HasPrefix(w, "kullanıcı") || strings.HasPrefix(w, "müşteri") {
+			return true
+		}
+	}
+	return false
+}
 
 var (
 	sentenceEnd = regexp.MustCompile(`[.!?]+\s+`)
@@ -210,7 +228,7 @@ func matchCore(sentence string) (string, bool) {
 				slots[name] = match[i]
 			}
 		}
-		if audienceWords.MatchString(slots["offer"]) {
+		if offerHasCondition(slots["offer"]) {
 			return "", false
 		}
 		rules, err := pat.rules(slots)
