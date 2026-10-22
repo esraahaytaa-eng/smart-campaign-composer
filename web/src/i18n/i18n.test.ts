@@ -28,6 +28,25 @@ describe('dictionaries', () => {
   })
 })
 
+// "Taslak" is the draft (a status). The brief needs its own word, or "delete
+// the draft" and "re-interpret the brief" read the same (T16 i18n review).
+describe('Turkish terminology', () => {
+  it('never calls the brief "taslak"', () => {
+    for (const key of Object.keys(en) as (keyof typeof en)[]) {
+      const english = JSON.stringify(en[key])
+      const turkish = JSON.stringify(tr[key]).toLocaleLowerCase('tr')
+      if (!/\bbrief\b/i.test(english)) continue
+      if (/\bdraft\b/i.test(english)) expect(turkish, key).toMatch(/açıklama/) // mentions both: the brief has its own word
+      else expect(turkish, key).not.toMatch(/taslak|taslağ/)
+    }
+  })
+
+  it('still calls the draft "taslak"', () => {
+    expect(tr['status.draft']).toBe('Taslak')
+    expect(tr['confirm.delete']).toMatch(/^Taslak/)
+  })
+})
+
 describe('t', () => {
   it('is English by default', () => {
     expect(i18n.locale.value).toBe('en')
