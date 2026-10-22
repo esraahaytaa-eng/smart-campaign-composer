@@ -167,6 +167,9 @@ Changes from the design so far:
 - **Dropped notes:** "‘20% discount’ was used for the content, not the audience" (the AI gives no such explanation) and "N without consent" (the counts already exclude anyone without consent).
 - **Campaign names:** there is no separate name (D43). Lists show the brief's first ~60 characters, cut at a word with "…", and a campaign's page shows the full brief.
 - **Building rules without the AI** for a new campaign is not offered yet: an unreadable brief is rephrased.
+- **Rule editor:** a modal dialog instead of the design's popover beside the chip. A dialog keeps focus inside it, closes with Escape and returns focus to the chip, and fits narrow screens.
+- **Breadcrumb:** "Campaigns / New campaign" is replaced by a back button and the page title.
+- **Rules help text** reads "Click a rule to edit it" rather than "Suggested by Mock AI", which stops being true once the marketer edits a rule.
 
 Differences to settle when the later screens are built (not decided yet):
 
