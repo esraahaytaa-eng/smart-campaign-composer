@@ -148,7 +148,12 @@ func checkTemplate(tpl string, limit int) error {
 	if _, err := Parse(tpl); err != nil {
 		return err
 	}
-	if n := utf8.RuneCountInString(Render(tpl, UserVars{})); n > limit {
+	fixed := Render(tpl, UserVars{})
+	if strings.TrimSpace(fixed) == "" {
+		// Recipients without these values would get an empty message.
+		return errors.New("needs some fixed text, not only variables")
+	}
+	if n := utf8.RuneCountInString(fixed); n > limit {
 		return fmt.Errorf("the fixed text alone is %d characters; the limit is %d, so no recipient could receive it", n, limit)
 	}
 	return nil

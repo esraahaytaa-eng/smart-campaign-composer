@@ -136,3 +136,23 @@ func TestValidateDraft_ChannelsMatchContent(t *testing.T) {
 		t.Errorf("valid content: got %s", fieldErrs(errs))
 	}
 }
+
+// A template of variables only renders empty for recipients without those
+// values (Milestone C review), so some fixed text is required.
+func TestValidateDraft_RequiresFixedText(t *testing.T) {
+	for name, c := range map[string]Content{
+		"sms of one variable":   {SMS: &Message{Body: "{{last_name}}"}},
+		"sms of variables only": {SMS: &Message{Body: "{{first_name}}  {{city}}"}},
+	} {
+		if errs := ValidateDraft(c, []string{"sms"}); len(errs) != 1 || errs[0].Field != "sms.body" {
+			t.Errorf("%s: want one sms.body error, got %s", name, fieldErrs(errs))
+		}
+	}
+	subjectOnlyVar := Content{Email: &Message{Subject: "{{first_name}}", Body: "Hello"}}
+	if errs := ValidateDraft(subjectOnlyVar, []string{"email"}); len(errs) != 1 || errs[0].Field != "email.subject" {
+		t.Errorf("subject of one variable: want one email.subject error, got %s", fieldErrs(errs))
+	}
+	if errs := ValidateDraft(sms("{{first_name}}!"), []string{"sms"}); len(errs) != 0 {
+		t.Errorf("one character of fixed text is enough: got %s", fieldErrs(errs))
+	}
+}
