@@ -14,6 +14,7 @@ import MessageField from '../components/MessageField.vue'
 import MessagePreview from '../components/MessagePreview.vue'
 import StepBar from '../components/StepBar.vue'
 import { formatNumber, t, type Key } from '../i18n'
+import { session } from '../session'
 import { errorText } from '../i18n/errors'
 
 const LIMITS = { sms: 160, subject: 80, body: 2000 } // after personalization (D2)
@@ -71,6 +72,7 @@ const unsaved = () => !!campaign.value && hasUnsavedChanges(draft.value, campaig
 // leaving; the content is read when the save runs. Returns whether nothing
 // is left unsaved. quiet: a typing pause doesn't nag about empty fields.
 async function commit(quiet = false): Promise<boolean> {
+  clearTimeout(pause) // this save covers a pending typing pause: one edit, one save
   if (!campaign.value || streaming.value || locked.value) return !unsaved()
   if (!unsaved()) return true
   if (!complete()) {
@@ -79,8 +81,19 @@ async function commit(quiet = false): Promise<boolean> {
   }
   incomplete.value = false
   saveError.value = null
+  let sent = false
   try {
-    await saver.save((v) => campaigns.setContent(id, v, chosen()))
+    // The save may wait in the queue: check again when it runs, so text
+    // cleared or saved meanwhile is never sent.
+    await saver.save(async (v) => {
+      if (!complete() || !unsaved()) return campaign.value!
+      sent = true
+      return campaigns.setContent(id, v, chosen())
+    })
+    if (!sent) {
+      if (!complete() && !quiet) incomplete.value = true
+      return !unsaved()
+    }
     fieldErrors.value = {}
     notice.value = 'content.saved'
     stale.value = false
@@ -88,6 +101,9 @@ async function commit(quiet = false): Promise<boolean> {
     await refreshEstimate()
     return !unsaved()
   } catch (err) {
+    // Session expired: the router is already on its way to sign-in; nothing
+    // more can be saved, so don't retry or ask (re-review: a 401 loop).
+    if (err instanceof ApiError && err.status === 401) return true
     const list = err instanceof ApiError ? ((err.body as { field_errors?: { field: string; message: string }[] })?.field_errors ?? []) : []
     if (list.length) {
       const byField: Record<string, string[]> = {}
@@ -115,6 +131,9 @@ watch(
 // route with a new id, which is a route *update*, so both guards are needed.
 async function beforeLeaving(): Promise<boolean> {
   clearTimeout(pause)
+  // Signed out (session expired, or log out): nothing can be saved, so leave
+  // without saving or asking; otherwise every redirect to sign-in would retry.
+  if (!session.value) return true
   if (streaming.value) {
     if (!window.confirm(t('content.leaveWhileWriting'))) return false
     stop?.abort()

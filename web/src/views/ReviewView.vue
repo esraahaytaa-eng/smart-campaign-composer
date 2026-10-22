@@ -96,7 +96,14 @@ async function openConfirm() {
 async function approve() {
   confirmOpen.value = false
   now.value = new Date()
-  if (!campaign.value || blockers.value.length || busy.value) return
+  if (blockers.value.length) {
+    // e.g. the time went stale while the dialog was open: say so, like openConfirm
+    tried.value = true
+    await nextTick()
+    blockerList.value?.focus()
+    return
+  }
+  if (!campaign.value || busy.value) return
   busy.value = true
   approveError.value = null
   try {
