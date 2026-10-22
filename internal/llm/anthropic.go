@@ -90,6 +90,8 @@ Audience rules form a flat list; a user must match all of them. Use only these r
 - cart_value / gte: current cart value in TL (number).
 - ordered_category / in, carted_category / in: {"categories": [...], plus a window}: ordered or carted an item of these categories in the window. Only categories from the known list.
 
+Each field and operator pair may appear at most once (one city rule listing several cities; never two ordered_category rules). If the brief needs the same pair twice with different values, the audience is unsupported.
+
 A window is either {"last_days": N} (1-365, counted back from when the campaign is sent) or {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD" or null} in the campaign's time zone. Use from/to when the brief names a date or a cutoff ("since 1 October", "Black Friday 24-28 November"); otherwise use last_days.
 
 Never guess. If any part of the requested audience cannot be expressed exactly with these rules (an attribute that is not listed such as age, gender or interests, an OR between conditions, an unknown city or category, an unclear time span), set "unsupported" to true, explain briefly in "reason" what cannot be expressed, and return no rules. Do not drop, approximate, broaden or add conditions. Off-topic or harmful requests are also unsupported.

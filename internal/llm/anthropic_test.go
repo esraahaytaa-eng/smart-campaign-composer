@@ -108,6 +108,10 @@ func TestInterpretPrompt_ContainsContextNotUserData(t *testing.T) {
 	if strings.Contains(prompt, "@") || strings.Contains(prompt, "+90") {
 		t.Errorf("prompt looks like it contains user records:\n%s", prompt)
 	}
+	// Validation rejects a repeated field+op; Claude must know, or a valid brief ends in a 502.
+	if !strings.Contains(interpretSystemPrompt, "at most once") {
+		t.Error("system prompt does not say each field and operator may appear at most once")
+	}
 	for _, field := range []string{"city", "cart_added", "no_order", "order_count", "total_spend", "last_order", "ordered_category", "carted_category", "cart_value", "signed_up"} {
 		if !strings.Contains(interpretSystemPrompt, field) {
 			t.Errorf("system prompt does not describe %s", field)
