@@ -536,7 +536,7 @@ func TestLifecycle_ShutdownWhileWaiting_ReleasesTheMessage(t *testing.T) {
 
 	// Waiting reserves the only token, so Tokens drops below 0. (A deadline
 	// would not do: Wait refuses at once a deadline it cannot meet.)
-	ctx := shutdownWhen(t, func() bool { return empty.Tokens() < -0.5 })
+	ctx := shutdownWhen(t, func() bool { return empty.Tokens() < 0 })
 	w.Process(ctx, l.claim(mid, time.Now()))
 
 	if n := l.int(`SELECT count(*) FROM messages WHERE id = $1 AND status IN ('pending', 'retry_scheduled')
