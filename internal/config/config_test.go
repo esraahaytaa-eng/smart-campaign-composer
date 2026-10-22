@@ -7,7 +7,7 @@ import (
 
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
-	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"} {
+	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "DEMO_MARKETER_PASSWORD"} {
 		t.Setenv(k, env[k])
 	}
 }
@@ -54,6 +54,8 @@ func TestLoadConfig_Errors(t *testing.T) {
 	}{
 		{"missing database url", "api", map[string]string{}, "DATABASE_URL"},
 		{"migrate needs database url", "migrate", map[string]string{}, "DATABASE_URL"},
+		{"migrate needs marketer password", "migrate", map[string]string{"DATABASE_URL": "postgres://db"}, "DEMO_MARKETER_PASSWORD"},
+		{"marketer password too short", "migrate", map[string]string{"DATABASE_URL": "postgres://db", "DEMO_MARKETER_PASSWORD": "short"}, "DEMO_MARKETER_PASSWORD"},
 		{"unknown llm mode", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_MODE": "fake"}, "LLM_MODE"},
 	}
 	for _, tc := range cases {
@@ -68,9 +70,13 @@ func TestLoadConfig_Errors(t *testing.T) {
 
 // The LLM settings only matter to the api; migrate must not fail on them.
 func TestLoadConfig_MigrateIgnoresLLMSettings(t *testing.T) {
-	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "LLM_MODE": "real"})
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "LLM_MODE": "real", "DEMO_MARKETER_PASSWORD": "demo-password"})
 
-	if _, err := Load("migrate"); err != nil {
+	cfg, err := Load("migrate")
+	if err != nil {
 		t.Fatalf("migrate should not need ANTHROPIC_API_KEY: %v", err)
+	}
+	if cfg.DemoMarketerPassword != "demo-password" {
+		t.Fatalf("password not loaded: %+v", cfg)
 	}
 }

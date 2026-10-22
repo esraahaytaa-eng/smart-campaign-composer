@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smart-campaign-composer/internal/config"
+	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/obs"
 )
 
@@ -50,14 +51,26 @@ func run(ctx context.Context, process string) error {
 	defer pool.Close()
 
 	if process == "migrate" {
-		// shortcut: only checks the connection; T2 adds the schema migrations and seed.
-		if err := pool.Ping(ctx); err != nil {
-			return fmt.Errorf("database unreachable: %w", err)
-		}
-		slog.Info("migrate: database reachable, no migrations yet")
-		return nil
+		return migrate(ctx, cfg, pool)
 	}
 	return serveAPI(ctx, cfg, pool)
+}
+
+// migrate applies the schema and seeds the demo data once (D20, D28).
+func migrate(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
+	if err := db.Migrate(ctx, pool); err != nil {
+		return fmt.Errorf("migrations: %w", err)
+	}
+	if err := db.Seed(ctx, pool, db.DefaultRNGSeed, time.Now(), cfg.DemoMarketerPassword); err != nil {
+		return err
+	}
+	var users int
+	var ref time.Time
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM users), reference_time FROM seed_meta`).Scan(&users, &ref); err != nil {
+		return err
+	}
+	slog.Info("migrate: done", "users", users, "seed_reference_time", ref)
+	return nil
 }
 
 func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {

@@ -20,6 +20,8 @@ services:
     command: ["migrate"]
     environment:
       DATABASE_URL: *db-url
+      # Demo login marketer@marketer.com, local use only (D10); override in .env.
+      DEMO_MARKETER_PASSWORD: "${DEMO_MARKETER_PASSWORD:-Demo1234!}"
     depends_on:
       postgres:
         condition: service_healthy

@@ -13,6 +13,8 @@ type Config struct {
 	LLMMode         string // "mock" or "real" (D24)
 	AnthropicAPIKey string
 	AnthropicModel  string
+
+	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
 }
 
 // Load reads the configuration for the given process (migrate, api, ...).
@@ -24,9 +26,14 @@ func Load(process string) (Config, error) {
 		LLMMode:         getenv("LLM_MODE", "mock"),
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:  getenv("ANTHROPIC_MODEL", "claude-opus-5-5"),
+
+		DemoMarketerPassword: os.Getenv("DEMO_MARKETER_PASSWORD"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
+	}
+	if process == "migrate" && len(cfg.DemoMarketerPassword) < 8 {
+		return Config{}, errors.New("DEMO_MARKETER_PASSWORD must be at least 8 characters")
 	}
 	if process != "api" {
 		return cfg, nil
