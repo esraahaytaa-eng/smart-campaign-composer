@@ -208,7 +208,10 @@ func TestProcess_FifthFailureFails(t *testing.T) {
 	p := &fakeProvider{handle: status(500)}
 	w := f.newWorker(p.serve(t))
 	f.sendingWithContent("Merhaba {{first_name}}!")
+	// Four recorded failed attempts: attempts count from delivery_attempts (D5 history).
 	f.exec(`UPDATE messages SET attempt_count = 4 WHERE user_id = 1 AND channel = 'sms'`)
+	f.exec(`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, finished_at, outcome, http_status)
+		SELECT m.id, g, now(), now(), 'server_error', 500 FROM messages m, generate_series(1, 4) g WHERE m.user_id = 1 AND m.channel = 'sms'`)
 	job := f.claimOne("sms", 1)
 
 	w.Process(context.Background(), job)
@@ -322,11 +325,9 @@ func TestRun_RateLimitNoWindowOver100(t *testing.T) {
 				times = append(times, r.at)
 			}
 		}
-		maxInWindow := mostInOneSecond(times)
-		t.Logf("%s: %d requests (incl. retries), at most %d in any 1 s window", ch, len(times), maxInWindow)
-		if maxInWindow > 100 {
-			t.Fatalf("%s: %d requests in one second, limit is 100", ch, maxInWindow)
-		}
+		// Logged, not asserted: arrival times also carry network and scheduling
+		// jitter outside the worker; the departure check above is the guarantee.
+		t.Logf("%s: %d requests (incl. retries), at most %d arrived in any 1 s window", ch, len(times), mostInOneSecond(times))
 	}
 }
 

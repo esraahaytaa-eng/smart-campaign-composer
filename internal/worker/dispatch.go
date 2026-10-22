@@ -176,6 +176,8 @@ func sleep(ctx context.Context, d time.Duration) {
 // recipient is what one message needs at send time.
 type recipient struct {
 	campaignStatus string
+	uncertain      bool // an earlier attempt may have been delivered
+	attempts       int  // attempts so far that count toward MaxAttempts
 	consent        bool
 	vars           content.UserVars
 	to             string
@@ -207,40 +209,47 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 	body := content.Render(rc.tpl.Body, rc.vars)
 	subject := content.Render(rc.tpl.Subject, rc.vars)
 	if overLimit(j.Channel, subject, body) {
-		return done(Result{Status: "skipped", SkipReason: "character_limit_exceeded"})
+		return done(Result{Status: "skipped", SkipReason: "character_limit_exceeded", LastError: uncertainNote(rc)})
 	}
 
+	// Shutdown while waiting: nothing was sent, so hand the message back at once.
+	release := Result{Status: "retry_scheduled", NextAttemptAt: w.Now()}
 	if err := w.Limiters[j.Channel].Wait(ctx); err != nil {
-		return err // shutdown: the lease expires and the message is retried
+		return errors.Join(err, done(release))
 	}
-	// The wait can be long; a cancel or opt-out meanwhile must still stop the send.
+	departure, err := w.caps[j.Channel].wait(ctx) // hard cap: ≤100 departures in any second
+	if err != nil {
+		return errors.Join(err, done(release))
+	}
+	// The waits can be long; a cancel or opt-out meanwhile must still stop the
+	// send. This is the last check before the request leaves.
 	if rc, err = w.load(ctx, j); err != nil {
 		return err
 	}
 	if r, stop := skip(rc); stop {
 		return done(r)
 	}
-	departure, err := w.caps[j.Channel].wait(ctx) // hard cap: ≤100 departures in any second
-	if err != nil {
-		return err
-	}
 
 	attempt := w.call(ctx, j, departure, rc.to, subject, body)
 	result := Result{Attempt: &attempt.Attempt, LastError: attempt.Error}
-	switch attempt.Outcome {
-	case "accepted":
+	counted := rc.attempts + 1 // this one
+	switch {
+	case attempt.Outcome == "accepted":
 		result.Status = "sent"
-	case "rejected":
+	case attempt.Outcome == "rejected":
+		result.Status = "failed"
+	case ctx.Err() != nil:
+		// Shutdown mid-request: no answer, maybe delivered. Not a failure and
+		// not counted; retried at once with the same key (D5 history).
+		attempt.Outcome, attempt.Error = "interrupted", "interrupted by worker shutdown"
+		result.LastError, result.Status, result.NextAttemptAt = attempt.Error, "retry_scheduled", w.Now()
+	case counted >= w.MaxAttempts:
 		result.Status = "failed"
 	default: // rate_limited, server_error, timeout, network_error
-		if j.Attempt >= w.MaxAttempts {
-			result.Status = "failed"
-		} else {
-			w.mu.Lock()
-			result.NextAttemptAt = w.Now().Add(Backoff(j.Attempt, attempt.retryAfter, w.Rand))
-			w.mu.Unlock()
-			result.Status = "retry_scheduled"
-		}
+		w.mu.Lock()
+		result.NextAttemptAt = w.Now().Add(Backoff(counted, attempt.retryAfter, w.Rand))
+		w.mu.Unlock()
+		result.Status = "retry_scheduled"
 	}
 	return done(result)
 }
@@ -249,12 +258,14 @@ func (w *Worker) load(ctx context.Context, j Job) (recipient, error) {
 	var rc recipient
 	var sms, email bool
 	var phone, mail string
-	err := w.Queue.Pool.QueryRow(ctx, `SELECT c.status, u.sms_opt_in, u.email_opt_in, u.first_name, coalesce(u.last_name, ''),
+	err := w.Queue.Pool.QueryRow(ctx, `SELECT c.status, m.delivery_uncertain,
+			(SELECT count(*) FROM delivery_attempts a WHERE a.message_id = m.id AND a.outcome <> 'interrupted'),
+			u.sms_opt_in, u.email_opt_in, u.first_name, coalesce(u.last_name, ''),
 			u.city, u.phone, u.email, coalesce(cc.subject, ''), cc.body
 		FROM messages m JOIN campaigns c ON c.id = m.campaign_id JOIN users u ON u.id = m.user_id
 		JOIN campaign_content cc ON cc.campaign_id = m.campaign_id AND cc.channel = m.channel
-		WHERE m.id = $1`, j.MessageID).Scan(&rc.campaignStatus, &sms, &email, &rc.vars.FirstName, &rc.vars.LastName,
-		&rc.vars.City, &phone, &mail, &rc.tpl.Subject, &rc.tpl.Body)
+		WHERE m.id = $1`, j.MessageID).Scan(&rc.campaignStatus, &rc.uncertain, &rc.attempts, &sms, &email,
+		&rc.vars.FirstName, &rc.vars.LastName, &rc.vars.City, &phone, &mail, &rc.tpl.Subject, &rc.tpl.Body)
 	if err != nil {
 		return rc, fmt.Errorf("load message %d: %w", j.MessageID, err)
 	}
@@ -265,15 +276,24 @@ func (w *Worker) load(ctx context.Context, j Job) (recipient, error) {
 	return rc, nil
 }
 
-// skip decides the outcomes that need no provider call.
+// skip decides the outcomes that need no provider call. A cancel or opt-out
+// is respected even if an earlier attempt may have been delivered; the record
+// then says so instead of claiming nothing was sent.
 func skip(rc recipient) (Result, bool) {
 	switch {
 	case rc.campaignStatus != "sending":
-		return Result{Status: "cancelled"}, true
+		return Result{Status: "cancelled", LastError: uncertainNote(rc)}, true
 	case !rc.consent:
-		return Result{Status: "skipped", SkipReason: "no_consent"}, true
+		return Result{Status: "skipped", SkipReason: "no_consent", LastError: uncertainNote(rc)}, true
 	}
 	return Result{}, false
+}
+
+func uncertainNote(rc recipient) string {
+	if rc.uncertain {
+		return "delivery uncertain: an earlier attempt may have reached the provider"
+	}
+	return ""
 }
 
 // overLimit applies the limits to the personalized text (D2, D3, D13).
