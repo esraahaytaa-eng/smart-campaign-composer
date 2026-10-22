@@ -6,11 +6,11 @@ import { channelsLosingContent } from '../campaign/channels'
 import { campaigns, loadCatalog } from '../campaign/client'
 import { defaultForm, fromForm, ruleErrors, toForm, type RuleForm } from '../campaign/rules'
 import { createSaver } from '../campaign/saver'
+import { briefTitle } from '../campaign/title'
 import type { Campaign, Catalog, Channel, FieldError } from '../campaign/types'
 import AudiencePanel from '../components/AudiencePanel.vue'
 import ChannelPicker from '../components/ChannelPicker.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import NameField from '../components/NameField.vue'
 import RuleChips from '../components/RuleChips.vue'
 import RuleEditor from '../components/RuleEditor.vue'
 import StepBar from '../components/StepBar.vue'
@@ -69,11 +69,7 @@ async function save(op: (version: number) => Promise<Campaign>, done?: string, b
   }
 }
 
-// ---- name, channels ----
-function rename(name: string) {
-  save((v) => campaigns.setName(id.value, v, name), 'Name saved.').catch(() => {})
-}
-
+// ---- channels ----
 const channelConfirm = ref<{ next: Channel[]; losing: Channel[] } | null>(null)
 function pickChannels(next: Channel[]) {
   const c = campaign.value!
@@ -193,9 +189,10 @@ function reload() {
         <RouterLink :to="{ name: 'campaigns' }" class="back" aria-label="Back to campaigns">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
         </RouterLink>
-        <NameField v-if="isDraft" :name="campaign.name" :disabled="locked" @rename="rename" />
-        <h1 v-else class="title">{{ campaign.name }}</h1>
+        <!-- Campaigns are identified by their brief (D43); the full brief is below. -->
+        <h1 class="title">{{ briefTitle(campaign.request_text) }}</h1>
         <span class="status">{{ isDraft ? 'Draft' : campaign.status }}</span>
+        <span v-if="isResend" class="status">Resend · {{ channelName(campaign.channels[0]!) }}</span>
         <span class="save-state" :class="saver.state.value">{{ saveLabel }}</span>
         <button v-if="isDraft" type="button" class="btn btn-sm btn-danger-outline" :disabled="locked" @click="deleteConfirm = true">Delete draft…</button>
       </div>
@@ -311,7 +308,7 @@ function reload() {
     </ConfirmDialog>
 
     <ConfirmDialog :open="deleteConfirm" title="Delete draft?" confirm-label="Delete permanently" cancel-label="Keep draft" danger @confirm="deleteDraft" @close="deleteConfirm = false">
-      <p><strong>{{ campaign?.name }}</strong></p>
+      <p><strong>{{ campaign ? briefTitle(campaign.request_text) : '' }}</strong></p>
       <p>The brief, audience rules and messages will be permanently deleted. This can’t be undone. Nothing was sent from this draft.</p>
     </ConfirmDialog>
   </div>
@@ -342,7 +339,9 @@ function reload() {
   justify-content: center;
 }
 .title {
-  font-size: 24px;
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 22px;
 }
 .status {
   font-size: 12px;

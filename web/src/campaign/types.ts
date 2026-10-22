@@ -9,7 +9,6 @@ export type FieldError = { rule: number; message: string }
 
 export type Campaign = {
   id: number
-  name: string
   request_text: string
   channels: Channel[]
   rules: Rule[] | null // null on a resend: its audience comes from the parent (D31)

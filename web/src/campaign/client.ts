@@ -12,7 +12,6 @@ export const campaigns = {
     api<Campaign>(path(id, '/channels'), { method: 'PUT', body: { version, channels } }),
   setRequest: (id: number, version: number, request: string) =>
     api<Campaign>(path(id, '/request'), { method: 'PUT', body: { version, request } }),
-  setName: (id: number, version: number, name: string) => api<Campaign>(path(id, '/name'), { method: 'PUT', body: { version, name } }),
   remove: (id: number, version: number) => api<void>(path(id), { method: 'DELETE', body: { version } }),
 }
 
