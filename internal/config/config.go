@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,6 +19,19 @@ type Config struct {
 	LLMTimeout      time.Duration // per AI call (D15)
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
+	ProviderDBPassword   string // migrate sets it on the mock provider's database role (D6)
+
+	Provider     map[string]ProviderChannel // mock provider behaviour per channel (D20)
+	ProviderSeed int64                      // seeds the provider's failure injection, so runs repeat
+}
+
+// ProviderChannel is how the mock provider behaves on one channel. The rates
+// are fractions of requests; the rest succeed.
+type ProviderChannel struct {
+	DelayMin, DelayMax time.Duration
+	ErrorRate          float64 // 5xx
+	RateLimitRate      float64 // 429 with Retry-After
+	TimeoutRate        float64 // hang past the client's timeout
 }
 
 // Load reads the configuration for the given process (migrate, api, ...).
@@ -30,12 +45,19 @@ func Load(process string) (Config, error) {
 		AnthropicModel:  getenv("ANTHROPIC_MODEL", "claude-opus-5-5"),
 
 		DemoMarketerPassword: os.Getenv("DEMO_MARKETER_PASSWORD"),
+		ProviderDBPassword:   os.Getenv("PROVIDER_DB_PASSWORD"),
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
 	if process == "migrate" && len(cfg.DemoMarketerPassword) < 8 {
 		return Config{}, errors.New("DEMO_MARKETER_PASSWORD must be at least 8 characters")
+	}
+	if process == "migrate" && len(cfg.ProviderDBPassword) < 8 {
+		return Config{}, errors.New("PROVIDER_DB_PASSWORD must be at least 8 characters")
+	}
+	if process == "mock-provider" {
+		return loadProvider(cfg)
 	}
 	if process != "api" {
 		return cfg, nil
@@ -62,4 +84,46 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// loadProvider reads SMS_* and EMAIL_* behaviour with the D20 defaults.
+func loadProvider(cfg Config) (Config, error) {
+	seed, err := strconv.ParseInt(getenv("PROVIDER_SEED", "1"), 10, 64)
+	if err != nil {
+		return Config{}, fmt.Errorf("PROVIDER_SEED must be an integer: %w", err)
+	}
+	cfg.ProviderSeed = seed
+	cfg.Provider = map[string]ProviderChannel{}
+	for _, ch := range []string{"sms", "email"} {
+		p := strings.ToUpper(ch) + "_"
+		var c ProviderChannel
+		var errs []error
+		ms := func(key, def string) time.Duration {
+			n, err := strconv.Atoi(getenv(p+key, def))
+			if err != nil || n < 0 {
+				errs = append(errs, fmt.Errorf("%s%s must be a whole number of milliseconds, 0 or more", p, key))
+			}
+			return time.Duration(n) * time.Millisecond
+		}
+		rate := func(key, def string) float64 {
+			f, err := strconv.ParseFloat(getenv(p+key, def), 64)
+			if err != nil || f < 0 || f > 1 {
+				errs = append(errs, fmt.Errorf("%s%s must be a fraction between 0 and 1", p, key))
+			}
+			return f
+		}
+		c.DelayMin, c.DelayMax = ms("DELAY_MS_MIN", "20"), ms("DELAY_MS_MAX", "200")
+		c.ErrorRate, c.RateLimitRate, c.TimeoutRate = rate("ERROR_RATE", "0.05"), rate("RATE_LIMIT_RATE", "0.03"), rate("TIMEOUT_RATE", "0.01")
+		if len(errs) > 0 {
+			return Config{}, errs[0]
+		}
+		if c.DelayMin > c.DelayMax {
+			return Config{}, fmt.Errorf("%sDELAY_MS_MIN must not exceed %sDELAY_MS_MAX", p, p)
+		}
+		if c.ErrorRate+c.RateLimitRate+c.TimeoutRate > 1 {
+			return Config{}, fmt.Errorf("%sERROR_RATE, %sRATE_LIMIT_RATE and %sTIMEOUT_RATE add up to more than 1", p, p, p)
+		}
+		cfg.Provider[ch] = c
+	}
+	return cfg, nil
 }
