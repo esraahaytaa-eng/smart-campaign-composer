@@ -51,6 +51,10 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		return Interpretation{}, err
 	}
 	in.Text = text
+	loc, err := loadZone(in.TimeZone)
+	if err != nil {
+		return Interpretation{}, err
+	}
 	in.Errors = nil
 	for range 2 {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -59,7 +63,7 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		if err != nil {
 			return Interpretation{}, fmt.Errorf("AI request failed: %w", err)
 		}
-		got, problems := parseInterpretation(raw, in)
+		got, problems := parseInterpretation(raw, in, loc)
 		if len(problems) == 0 {
 			return got, nil
 		}
@@ -89,7 +93,7 @@ type aiAnswer struct {
 }
 
 // parseInterpretation validates one answer and returns every problem found.
-func parseInterpretation(raw json.RawMessage, in llm.InterpretInput) (Interpretation, []string) {
+func parseInterpretation(raw json.RawMessage, in llm.InterpretInput, loc *time.Location) (Interpretation, []string) {
 	var out aiAnswer
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -137,9 +141,16 @@ func parseInterpretation(raw json.RawMessage, in llm.InterpretInput) (Interpreta
 	}
 	if out.SuggestedSendAt != nil {
 		at, err := time.Parse(time.RFC3339, *out.SuggestedSendAt)
-		if err != nil {
+		_, offset := at.Zone()
+		_, zoneOffset := at.In(loc).Zone()
+		switch {
+		case err != nil:
 			problems = append(problems, fmt.Sprintf("suggested_send_at %q is not an RFC 3339 time with offset", *out.SuggestedSendAt))
-		} else {
+		case offset != zoneOffset:
+			// A wrong offset would silently move the time; the retry gets it right.
+			problems = append(problems, fmt.Sprintf("suggested_send_at %q must use the %s offset %s",
+				*out.SuggestedSendAt, in.TimeZone, at.In(loc).Format("-07:00")))
+		default:
 			got.SuggestedSendAt, got.ScheduleNote = usableSendAt(at, got.ScheduleNote, in.Now)
 		}
 	}

@@ -94,6 +94,8 @@ func TestInterpret_InvalidTwice_ErrAIInvalid(t *testing.T) {
 		"no rules":            output(`[]`, "null", "null"),
 		"bad channel":         strings.Replace(output(goodRules, "null", "null"), `["sms"]`, `["fax"]`, 1),
 		"bad time format":     output(goodRules, `"tomorrow 10:00"`, `"tomorrow"`),
+		// 10:00 written in UTC for an Istanbul campaign would silently become 13:00 local.
+		"wrong zone offset": output(goodRules, `"2026-10-22T10:00:00Z"`, `"tomorrow at 10:00"`),
 		"unsupported, no why": `{"unsupported":true,"reason":"","channels":[],"rules":[],"suggested_send_at":null,"schedule_note":null}`,
 		"reason too long":     `{"unsupported":true,"reason":"` + strings.Repeat("x", 501) + `","channels":[],"rules":[],"suggested_send_at":null,"schedule_note":null}`,
 	} {
@@ -203,5 +205,15 @@ func TestInterpret_WithMock(t *testing.T) {
 	got, err = Interpret(context.Background(), m, in, time.Second)
 	if err != nil || !got.Unsupported || got.Rules != nil {
 		t.Fatalf("unknown brief: %v %+v", err, got)
+	}
+}
+
+func TestInterpret_InvalidTimeZone_NoAICall(t *testing.T) {
+	s := &scripted{}
+
+	_, err := Interpret(context.Background(), s, llm.InterpretInput{Text: "brief", Now: now, TimeZone: "Mars/Olympus", Catalog: catalog}, time.Second)
+
+	if err == nil || errors.Is(err, ErrAIInvalid) || len(s.calls) != 0 {
+		t.Fatalf("want a time zone error without calling the AI, got %v after %d calls", err, len(s.calls))
 	}
 }
