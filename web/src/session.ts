@@ -1,5 +1,6 @@
 import { readonly, ref } from 'vue'
 import { api, ApiError } from './api'
+import { sessionLoadError } from './i18n/errors'
 
 export type Me = { id: number; email: string; name: string; llm_mode: 'mock' | 'real' }
 
@@ -35,7 +36,7 @@ export async function login(email: string, password: string): Promise<Me> {
   await api('/api/login', { method: 'POST', body: { email, password } })
   loaded = false // /api/me also carries the AI mode for the banner
   const signedIn = await loadSession()
-  if (!signedIn) throw problem.value ?? new ApiError('session could not be loaded', 0)
+  if (!signedIn) throw problem.value ?? sessionLoadError()
   return signedIn
 }
 

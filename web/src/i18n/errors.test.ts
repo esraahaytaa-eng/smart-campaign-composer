@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ApiError } from '../api'
 import { setLocale } from './index'
-import { aiReason, errorText } from './errors'
+import { aiReason, errorText, sessionLoadError } from './errors'
 
 afterEach(() => setLocale('en'))
 
@@ -9,7 +9,6 @@ describe('errorText', () => {
   it.each([
     [new ApiError("Can't reach the server.", 0), "Can't reach the server. Check that it is running."],
     [new ApiError('campaign not found', 404), 'This campaign doesn’t exist, or it was deleted.'],
-    [new ApiError('the campaign changed since you loaded it', 409), 'This draft was changed elsewhere, in another tab or by another marketer. Reload to see the latest version before editing again.'],
     [new ApiError('The AI returned an invalid answer twice.', 502), 'The AI couldn’t produce a usable answer. Try again, or rephrase the brief.'],
     [new ApiError('The AI did not answer in time.', 504), 'The AI didn’t answer in time. Try again.'],
     [new ApiError('internal error', 500), 'The server ran into a problem. Try again in a moment.'],
@@ -26,6 +25,19 @@ describe('errorText', () => {
     expect(errorText(err)).toBe('The server didn’t accept this change. Details from the server (in English): send_at must be between now and 30 days from now')
     setLocale('tr')
     expect(errorText(err)).toBe('Sunucu bu değişikliği kabul etmedi. Sunucudan gelen ayrıntı (İngilizce): send_at must be between now and 30 days from now')
+  })
+
+  // 409 means many things (stale version, not a draft, no skipped recipients,
+  // an active resend…): the server's reason is kept, never "changed elsewhere".
+  it('keeps the reason of a conflict', () => {
+    const err = new ApiError('no recipients were skipped for the character limit on this channel', 409)
+    expect(errorText(err)).toBe(
+      'The server didn’t accept this change. Details from the server (in English): no recipients were skipped for the character limit on this channel',
+    )
+  })
+
+  it('explains a session that could not be loaded after signing in', () => {
+    expect(errorText(sessionLoadError())).toBe('Signed in, but the session could not be loaded. Try again.')
   })
 
   it('speaks Turkish when the UI does', () => {
