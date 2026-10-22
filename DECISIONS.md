@@ -286,7 +286,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Decision:** `GET /api/campaigns/{id}/events` sends a status snapshot when the counts change (polled ~1s, D16). Once the campaign is `completed` or `cancelled` and no message is still in flight (after a cancel, messages a worker holds finish later), it sends the final snapshot, then an `end` event, and closes.
 - **Why:** A finished campaign never changes, so no database polling for open dashboards of old campaigns.
 - **Rejected:** *Keep the stream open until the client leaves:* one query per second per open tab for nothing.
-- **Trade-offs:** The frontend must close its `EventSource` on `end`, or the browser reconnects every few seconds.
+- **Trade-offs:** The frontend must close its `EventSource` on `end`, or the browser reconnects every few seconds. A resend created after `end` changes the parent's resend fields without a new event, so the frontend fetches the campaign again after a resend.
 
 ## Open Questions
 
