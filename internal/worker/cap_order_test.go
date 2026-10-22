@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,10 +48,16 @@ func TestProcess_CancelDuringCapWait(t *testing.T) {
 		t.Fatalf("claim: %v %v", jobs, err)
 	}
 
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		pool.Exec(ctx, `UPDATE campaigns SET status = 'cancelled' WHERE id = 1`)
-	}()
+	// Cancel while the worker waits for the cap: the hook runs at that moment
+	// and commits the cancel before the wait can end, however slow the machine.
+	var once sync.Once
+	w.caps["sms"].waiting = func() {
+		once.Do(func() {
+			if _, err := pool.Exec(ctx, `UPDATE campaigns SET status = 'cancelled' WHERE id = 1`); err != nil {
+				t.Error(err)
+			}
+		})
+	}
 	if err := w.Process(ctx, jobs[0]); err != nil {
 		t.Fatal(err)
 	}
