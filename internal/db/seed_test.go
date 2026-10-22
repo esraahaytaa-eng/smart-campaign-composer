@@ -102,6 +102,22 @@ func TestMigrate_RunsTwice(t *testing.T) {
 	}
 }
 
+// Smoke test: goose's own retries already hide most races, so this passes
+// without the session locker too; it guards that the locker never deadlocks.
+func TestMigrate_ConcurrentRunsBothSucceed(t *testing.T) {
+	pool := dbtest.FreshDB(t)
+
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() { errs <- db.Migrate(context.Background(), pool) }()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent migrate: %v", err)
+		}
+	}
+}
+
 func TestSeed_Idempotent(t *testing.T) {
 	pool := seeded(t, refTime)
 	counts := func() [4]int {
