@@ -200,3 +200,42 @@ func (c compare) sql(b *builder) string {
 	}
 	return aggregates[c.field] + " " + op + " " + b.arg(c.n)
 }
+
+// FixedWindowStarts returns the start of every fixed-date window in the rules,
+// resolved in loc. A campaign sent before such a start would evaluate an
+// empty window (T9 rejects that at approval).
+func FixedWindowStarts(rules []Rule, loc *time.Location) ([]time.Time, error) {
+	var starts []time.Time
+	for i, r := range rules {
+		c, err := parse(r, nil)
+		if err != nil {
+			return nil, fmt.Errorf("rule %d: %w", i, err)
+		}
+		var w window
+		switch v := c.(type) {
+		case timeRule:
+			w = v.w
+		case lastOrder:
+			w = v.w
+		case categoryRule:
+			w = v.v.window
+		default:
+			continue
+		}
+		if w.From != nil {
+			start, _ := w.bounds(time.Time{}, loc)
+			starts = append(starts, start)
+		}
+	}
+	return starts, nil
+}
+
+// ConsentColumn is the channel's opt-in column on users "u", for callers that
+// select recipients without rules (a resend's fixed list).
+func ConsentColumn(channel string) (string, error) {
+	col, ok := consent[channel]
+	if !ok {
+		return "", fmt.Errorf("unknown channel %q", channel)
+	}
+	return col, nil
+}
