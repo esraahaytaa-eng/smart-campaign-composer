@@ -18,6 +18,7 @@ type captured struct {
 	body   map[string]any
 	header http.Header
 	url    string
+	calls  int
 }
 
 // fakeAPI answers every request with one Messages API response.
@@ -29,6 +30,7 @@ func fakeAPI(t *testing.T, status int, stopReason, text string) (*captured, stri
 		json.Unmarshal(b, &got.body)
 		got.header = r.Header.Clone()
 		got.url = r.URL.String()
+		got.calls++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		if status != http.StatusOK {
@@ -46,7 +48,8 @@ func fakeAPI(t *testing.T, status int, stopReason, text string) (*captured, stri
 
 func interpretVia(t *testing.T, url, model string, in InterpretInput) (json.RawMessage, error) {
 	t.Helper()
-	a := NewAnthropic("test-key", model, option.WithBaseURL(url), option.WithMaxRetries(0))
+	// Production options apart from the URL: retry behaviour is part of what is tested.
+	a := NewAnthropic("test-key", model, option.WithBaseURL(url))
 	return a.InterpretRequest(context.Background(), in)
 }
 
@@ -165,4 +168,16 @@ func TestInterpretSchema_AllObjectsClosed(t *testing.T) {
 	var schema any
 	json.Unmarshal(b, &schema)
 	walk("schema", schema)
+}
+
+// D15: API errors are not retried, so the SDK's own retries must be off.
+func TestAnthropic_NoSDKRetries(t *testing.T) {
+	got, url := fakeAPI(t, http.StatusInternalServerError, "", "")
+
+	if _, err := interpretVia(t, url, "claude-opus-5-5", testInput()); err == nil {
+		t.Fatal("want error")
+	}
+	if got.calls != 1 {
+		t.Fatalf("want exactly 1 HTTP call for a failing API, got %d", got.calls)
+	}
 }

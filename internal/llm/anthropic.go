@@ -20,7 +20,8 @@ type Anthropic struct {
 }
 
 func NewAnthropic(apiKey, model string, opts ...option.RequestOption) *Anthropic {
-	opts = append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
+	// No SDK retries: D15 allows one retry for an invalid answer only, never for API errors.
+	opts = append([]option.RequestOption{option.WithAPIKey(apiKey), option.WithMaxRetries(0)}, opts...)
 	return &Anthropic{client: anthropic.NewClient(opts...), model: model}
 }
 
