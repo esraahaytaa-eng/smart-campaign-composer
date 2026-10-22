@@ -17,7 +17,9 @@ type mockMessage struct {
 }
 
 // mockTexts are the mock's fixed templates per language.
-var mockTexts = map[bool]struct{ sms, subject, body string }{
+type mockText struct{ sms, subject, body string }
+
+var mockTexts = map[bool]mockText{
 	true: { // Turkish
 		sms:     "Merhaba {{first_name}}! Sana özel bir fırsat seni bekliyor. Kaçırmadan hemen göz at!",
 		subject: "{{first_name}}, sana özel bir fırsat var",
@@ -30,10 +32,21 @@ var mockTexts = map[bool]struct{ sms, subject, body string }{
 	},
 }
 
+// mockResendTexts are shorter, for recipients the first text was too long for (D31).
+var mockResendTexts = map[bool]mockText{
+	true:  {sms: "{{first_name}}, fırsatın seni bekliyor!", subject: "Fırsatın seni bekliyor"},
+	false: {sms: "{{first_name}}, your offer is waiting!", subject: "Your offer is waiting"},
+}
+
 // StreamContent returns fixed, valid templates in the brief's language and
 // streams them in small chunks, ChunkDelay apart, like a real model would.
 func (m *Mock) StreamContent(ctx context.Context, in ContentInput, onText func(string)) (json.RawMessage, error) {
-	texts := mockTexts[turkish.MatchString(in.Text)]
+	isTurkish := turkish.MatchString(in.Text)
+	texts := mockTexts[isTurkish]
+	if in.Resend {
+		short := mockResendTexts[isTurkish]
+		texts.sms, texts.subject = short.sms, short.subject
+	}
 	out := map[string]mockMessage{}
 	if slices.Contains(in.Channels, "sms") {
 		out["sms"] = mockMessage{Body: texts.sms}

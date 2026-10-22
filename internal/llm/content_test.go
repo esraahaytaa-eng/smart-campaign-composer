@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"smart-campaign-composer/internal/content"
 )
@@ -86,5 +87,27 @@ func TestMockContent_StopsWhenCancelled(t *testing.T) {
 
 	if !errors.Is(err, context.Canceled) || calls != 2 {
 		t.Fatalf("want context.Canceled after 2 chunks, got %v after %d", err, calls)
+	}
+}
+
+func TestMockContent_ResendIsShorter(t *testing.T) {
+	for _, brief := range []string{MockExamples[0].Brief, MockExamples[8].Brief} { // English, Turkish
+		var normal, resend content.Content
+		for _, r := range []struct {
+			resend bool
+			out    *content.Content
+		}{{false, &normal}, {true, &resend}} {
+			raw, err := NewMock().StreamContent(context.Background(), ContentInput{Text: brief, Channels: []string{"sms", "email"}, Resend: r.resend}, func(string) {})
+			if err != nil {
+				t.Fatal(err)
+			}
+			json.Unmarshal(raw, r.out)
+		}
+		if n, o := utf8.RuneCountInString(resend.SMS.Body), utf8.RuneCountInString(normal.SMS.Body); n >= o-20 {
+			t.Errorf("%.20q: resend SMS (%d) should be clearly shorter than the original (%d)", brief, n, o)
+		}
+		if errs := content.ValidateDraft(resend, []string{"sms", "email"}); len(errs) != 0 {
+			t.Errorf("resend content invalid: %+v", errs)
+		}
 	}
 }

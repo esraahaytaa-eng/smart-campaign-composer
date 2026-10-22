@@ -28,6 +28,7 @@ type ContentInput struct {
 	Text     string   // the brief; content is written in its language (D32)
 	Channels []string // "sms" and/or "email"
 	Errors   []string // validation errors of the previous answer, on the retry
+	Resend   bool     // the first text was too long for some recipients (D31): write shorter
 }
 
 // InterpretInput never contains user records (D15): only the brief, the

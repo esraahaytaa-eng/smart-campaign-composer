@@ -292,3 +292,13 @@ func TestContentPrompt(t *testing.T) {
 		t.Errorf("schema for email only: %v", props)
 	}
 }
+
+// D31: a resend exists because the first text was too long for some names.
+func TestContentPrompt_ResendAsksForShorterText(t *testing.T) {
+	resend := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}, Resend: true})
+	normal := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}})
+
+	if !strings.Contains(resend, "under 100") || strings.Contains(normal, "under 100") {
+		t.Fatalf("resend prompt must ask for shorter text, the normal one must not:\n%s\n---\n%s", resend, normal)
+	}
+}

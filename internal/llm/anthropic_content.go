@@ -59,6 +59,10 @@ func (a *Anthropic) StreamContent(ctx context.Context, in ContentInput, onText f
 func contentPrompt(in ContentInput) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Channels: %s\n\n<brief>\n%s\n</brief>\n", strings.Join(in.Channels, ", "), in.Text)
+	if in.Resend {
+		b.WriteString("\nThis is a resend to recipients whose earlier message was too long once their names were filled in. " +
+			"Write clearly shorter text: keep the SMS body under 100 characters and the email subject under 50.\n")
+	}
 	if len(in.Errors) > 0 {
 		fmt.Fprintf(&b, "\nYour previous answer was rejected by validation:\n- %s\nReturn corrected messages.\n", strings.Join(in.Errors, "\n- "))
 	}

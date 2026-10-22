@@ -303,3 +303,22 @@ func TestResend_Conflicts(t *testing.T) {
 		t.Errorf("no skipped recipients: want 409, got %d", rec.Code)
 	}
 }
+
+func TestGenerate_ResendAsksForShorterContent(t *testing.T) {
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{`{"sms":{"body":"Merhaba {{first_name}}!"}}`, validContent}}
+	a := newApp(t, model)
+	parent := a.parentWithSkips()
+	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(parent)+"/resend", `{"channel":"sms"}`)
+	resendID := int64(decode[map[string]any](t, rec)["id"].(float64))
+
+	if evs := a.generate(resendID, 1); names(evs) != "delta,done" {
+		t.Fatalf("resend content: %s", names(evs))
+	}
+	d := a.newDraft()
+	if evs := a.generate(d.ID, 1); names(evs) != "delta,done" {
+		t.Fatalf("normal content: %s", names(evs))
+	}
+	if !model.calls[0].Resend || model.calls[1].Resend {
+		t.Fatalf("want Resend only for the resend draft, got %v / %v", model.calls[0].Resend, model.calls[1].Resend)
+	}
+}

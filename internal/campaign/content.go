@@ -37,8 +37,9 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	var brief string
 	var channels []string
 	var version int
-	if err := h.Pool.QueryRow(r.Context(), `SELECT request_text, channels, version FROM campaigns WHERE id = $1`, id).
-		Scan(&brief, &channels, &version); err != nil {
+	var isResend bool
+	if err := h.Pool.QueryRow(r.Context(), `SELECT request_text, channels, version, parent_campaign_id IS NOT NULL
+		FROM campaigns WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend); err != nil {
 		serverError(w, "load campaign", err)
 		return
 	}
@@ -59,7 +60,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	input := llm.ContentInput{Text: brief, Channels: channels}
+	input := llm.ContentInput{Text: brief, Channels: channels, Resend: isResend}
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(r.Context(), h.Timeout)
 		streamer := llm.NewFieldStreamer(contentFields, func(d llm.Delta) { send("delta", d) })
