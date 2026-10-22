@@ -32,18 +32,8 @@ func channelAudience(c campaignJSON, channel string, now time.Time) (content.Aud
 		where, args, err := audience.Build(c.Rules, channel, now, loc)
 		return content.Audience{Where: where, Args: args}, err
 	}
-	consent, err := audience.ConsentColumn(channel)
-	if err != nil {
-		return content.Audience{}, err
-	}
-	// Skipped for length in the parent, and not sent on this channel by the
-	// parent or by any earlier (cancelled) resend of it.
-	where := `u.id IN (SELECT m.user_id FROM messages m WHERE m.campaign_id = $1 AND m.channel = $2
-			AND m.skip_reason = 'character_limit_exceeded')
-		AND NOT EXISTS (SELECT 1 FROM messages s JOIN campaigns c ON c.id = s.campaign_id
-			WHERE (c.id = $1 OR c.parent_campaign_id = $1) AND s.channel = $2 AND s.user_id = u.id AND s.status = 'sent')
-		AND ` + consent
-	return content.Audience{Where: where, Args: []any{*c.ParentCampaignID, channel}}, nil
+	where, args, err := audience.BuildResend(*c.ParentCampaignID, channel)
+	return content.Audience{Where: where, Args: args}, err
 }
 
 // countAudience is the current audience per channel.
