@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: backend T1–T14 (login, audience rules, AI interpretation and content with a mock and Claude, drafts, approval, cancel and resend, mock providers, sending worker, metrics and the live status stream) plus the draft endpoints the frontend needs (D37–D40), the frontend app shell with sign-in (T15), and the composer's audience step with editable campaign names (T16, D42). Not yet built: the content and review screens and the dashboard (T17–T18).
+> **Status: work in progress.** Done: backend T1–T14 (login, audience rules, AI interpretation and content with a mock and Claude, drafts, approval, cancel and resend, mock providers, sending worker, metrics and the live status stream) plus the draft endpoints the frontend needs (D37–D40), the frontend app shell with sign-in (T15), and the composer's audience step (T16). Not yet built: the content and review screens and the dashboard (T17–T18).
 
 ## Requirements
 
@@ -50,7 +50,6 @@ All endpoints need a login session (see above).
 | `DELETE /api/campaigns/{id}` `{"version"}` | Delete a draft and its content for good (204). Deleting an abandoned resend draft lets that channel be resent again. Approved, sending, completed and cancelled campaigns are never deleted (409); stop a send with cancel (D37). |
 | `PUT /api/campaigns/{id}/request` `{"request", "version"}` | Edit a draft's brief and let the AI read it again (D40). On success the brief, rules and proposed send time are replaced (rules edited by hand are overwritten) and the content is kept, so review or regenerate it before approval. A stale version is refused before the AI is called. Failures return the same errors as create and leave the draft unchanged. Not for resends (409). |
 | `PUT /api/campaigns/{id}/rules` `{"rules", "version"}` | Replace the draft's rules; they are validated and recounted. |
-| `PUT /api/campaigns/{id}/name` `{"name", "version"}` | Rename a draft: 1–100 characters on one line (D42). A new campaign is named after the brief's first sentence (at most 60 characters), a resend after its parent; re-interpreting the brief renames a campaign only while it still has its default name. |
 | `PUT /api/campaigns/{id}/channels` `{"channels", "version"}` | Change a draft's channels, validated as on create; counts are refreshed. A removed channel's content is deleted; an added channel has no content until it is written or generated, and approval waits for it (D38). A resend's channel is fixed (409). |
 | `PUT /api/campaigns/{id}/schedule` `{"send_at", "version"}` | Change or clear (`null`) the proposed send time: RFC 3339 with offset, between now and 30 days ahead. |
 | `GET /api/campaigns`, `GET /api/campaigns/{id}` | List (newest 200) / one campaign; drafts include current counts, a single campaign its content. |
@@ -135,7 +134,7 @@ Vue 3, Vite, TypeScript and vue-router (D25), with Reka UI for accessible dialog
 
 So far (T15): sign-in with field validation and a show/hide password toggle; every other page requires a session, and a page opened while signed out returns there after sign-in (only paths on this site are accepted as the return address). An API call that finds the session expired sends the marketer to sign in again. The sidebar shows the AI mode from `GET /api/me` and has a user menu with log out.
 
-The composer (T16): **+ New campaign** takes a brief and the channels, and the AI turns the brief into a draft (an unsupported brief is explained and kept for rephrasing; nothing is saved). The draft's audience step shows the rules as plain-language chips ("Added to cart in the last 30 days (counted from send time)", "Ordered books since 1 Oct 2026"): click a chip to edit it in a dialog built from `GET /api/catalog`, switch a time rule between "last N days" and a fixed date, add rules from the catalog, or remove them; the consent rule is always applied. The estimated audience per channel updates after each change. The name, channels, rules and brief save automatically, one change at a time with the draft's version; if someone else changed the draft, the page says so and asks to reload. Removing a channel that has content, re-interpreting the brief and deleting the draft each ask for confirmation first. The dashboard, the campaign list and the content step are still placeholders (T17–T18).
+The composer (T16): **+ New campaign** takes a brief and the channels, and the AI turns the brief into a draft (an unsupported brief is explained and kept for rephrasing; nothing is saved). The draft's audience step shows the rules as plain-language chips ("Added to cart in the last 30 days (counted from send time)", "Ordered books since 1 Oct 2026"): click a chip to edit it in a dialog built from `GET /api/catalog`, switch a time rule between "last N days" and a fixed date, add rules from the catalog, or remove them; the consent rule is always applied. The estimated audience per channel updates after each change. The channels and rules save automatically, one change at a time with the draft's version; if someone else changed the draft, the page says so and asks to reload. The page title is the start of the brief (D43); the full brief is in the brief card. Removing a channel that has content, re-interpreting the brief and deleting the draft each ask for confirmation first. The dashboard, the campaign list and the content step are still placeholders (T17–T18).
 
 Development with hot reload, against the api from `docker compose up`, without a local Node:
 
@@ -166,7 +165,7 @@ Changes from the design so far:
 - **Saving drafts:** every change saves itself through the API with the draft's version, so a "Saving… / All changes saved" indicator replaces the *Save draft* button and the unsaved-changes dialog. Only the brief text waits for *Re-interpret*.
 - **Rule preview:** the design previews the count while a rule is edited; counting unsaved rules would need another endpoint, so the count updates when the rule is applied and shows the change ("−82 since your last edit").
 - **Dropped notes:** "‘20% discount’ was used for the content, not the audience" (the AI gives no such explanation) and "N without consent" (the counts already exclude anyone without consent).
-- **Campaign names** are real and editable (D42), with a default from the brief.
+- **Campaign names:** there is no separate name (D43). Lists show the brief's first ~60 characters, cut at a word with "…", and a campaign's page shows the full brief.
 - **Building rules without the AI** for a new campaign is not offered yet: an unreadable brief is rephrased.
 
 Differences to settle when the later screens are built (not decided yet):
@@ -195,6 +194,7 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 
 ## Future improvements
 
+- **AI-generated campaign titles:** the AI could suggest a short title in the same answer that interprets the brief, with the brief's start as the fallback and manual edits kept. Deferred to keep the scope small (D43).
 - **Archiving campaigns:** hide finished campaigns from the list. Not built: deleting drafts removes most of the clutter, and archiving can be added later without changing how deletion works (D37).
 
 ## Known limitations

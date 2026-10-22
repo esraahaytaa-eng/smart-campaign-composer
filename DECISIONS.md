@@ -325,11 +325,19 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Trade-offs:** More CSS to write; no ready-made data table or chart components.
 
 ### D42 — Campaigns have an editable name
-- **Status:** Accepted · 2026-10-22
+- **Status:** Superseded by D43 · 2026-10-22
 - **Decision:** Every campaign has a `name`, 1–100 characters. On create it defaults to the brief's first sentence, cut at a word to at most 60 characters with "…"; a resend defaults to its parent's name plus "· resend (SMS)" or "· resend (Email)". `PUT /api/campaigns/{id}/name` `{name, version}` renames a draft (version-checked, D10). Re-interpreting the brief (D40) updates a name that is still the old brief's default and keeps a name the marketer chose. A campaign stored without a name (rows from before this change) shows the default.
 - **Why:** The design names campaigns everywhere; a sentence-long brief is hard to scan in lists.
 - **Rejected:** *A title derived from the brief only:* long, sentence-like and not editable. *Renaming after approval:* everything about an approved campaign stays fixed (D11).
 - **Trade-offs:** One more field to keep in step with the brief.
+- **History:** 2026-10-22: removed before release in favour of brief-based titles (D43). Migration 00005 drops the column added by 00004.
+
+### D43 — Campaigns are identified by their brief
+- **Status:** Accepted · 2026-10-22
+- **Decision:** No separate campaign name. Lists show the brief's first ~60 characters, cut at a word with "…"; the campaign's own page shows the full brief. Replaces D42. AI-generated titles are deferred (README, Future improvements).
+- **Why:** The name only helps marketers recognise a campaign in a list, and the brief already does that; a separate field adds an endpoint, a migration and rules for keeping it in step with the brief.
+- **Rejected:** *Editable name (D42):* more scope than the case needs. *AI-suggested name in the interpretation answer:* better titles at almost no cost, but it grows the AI answer format; revisit if time permits.
+- **Trade-offs:** Titles read like the start of a sentence, and two campaigns with similar briefs look alike in a list.
 
 ## Open Questions
 
