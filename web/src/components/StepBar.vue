@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // The composer's five steps from the design; earlier steps show a check.
+import { t, type Key } from '../i18n'
+
 const props = defineProps<{ current: number }>()
-const steps = ['Audience', 'Content', 'Review & approve', 'Sending', 'Monitor']
+const steps: Key[] = ['steps.audience', 'steps.content', 'steps.review', 'steps.sending', 'steps.monitor']
 const state = (i: number) => (i + 1 < props.current ? 'done' : i + 1 === props.current ? 'current' : 'todo')
 </script>
 
 <template>
-  <ol class="steps" aria-label="Campaign steps">
+  <ol class="steps" :aria-label="t('steps.label')">
     <li v-for="(label, i) in steps" :key="label" :class="state(i)" :aria-current="state(i) === 'current' ? 'step' : undefined">
       <span class="dot" aria-hidden="true">{{ state(i) === 'done' ? '✓' : i + 1 }}</span>
-      <span>{{ label }}<span v-if="state(i) === 'done'" class="sr-only"> (done)</span></span>
+      <span>{{ t(label) }}<span v-if="state(i) === 'done'" class="sr-only"> {{ t('steps.done') }}</span></span>
     </li>
   </ol>
 </template>

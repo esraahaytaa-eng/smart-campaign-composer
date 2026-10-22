@@ -1,43 +1,46 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Channel, Counts } from '../campaign/types'
+import { formatNumber, t } from '../i18n'
 
 // change is the total's difference after the marketer's last edit (shown
 // instead of a preview before Apply, which would need another endpoint).
 const props = defineProps<{ counts?: Counts; channels: Channel[]; change?: number | null; resend?: boolean }>()
-const f = (n: number) => n.toLocaleString('en-US')
 const rows = computed(() =>
   (['sms', 'email'] as Channel[]).map((ch) => {
     const on = props.channels.includes(ch)
     const n = props.counts?.[ch] ?? 0
     const total = props.counts?.total ?? 0
-    return { ch, label: ch === 'sms' ? 'SMS recipients' : 'Email recipients', on, count: on ? f(n) : '—', width: on && total ? `${(n / total) * 100}%` : '0%' }
+    return {
+      ch,
+      label: t(ch === 'sms' ? 'channel.recipients.sms' : 'channel.recipients.email'),
+      off: t('channel.notSelected', { channel: t(ch === 'sms' ? 'channel.sms' : 'channel.email') }),
+      on,
+      count: on ? formatNumber(n) : '—',
+      width: on && total ? `${(n / total) * 100}%` : '0%',
+    }
   }),
 )
 </script>
 
 <template>
   <section class="card panel" aria-labelledby="audience-title">
-    <h2 id="audience-title">Estimated audience</h2>
+    <h2 id="audience-title">{{ t('audience.title') }}</h2>
     <div class="total">
-      <span class="number">{{ counts ? f(counts.total) : '—' }}</span>
-      <span>customers match right now</span>
-      <span v-if="change" class="change" role="status">{{ change > 0 ? '+' : '−' }}{{ f(Math.abs(change)) }} since your last edit</span>
+      <span class="number">{{ counts ? formatNumber(counts.total) : '—' }}</span>
+      <span>{{ t('audience.match') }}</span>
+      <span v-if="change" class="change" role="status">{{ t('audience.change', { sign: change > 0 ? '+' : '−', count: formatNumber(Math.abs(change)) }) }}</span>
     </div>
     <div v-for="r in rows" :key="r.ch" class="row" :class="{ off: !r.on }">
       <div class="line">
         <span>{{ r.label }}</span><strong>{{ r.count }}</strong>
       </div>
       <div class="bar" aria-hidden="true"><div :style="{ width: r.width }" :class="r.ch" /></div>
-      <span v-if="!r.on" class="note">{{ r.ch === 'sms' ? 'SMS' : 'Email' }} not selected</span>
+      <span v-if="!r.on" class="note">{{ r.off }}</span>
     </div>
     <p class="alert alert-info">
-      {{
-        resend
-          ? 'The recipients of the original campaign who were skipped for the character limit, minus anyone who may already have it.'
-          : 'Saved as rules, not a fixed list. Only customers who allow the channel are counted.'
-      }}
-      The final audience is recalculated when sending starts.
+      {{ t(resend ? 'audience.resendNote' : 'audience.rulesNote') }}
+      {{ t('audience.recalculated') }}
     </p>
   </section>
 </template>

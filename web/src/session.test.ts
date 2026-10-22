@@ -22,7 +22,7 @@ describe('loadSession', () => {
     expect(await session.loadSession()).toBeNull()
     expect(await session.loadSession()).toBeNull()
     expect(fetch).toHaveBeenCalledOnce()
-    expect(session.sessionProblem.value).toBe('')
+    expect(session.sessionProblem.value).toBeNull()
   })
 
   // A server error is not "signed out": say so, and ask again next time.
@@ -33,9 +33,9 @@ describe('loadSession', () => {
     )
 
     expect(await session.loadSession()).toBeNull()
-    expect(session.sessionProblem.value).toBe('The server answered with an error (502).')
+    expect(session.sessionProblem.value?.status).toBe(502)
     expect(await session.loadSession()).toEqual(me)
-    expect(session.sessionProblem.value).toBe('')
+    expect(session.sessionProblem.value).toBeNull()
   })
 })
 
@@ -46,6 +46,6 @@ describe('login', () => {
       () => new Response('down', { status: 500 }),
     )
 
-    await expect(session.login(me.email, 'pw')).rejects.toThrow('The server answered with an error (500).')
+    await expect(session.login(me.email, 'pw')).rejects.toMatchObject({ status: 500 })
   })
 })

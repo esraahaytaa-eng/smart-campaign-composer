@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
 import { logout, session } from '../session'
 import BrandMark from '../components/BrandMark.vue'
+import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import { t } from '../i18n'
 
 const router = useRouter()
 
@@ -16,12 +18,8 @@ const initials = computed(() =>
     .join(''),
 )
 // Providers are always mocked; the AI may be Claude (LLM_MODE=real, D24).
-const modeLabel = computed(() => (session.value?.llm_mode === 'real' ? 'Claude AI · Mock providers' : 'Mock AI · Mock providers'))
-const modeTitle = computed(() =>
-  session.value?.llm_mode === 'real'
-    ? 'The AI is Claude. SMS and email providers are simulated: no real messages are sent.'
-    : 'The AI and the SMS and email providers are simulated. No real messages are sent.',
-)
+const modeLabel = computed(() => t(session.value?.llm_mode === 'real' ? 'mode.real' : 'mode.mock'))
+const modeTitle = computed(() => t(session.value?.llm_mode === 'real' ? 'mode.realHelp' : 'mode.mockHelp'))
 
 async function signOut() {
   await logout().catch(() => {}) // the session is cleared locally either way
@@ -31,17 +29,18 @@ async function signOut() {
 
 <template>
   <div class="shell">
-    <nav class="sidebar" aria-label="Primary">
+    <nav class="sidebar" :aria-label="t('nav.primary')">
       <div class="brand">
         <BrandMark />
-        <span>Smart Campaign<br />Composer</span>
+        <span class="brand-name">{{ t('app.name') }}</span>
       </div>
-      <RouterLink :to="{ name: 'new-campaign' }" class="new">+ New campaign</RouterLink>
+      <RouterLink :to="{ name: 'new-campaign' }" class="new">{{ t('nav.newCampaign') }}</RouterLink>
       <div class="links">
-        <RouterLink :to="{ name: 'dashboard' }" class="link" exact-active-class="active">Dashboard</RouterLink>
-        <RouterLink :to="{ name: 'campaigns' }" class="link" :class="{ active: $route.path.startsWith('/campaigns') }">Campaigns</RouterLink>
+        <RouterLink :to="{ name: 'dashboard' }" class="link" exact-active-class="active">{{ t('page.dashboard') }}</RouterLink>
+        <RouterLink :to="{ name: 'campaigns' }" class="link" :class="{ active: $route.path.startsWith('/campaigns') }">{{ t('page.campaigns') }}</RouterLink>
       </div>
       <div class="foot">
+        <LanguageSwitcher />
         <span class="mode-badge" :title="modeTitle">{{ modeLabel }}<span class="sr-only">. {{ modeTitle }}</span></span>
         <DropdownMenuRoot>
           <DropdownMenuTrigger class="account">
@@ -53,8 +52,8 @@ async function signOut() {
           </DropdownMenuTrigger>
           <DropdownMenuPortal>
             <DropdownMenuContent class="menu" side="top" align="start" :side-offset="8">
-              <DropdownMenuLabel class="menu-label">Signed in as<strong>{{ session?.email }}</strong></DropdownMenuLabel>
-              <DropdownMenuItem class="menu-item menu-item-danger" @select="signOut">Log out</DropdownMenuItem>
+              <DropdownMenuLabel class="menu-label">{{ t('account.signedInAs') }}<strong>{{ session?.email }}</strong></DropdownMenuLabel>
+              <DropdownMenuItem class="menu-item menu-item-danger" @select="signOut">{{ t('account.logout') }}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenuPortal>
         </DropdownMenuRoot>
@@ -82,6 +81,9 @@ async function signOut() {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+.brand-name {
+  max-width: 130px;
 }
 .brand {
   display: flex;

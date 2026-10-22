@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { setLocale } from '../i18n'
 import type { Catalog, Rule } from './types'
 import { addableRules, defaultForm, formProblems, fromForm, ruleErrors, ruleLabel, ruleTitle, toForm } from './rules'
 
@@ -149,5 +150,33 @@ describe('formProblems', () => {
     [form('total_spend', 'gte', { amount: Number.NaN }), 'Enter an amount from 0 to 1,000,000 TL.'],
   ])('%j: %s', (f, problem) => {
     expect(formProblems(f, catalog)).toEqual([problem])
+  })
+})
+
+// D44: chips are UI text in the marketer's language; the data inside them
+// (cities, categories, numbers, dates) is never translated.
+describe('Turkish chip labels', () => {
+  afterEach(() => setLocale('en'))
+
+  it.each([
+    [rule('city', 'in', ['İstanbul', 'Ankara']), 'Şehir: İstanbul veya Ankara'],
+    [rule('cart_added', 'within', { last_days: 30 }), 'Son 30 gün içinde (gönderim zamanına göre) sepete ürün ekledi'],
+    [rule('no_order', 'within', { from: '2026-10-01' }), '1 Eki 2026 tarihinden beri sipariş vermedi'],
+    [rule('signed_up', 'within', { from: '2026-10-01', to: '2026-10-10' }), '1 Eki 2026 ile 10 Eki 2026 arasında üye oldu'],
+    [rule('last_order', 'before', { last_days: 90 }), 'Son siparişi 90 günden daha eski (gönderim zamanına göre)'],
+    [rule('ordered_category', 'in', { categories: ['books'], last_days: 7 }), 'Son 7 gün içinde (gönderim zamanına göre) books kategorisinden sipariş verdi'],
+    [rule('order_count', 'gte', 3), 'En az 3 sipariş'],
+    [rule('total_spend', 'gte', 10000), 'Toplam harcaması en az 10.000 TL'],
+    [rule('cart_value', 'gte', 499.5), 'Sepet tutarı en az 499,50 TL'],
+  ])('%j reads "%s"', (r, label) => {
+    setLocale('tr')
+    expect(ruleLabel(r)).toBe(label)
+  })
+
+  it('translates editor titles and problems', () => {
+    setLocale('tr')
+    expect(ruleTitle('city', 'in')).toBe('Şehir')
+    expect(formProblems(defaultForm('city', 'in', catalog), catalog)).toEqual(['En az bir şehir seçin.'])
+    expect(formProblems(Object.assign(defaultForm('total_spend', 'gte', catalog), { amount: -1 }), catalog)).toEqual(['0 ile 1.000.000 TL arasında bir tutar girin.'])
   })
 })

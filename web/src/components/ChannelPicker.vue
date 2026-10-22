@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { Channel } from '../campaign/types'
+import { t, type Key } from '../i18n'
 
 const props = defineProps<{ modelValue: Channel[]; disabled?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [Channel[]] }>()
 
-const options: { label: string; channels: Channel[] }[] = [
-  { label: 'SMS', channels: ['sms'] },
-  { label: 'Email', channels: ['email'] },
-  { label: 'Both', channels: ['sms', 'email'] },
+const options: { label: Key; channels: Channel[] }[] = [
+  { label: 'channel.sms', channels: ['sms'] },
+  { label: 'channel.email', channels: ['email'] },
+  { label: 'channel.both', channels: ['sms', 'email'] },
 ]
 const selected = (o: { channels: Channel[] }) =>
   o.channels.length === props.modelValue.length && o.channels.every((c) => props.modelValue.includes(c))
@@ -15,7 +16,7 @@ const selected = (o: { channels: Channel[] }) =>
 
 <template>
   <div class="picker" role="group" aria-labelledby="channels-label">
-    <span id="channels-label" class="label">Channels</span>
+    <span id="channels-label" class="label">{{ t('channel.label') }}</span>
     <div class="options">
       <button
         v-for="o in options"
@@ -25,7 +26,7 @@ const selected = (o: { channels: Channel[] }) =>
         :disabled="disabled"
         @click="!selected(o) && emit('update:modelValue', o.channels)"
       >
-        {{ o.label }}
+        {{ t(o.label) }}
       </button>
     </div>
   </div>

@@ -1,8 +1,12 @@
+<script setup lang="ts">
+import { t } from '../i18n'
+</script>
+
 <template>
   <div class="page">
-    <h1>Campaigns</h1>
+    <h1>{{ t('page.campaigns') }}</h1>
     <div class="card empty">
-      <p>The campaign list and composer are added in later steps of the plan (T16–T18).</p>
+      <p>{{ t('campaigns.placeholder') }}</p>
     </div>
   </div>
 </template>

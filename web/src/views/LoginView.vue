@@ -6,6 +6,9 @@ import { safeRedirect } from '../guard'
 import { focusTarget } from '../login'
 import { login, sessionProblem } from '../session'
 import BrandMark from '../components/BrandMark.vue'
+import LanguageSwitcher from '../components/LanguageSwitcher.vue'
+import { t } from '../i18n'
+import { errorText } from '../i18n/errors'
 
 const router = useRouter()
 const route = useRoute()
@@ -16,16 +19,20 @@ const showPassword = ref(false)
 const tried = ref(false)
 const busy = ref(false)
 // From the server: wrong login, or a problem reaching it (also on first load).
-const failure = ref(sessionProblem.value)
+// Kept as the error, so it is shown in the current language.
+const failure = ref<unknown>(sessionProblem.value)
+const failureText = computed(() =>
+  failure.value instanceof ApiError && failure.value.status === 401 ? t('auth.wrongLogin') : failure.value ? errorText(failure.value) : '',
+)
 const emailInput = ref<HTMLInputElement>()
 const passwordInput = ref<HTMLInputElement>()
 
 const emailError = computed(() => {
   const v = email.value.trim()
-  if (!v) return 'Enter your work email.'
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email, like name@company.com.'
+  if (!v) return t('auth.emailRequired')
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : t('auth.emailInvalid')
 })
-const passwordError = computed(() => (password.value ? '' : 'Enter your password.'))
+const passwordError = computed(() => (password.value ? '' : t('auth.passwordRequired')))
 
 async function focusProblem() {
   await nextTick()
@@ -36,19 +43,14 @@ async function focusProblem() {
 async function submit() {
   if (busy.value) return
   tried.value = true
-  failure.value = ''
+  failure.value = null
   if (emailError.value || passwordError.value) return focusProblem()
   busy.value = true
   try {
     await login(email.value.trim(), password.value)
     await router.replace(safeRedirect(route.query.redirect) ?? '/')
   } catch (err) {
-    failure.value =
-      err instanceof ApiError && err.status === 401
-        ? 'Email or password is incorrect. Check both and try again.'
-        : err instanceof ApiError
-          ? err.message
-          : 'Something went wrong. Try again.'
+    failure.value = err
     busy.value = false
     await focusProblem()
   } finally {
@@ -57,43 +59,44 @@ async function submit() {
 }
 
 function clearFailure() {
-  failure.value = ''
+  failure.value = null
 }
 </script>
 
 <template>
   <div class="login">
-    <section class="pitch" aria-label="About Smart Campaign Composer">
+    <section class="pitch" :aria-label="t('auth.about')">
       <div class="brand">
         <BrandMark inverted />
-        <span>Smart Campaign Composer</span>
+        <span>{{ t('app.name') }}</span>
       </div>
       <div class="pitch-body">
-        <h1>From a one-line brief to a campaign you approved.</h1>
+        <h1>{{ t('auth.headline') }}</h1>
         <ol>
-          <li>AI turns your brief into audience rules you can edit</li>
-          <li>SMS and email drafts, checked against character limits</li>
-          <li>Nothing sends until you approve; every result is traceable</li>
+          <li>{{ t('auth.point1') }}</li>
+          <li>{{ t('auth.point2') }}</li>
+          <li>{{ t('auth.point3') }}</li>
         </ol>
       </div>
       <!-- The AI mode is only known after sign-in (GET /api/me); providers are always mocked. -->
-      <span class="pitch-badge">Mock SMS and email providers — no real messages are sent</span>
+      <span class="pitch-badge">{{ t('auth.providers') }}</span>
     </section>
 
     <main class="form-side">
+      <LanguageSwitcher class="lang" />
       <form novalidate aria-labelledby="login-title" @submit.prevent="submit">
         <div class="heading">
-          <h2 id="login-title">Sign in</h2>
-          <span>Use your marketing team account.</span>
+          <h2 id="login-title">{{ t('auth.signIn') }}</h2>
+          <span>{{ t('auth.subtitle') }}</span>
         </div>
 
-        <div v-if="failure" role="alert" class="alert alert-error">
+        <div v-if="failureText" role="alert" class="alert alert-error">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a31f15" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></svg>
-          <span>{{ failure }}</span>
+          <span>{{ failureText }}</span>
         </div>
 
         <div class="field">
-          <label for="email">Work email</label>
+          <label for="email">{{ t('auth.email') }}</label>
           <input
             id="email"
             ref="emailInput"
@@ -101,7 +104,7 @@ function clearFailure() {
             class="input"
             type="email"
             autocomplete="username"
-            placeholder="you@company.com"
+            :placeholder="t('auth.emailPlaceholder')"
             :readonly="busy"
             :aria-invalid="tried && !!emailError"
             :aria-describedby="tried && emailError ? 'email-error' : undefined"
@@ -111,7 +114,7 @@ function clearFailure() {
         </div>
 
         <div class="field">
-          <label for="password">Password</label>
+          <label for="password">{{ t('auth.password') }}</label>
           <div class="password" :class="{ invalid: tried && !!passwordError }">
             <input
               id="password"
@@ -126,7 +129,7 @@ function clearFailure() {
             />
             <button type="button" class="reveal" @click="showPassword = !showPassword">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
-              {{ showPassword ? 'Hide' : 'Show' }}<span class="sr-only"> password</span>
+              {{ t(showPassword ? 'auth.hide' : 'auth.show') }}<span class="sr-only">{{ t('auth.revealSuffix') }}</span>
             </button>
           </div>
           <span v-if="tried && passwordError" id="password-error" class="field-error">{{ passwordError }}</span>
@@ -135,10 +138,10 @@ function clearFailure() {
         <!-- aria-disabled, not disabled: a disabled button would drop keyboard focus. -->
         <button type="submit" class="btn btn-primary btn-lg" :aria-disabled="busy" :class="{ busy }">
           <span v-if="busy" class="spinner" aria-hidden="true" />
-          {{ busy ? 'Signing in…' : 'Sign in' }}
+          {{ t(busy ? 'auth.signingIn' : 'auth.signIn') }}
         </button>
 
-        <p class="demo-note">Running the local demo? The demo login is described in the README.</p>
+        <p class="demo-note">{{ t('auth.demoNote') }}</p>
       </form>
     </main>
   </div>
@@ -229,6 +232,7 @@ function clearFailure() {
   background: var(--notice-dot);
 }
 .form-side {
+  position: relative;
   flex: 1 1 480px;
   padding: 48px 24px;
   display: flex;
@@ -241,6 +245,11 @@ form {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+.lang {
+  position: absolute;
+  top: 24px;
+  right: 24px;
 }
 .heading {
   display: flex;

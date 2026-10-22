@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ApiError } from '../api'
 import { browserTimeZone, campaigns } from '../campaign/client'
 import type { Channel } from '../campaign/types'
 import ChannelPicker from '../components/ChannelPicker.vue'
 import StepBar from '../components/StepBar.vue'
+import { t } from '../i18n'
+import { aiReason, errorText } from '../i18n/errors'
 
 const MAX_BRIEF = 1000 // characters, as the backend counts them (D15)
 
@@ -13,7 +14,9 @@ const router = useRouter()
 const brief = ref('')
 const channels = ref<Channel[]>(['sms', 'email'])
 const busy = ref(false)
-const problem = ref<{ text: string; unsupported: boolean } | null>(null)
+// What went wrong, kept as data so it shows in the current language. reason is
+// AI output (an unsupported brief): shown exactly as written, never translated.
+const problem = ref<{ text: () => string; reason: string | null } | null>(null)
 const briefInput = ref<HTMLTextAreaElement>()
 
 const length = computed(() => [...brief.value.trim()].length)
@@ -22,7 +25,8 @@ const tooLong = computed(() => length.value > MAX_BRIEF)
 async function interpret() {
   problem.value = null
   if (length.value === 0 || tooLong.value) {
-    problem.value = { text: length.value === 0 ? 'Write a brief first.' : `Shorten the brief to ${MAX_BRIEF} characters.`, unsupported: false }
+    const empty = length.value === 0
+    problem.value = { text: () => (empty ? t('composer.briefEmpty') : t('composer.briefTooLong', { max: MAX_BRIEF })), reason: null }
     briefInput.value?.focus()
     return
   }
@@ -32,8 +36,7 @@ async function interpret() {
     await router.replace({ name: 'campaign', params: { id: c.id } })
   } catch (err) {
     // An unsupported brief keeps the text so it can be rephrased; nothing was saved (D15).
-    const unsupported = err instanceof ApiError && (err.body as { unsupported?: boolean } | undefined)?.unsupported === true
-    problem.value = { text: err instanceof ApiError ? err.message : 'Something went wrong. Try again.', unsupported }
+    problem.value = { text: () => errorText(err), reason: aiReason(err) }
     briefInput.value?.focus()
   } finally {
     busy.value = false
@@ -44,44 +47,43 @@ async function interpret() {
 <template>
   <div class="page">
     <div class="head">
-      <RouterLink :to="{ name: 'campaigns' }" class="back" aria-label="Back to campaigns">
+      <RouterLink :to="{ name: 'campaigns' }" class="back" :aria-label="t('composer.back')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
       </RouterLink>
-      <h1>New campaign</h1>
+      <h1>{{ t('page.newCampaign') }}</h1>
     </div>
     <StepBar :current="1" />
 
     <form class="card brief" novalidate @submit.prevent="interpret">
-      <label for="brief" class="section-title">Campaign brief</label>
-      <p id="brief-help" class="help">
-        Describe who should get the campaign and what it offers. The AI turns it into audience rules you can check and edit.
-      </p>
+      <label for="brief" class="section-title">{{ t('composer.brief') }}</label>
+      <p id="brief-help" class="help">{{ t('composer.briefHelp') }}</p>
       <textarea
         id="brief"
         ref="briefInput"
         v-model="brief"
         rows="4"
         class="textarea"
-        placeholder="e.g. Send a 20% discount reminder to customers in Istanbul who added products to their cart in the last 30 days but did not buy anything."
+        :placeholder="t('composer.briefPlaceholder')"
         aria-describedby="brief-help brief-count"
         :aria-invalid="tooLong"
         :readonly="busy"
       />
-      <span id="brief-count" class="count" :class="{ over: tooLong }">{{ length }} / {{ MAX_BRIEF }}</span>
+      <span id="brief-count" class="count" :class="{ over: tooLong }">{{ t('composer.count', { count: length, max: MAX_BRIEF }) }}</span>
 
-      <div v-if="problem" role="alert" class="alert" :class="problem.unsupported ? 'alert-warning' : 'alert-error'">
-        <span>
-          <strong v-if="problem.unsupported">The AI couldn't turn this brief into audience rules.</strong>
-          {{ problem.text }}
-          <template v-if="problem.unsupported"> Rephrase the brief using the conditions the audience rules support.</template>
+      <div v-if="problem" role="alert" class="alert" :class="problem.reason ? 'alert-warning' : 'alert-error'">
+        <span v-if="problem.reason">
+          <strong>{{ t('composer.unsupported') }}</strong>
+          {{ t('composer.aiReason') }} <q>{{ problem.reason }}</q>
+          {{ t('composer.unsupportedHint') }}
         </span>
+        <span v-else>{{ problem.text() }}</span>
       </div>
 
       <div class="bar">
         <ChannelPicker v-model="channels" :disabled="busy" />
         <button type="submit" class="btn btn-primary" :class="{ busy }" :aria-disabled="busy">
           <span v-if="busy" class="spinner" aria-hidden="true" />
-          {{ busy ? 'The AI is reading the brief…' : 'Interpret with AI' }}
+          {{ t(busy ? 'composer.interpreting' : 'composer.interpret') }}
         </button>
       </div>
     </form>

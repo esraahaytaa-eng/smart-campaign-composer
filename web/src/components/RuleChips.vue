@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
 import type { Catalog, Rule } from '../campaign/types'
 import { addableRules, ruleLabel, ruleTitle } from '../campaign/rules'
+import { t } from '../i18n'
 
 const props = defineProps<{ rules: Rule[]; catalog: Catalog; errors?: Map<number, string[]>; disabled?: boolean }>()
 const emit = defineEmits<{ edit: [index: number]; remove: [index: number]; add: [field: string, op: string] }>()
@@ -14,10 +15,10 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
 <template>
   <div class="chips">
     <template v-for="(r, i) in rules" :key="`${r.field} ${r.op}`">
-      <span v-if="i > 0" class="and" aria-hidden="true">AND</span>
+      <span v-if="i > 0" class="and" aria-hidden="true">{{ t('rules.and') }}</span>
       <span class="chip" :class="{ invalid: errors?.has(i) }">
         <button type="button" class="chip-label" :disabled="disabled" :aria-describedby="errors?.has(i) ? `rule-error-${i}` : undefined" @click="emit('edit', i)">
-          {{ ruleLabel(r) }}<span class="sr-only">. Edit</span>
+          {{ ruleLabel(r) }}<span class="sr-only">. {{ t('rules.edit') }}</span>
         </button>
         <!-- aria-disabled keeps the button focusable, so its reason can be heard. -->
         <button
@@ -26,7 +27,7 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
           :disabled="disabled"
           :aria-disabled="lastRule"
           :aria-describedby="lastRule ? 'last-rule-hint' : undefined"
-          :aria-label="`Remove rule: ${ruleLabel(r)}`"
+          :aria-label="t('rules.remove', { rule: ruleLabel(r) })"
           @click="!lastRule && emit('remove', i)"
         >
           ×
@@ -34,14 +35,14 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
         <span v-if="errors?.has(i)" :id="`rule-error-${i}`" class="chip-error">{{ errors.get(i)?.join(' ') }}</span>
       </span>
     </template>
-    <span class="and" aria-hidden="true">AND</span>
-    <span class="chip fixed" title="Always applied. Customers without consent for a channel never receive it.">
+    <span class="and" aria-hidden="true">{{ t('rules.and') }}</span>
+    <span class="chip fixed" :title="t('rules.consentHelp')">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
-      Has consent for the channel<span class="sr-only"> (always applied)</span>
+      {{ t('rules.consent') }}<span class="sr-only"> {{ t('rules.consentAlways') }}</span>
     </span>
-    <span v-if="lastRule" id="last-rule-hint" class="hint">A campaign needs at least one audience rule.</span>
+    <span v-if="lastRule" id="last-rule-hint" class="hint">{{ t('rules.lastRule') }}</span>
     <DropdownMenuRoot v-if="addable.length">
-      <DropdownMenuTrigger class="add" :disabled="disabled">+ Add rule</DropdownMenuTrigger>
+      <DropdownMenuTrigger class="add" :disabled="disabled">{{ t('rules.add') }}</DropdownMenuTrigger>
       <DropdownMenuPortal>
         <DropdownMenuContent class="menu add-menu" align="start" :side-offset="6">
           <DropdownMenuItem v-for="p in addable" :key="`${p.field} ${p.op}`" class="menu-item" @select="emit('add', p.field, p.op)">

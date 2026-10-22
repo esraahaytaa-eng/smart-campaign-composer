@@ -1,7 +1,11 @@
+<script setup lang="ts">
+import { t } from '../i18n'
+</script>
+
 <template>
   <div class="page">
-    <h1>Page not found</h1>
-    <p>This page doesn’t exist. <RouterLink :to="{ name: 'dashboard' }">Go to the dashboard</RouterLink></p>
+    <h1>{{ t('page.notFound') }}</h1>
+    <p>{{ t('notFound.text') }} <RouterLink :to="{ name: 'dashboard' }">{{ t('notFound.link') }}</RouterLink></p>
   </div>
 </template>
 

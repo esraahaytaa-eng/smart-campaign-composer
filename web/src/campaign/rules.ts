@@ -1,5 +1,7 @@
-// Rule chips (D9): plain-language labels, and the editor form that maps to
-// and from the rule values the backend validates (D14, D39).
+// Rule chips (D9): plain-language labels in the UI language (D44), and the
+// editor form that maps to and from the rule values the backend validates
+// (D14, D39).
+import { capitalize, formatAmount, formatDate, formatNumber, formatOr, t, type Key } from '../i18n'
 import type { Catalog, FieldError, Rule, ValueType } from './types'
 
 type Window = { last_days?: number; from?: string; to?: string }
@@ -16,60 +18,48 @@ export type RuleForm = {
   amount: number // order count or TL amount
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-// "2026-10-01" → "1 Oct 2026", independent of the browser's locale.
-export function formatDate(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number)
-  return `${d} ${MONTHS[(m ?? 1) - 1]} ${y}`
-}
-
-function formatAmount(n: number): string {
-  return n.toLocaleString('en-US', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })
-}
-
-function list(items: string[]): string {
-  return items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`
-}
-
 // "in the last 30 days (counted from send time)", "since 1 Oct 2026", …
 function windowPhrase(w: Window): string {
-  if (w.last_days !== undefined) {
-    return `in the last ${w.last_days === 1 ? 'day' : `${w.last_days} days`} (counted from send time)`
-  }
-  return w.to ? `from ${formatDate(w.from ?? '')} to ${formatDate(w.to)}` : `since ${formatDate(w.from ?? '')}`
+  if (w.last_days !== undefined) return t('window.last', { count: w.last_days })
+  return w.to ? t('window.range', { from: formatDate(w.from ?? ''), to: formatDate(w.to) }) : t('window.since', { date: formatDate(w.from ?? '') })
 }
 
+// ruleLabel is a chip's text in the UI language (D9, D44). Cities and
+// category codes are data: they are shown exactly as stored.
 export function ruleLabel(r: Rule): string {
-  const v = r.value as Window & { categories?: string[] } & string[] & number
-  switch (r.field) {
-    case 'city':
-      return `City is ${list(r.value as string[])}`
-    case 'cart_added':
-      return `Added to cart ${windowPhrase(v)}`
-    case 'no_order':
-      return `No order ${windowPhrase(v)}`
-    case 'signed_up':
-      return `Signed up ${windowPhrase(v)}`
-    case 'last_order':
-      if (r.op === 'after') return `Last order ${windowPhrase(v)}`
-      return v.last_days !== undefined
-        ? `Last order more than ${v.last_days} days ago (counted from send time)`
-        : `Last order before ${formatDate(v.from ?? '')}`
-    case 'ordered_category':
-      return `Ordered ${list(v.categories ?? [])} ${windowPhrase(v)}`
-    case 'carted_category':
-      return `Added ${list(v.categories ?? [])} to cart ${windowPhrase(v)}`
-    case 'order_count': {
-      const n = r.value as number
-      return `${r.op === 'gte' ? 'At least' : 'At most'} ${n} ${n === 1 ? 'order' : 'orders'}`
+  const v = r.value as Window & { categories?: string[] }
+  const window = () => windowPhrase(v)
+  const label = (() => {
+    switch (r.field) {
+      case 'city':
+        return t('rule.city', { list: formatOr(r.value as string[]) })
+      case 'cart_added':
+        return t('rule.cartAdded', { window: window() })
+      case 'no_order':
+        return t('rule.noOrder', { window: window() })
+      case 'signed_up':
+        return t('rule.signedUp', { window: window() })
+      case 'last_order':
+        if (r.op === 'after') return t('rule.lastOrderAfter', { window: window() })
+        return v.last_days !== undefined
+          ? t('rule.lastOrderBeforeDays', { count: v.last_days })
+          : t('rule.lastOrderBeforeDate', { date: formatDate(v.from ?? '') })
+      case 'ordered_category':
+        return t('rule.orderedCategory', { list: formatOr(v.categories ?? []), window: window() })
+      case 'carted_category':
+        return t('rule.cartedCategory', { list: formatOr(v.categories ?? []), window: window() })
+      case 'order_count': {
+        const orders = t('rules.orders', { count: r.value as number })
+        return t(r.op === 'gte' ? 'rule.orderCountGte' : 'rule.orderCountLte', { orders })
+      }
+      case 'total_spend':
+        return t(r.op === 'gte' ? 'rule.totalSpendGte' : 'rule.totalSpendLte', { amount: formatAmount(r.value as number) })
+      case 'cart_value':
+        return t('rule.cartValueGte', { amount: formatAmount(r.value as number) })
     }
-    case 'total_spend':
-      return `Spent ${r.op === 'gte' ? 'at least' : 'at most'} ${formatAmount(r.value as number)} TL in total`
-    case 'cart_value':
-      return `At least ${formatAmount(r.value as number)} TL in the cart`
-  }
-  return `${r.field} ${r.op}` // a field this screen doesn't know yet
+    return `${r.field} ${r.op}` // a field this screen doesn't know yet
+  })()
+  return capitalize(label) // Turkish labels can start with the time window
 }
 
 export function valueType(field: string, catalog: Catalog): ValueType | undefined {
@@ -147,25 +137,26 @@ export function ruleErrors(errors: FieldError[]): { byRule: Map<number, string[]
   return { byRule, general }
 }
 
-const TITLES: Record<string, string> = {
-  'city in': 'City',
-  'cart_added within': 'Added to cart',
-  'no_order within': 'No order',
-  'signed_up within': 'Signed up',
-  'last_order before': 'Last order longer ago than',
-  'last_order after': 'Last order within',
-  'ordered_category in': 'Ordered a category',
-  'carted_category in': 'Added a category to cart',
-  'order_count gte': 'Number of orders: at least',
-  'order_count lte': 'Number of orders: at most',
-  'total_spend gte': 'Total spend: at least',
-  'total_spend lte': 'Total spend: at most',
-  'cart_value gte': 'Cart value: at least',
+const TITLES: Record<string, Key> = {
+  'city in': 'title.city',
+  'cart_added within': 'title.cartAdded',
+  'no_order within': 'title.noOrder',
+  'signed_up within': 'title.signedUp',
+  'last_order before': 'title.lastOrderBefore',
+  'last_order after': 'title.lastOrderAfter',
+  'ordered_category in': 'title.orderedCategory',
+  'carted_category in': 'title.cartedCategory',
+  'order_count gte': 'title.orderCountGte',
+  'order_count lte': 'title.orderCountLte',
+  'total_spend gte': 'title.totalSpendGte',
+  'total_spend lte': 'title.totalSpendLte',
+  'cart_value gte': 'title.cartValueGte',
 }
 
 // ruleTitle names a field and operator in the "+ Add rule" menu and the editor.
 export function ruleTitle(field: string, op: string): string {
-  return TITLES[`${field} ${op}`] ?? `${field} ${op}`
+  const key = TITLES[`${field} ${op}`]
+  return key ? t(key) : `${field} ${op}`
 }
 
 // formProblems catches obvious mistakes before a rule is saved; the backend
@@ -174,24 +165,24 @@ export function formProblems(form: RuleForm, catalog: Catalog): string[] {
   const { max_days, max_count, max_amount, min_date } = catalog.limits
   const type = valueType(form.field, catalog)
   const problems: string[] = []
-  if (type === 'cities' && form.cities.length === 0) problems.push('Choose at least one city.')
-  if (type === 'categories_window' && form.categories.length === 0) problems.push('Choose at least one category.')
+  if (type === 'cities' && form.cities.length === 0) problems.push(t('problem.city'))
+  if (type === 'categories_window' && form.categories.length === 0) problems.push(t('problem.category'))
   if (type === 'window' || type === 'categories_window') {
     if (form.timeMode === 'last') {
-      if (!Number.isInteger(form.lastDays) || form.lastDays < 1 || form.lastDays > max_days) problems.push(`Enter 1 to ${max_days} days.`)
+      if (!Number.isInteger(form.lastDays) || form.lastDays < 1 || form.lastDays > max_days) problems.push(t('problem.days', { max: max_days }))
     } else if (!form.from) {
-      problems.push('Choose a start date.')
+      problems.push(t('problem.startDate'))
     } else if (form.from < min_date) {
-      problems.push(`Choose a date from ${formatDate(min_date)}.`)
+      problems.push(t('problem.minDate', { date: formatDate(min_date) }))
     } else if (form.to && form.to < form.from && !(form.field === 'last_order' && form.op === 'before')) {
-      problems.push('The end date must not be before the start date.')
+      problems.push(t('problem.endBeforeStart'))
     }
   }
   if (type === 'count' && !(Number.isInteger(form.amount) && form.amount >= 0 && form.amount <= max_count)) {
-    problems.push(`Enter a whole number from 0 to ${max_count.toLocaleString('en-US')}.`)
+    problems.push(t('problem.count', { max: formatNumber(max_count) }))
   }
   if (type === 'amount' && !(form.amount >= 0 && form.amount <= max_amount)) {
-    problems.push(`Enter an amount from 0 to ${max_amount.toLocaleString('en-US')} TL.`)
+    problems.push(t('problem.amount', { max: formatNumber(max_amount) }))
   }
   return problems
 }

@@ -8,6 +8,7 @@ import {
   AlertDialogRoot,
   AlertDialogTitle,
 } from 'reka-ui'
+import { t } from '../i18n'
 
 defineProps<{ open: boolean; title: string; confirmLabel: string; cancelLabel?: string; danger?: boolean }>()
 // confirm: the action was chosen; the parent acts and hides the dialog.
@@ -24,7 +25,7 @@ const emit = defineEmits<{ confirm: []; close: [] }>()
         <AlertDialogTitle class="title">{{ title }}</AlertDialogTitle>
         <AlertDialogDescription as="div" class="body"><slot /></AlertDialogDescription>
         <div class="actions">
-          <AlertDialogCancel class="btn">{{ cancelLabel ?? 'Cancel' }}</AlertDialogCancel>
+          <AlertDialogCancel class="btn">{{ cancelLabel ?? t('confirm.cancel') }}</AlertDialogCancel>
           <button type="button" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm')">{{ confirmLabel }}</button>
         </div>
       </AlertDialogContent>

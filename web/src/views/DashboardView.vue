@@ -1,8 +1,12 @@
+<script setup lang="ts">
+import { t } from '../i18n'
+</script>
+
 <template>
   <div class="page">
-    <h1>Dashboard</h1>
+    <h1>{{ t('page.dashboard') }}</h1>
     <div class="card empty">
-      <p>Campaign summaries and live delivery status are added in a later step of the plan (T18).</p>
+      <p>{{ t('dashboard.placeholder') }}</p>
     </div>
   </div>
 </template>

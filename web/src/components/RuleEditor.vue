@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import type { Catalog } from '../campaign/types'
 import { formProblems, ruleTitle, valueType, type RuleForm } from '../campaign/rules'
+import { t, type Key } from '../i18n'
 
 // The chip editor (D9). The parent saves on apply; serverErrors are the
 // backend's messages for this rule, shown until the form changes.
@@ -26,7 +27,7 @@ const problems = computed(() => (draft.value ? formProblems(draft.value, props.c
 const shownProblems = computed(() => (tried.value ? problems.value : []).concat(props.serverErrors ?? []))
 const hasTime = computed(() => type.value === 'window' || type.value === 'categories_window')
 const noEndDate = computed(() => draft.value?.field === 'last_order' && draft.value.op === 'before')
-const opLabel: Record<string, string> = { gte: 'at least', lte: 'at most', before: 'longer ago than', after: 'within' }
+const opLabel: Record<string, Key> = { gte: 'op.gte', lte: 'op.lte', before: 'op.before', after: 'op.after' }
 
 function toggle(list: string[], value: string) {
   const i = list.indexOf(value)
@@ -46,18 +47,18 @@ function apply() {
       <DialogOverlay class="overlay" />
       <DialogContent v-if="draft" class="dialog" @submit.prevent>
         <DialogTitle class="title">{{ ruleTitle(draft.field, draft.op) }}</DialogTitle>
-        <DialogDescription class="sr-only">Edit the rule, then apply it. The audience count updates when it is saved.</DialogDescription>
+        <DialogDescription class="sr-only">{{ t('editor.description') }}</DialogDescription>
 
         <form class="form" novalidate @submit.prevent="apply">
           <label v-if="ops.length > 1" class="row">
-            <span>Condition</span>
+            <span>{{ t('editor.condition') }}</span>
             <select v-model="draft.op" class="input small">
-              <option v-for="op in ops" :key="op" :value="op">{{ opLabel[op] ?? op }}</option>
+              <option v-for="op in ops" :key="op" :value="op">{{ opLabel[op] ? t(opLabel[op]!) : op }}</option>
             </select>
           </label>
 
           <fieldset v-if="type === 'cities'" class="choices">
-            <legend>Cities</legend>
+            <legend>{{ t('editor.cities') }}</legend>
             <label v-for="city in catalog.cities" :key="city" class="choice">
               <input type="checkbox" :checked="draft.cities.includes(city)" @change="toggle(draft.cities, city)" />
               {{ city }}
@@ -65,7 +66,7 @@ function apply() {
           </fieldset>
 
           <fieldset v-if="type === 'categories_window'" class="choices">
-            <legend>Categories</legend>
+            <legend>{{ t('editor.categories') }}</legend>
             <label v-for="cat in catalog.categories" :key="cat" class="choice">
               <input type="checkbox" :checked="draft.categories.includes(cat)" @change="toggle(draft.categories, cat)" />
               {{ cat }}
@@ -73,43 +74,43 @@ function apply() {
           </fieldset>
 
           <fieldset v-if="hasTime" class="time">
-            <legend>When</legend>
+            <legend>{{ t('editor.when') }}</legend>
             <label class="choice">
               <input v-model="draft.timeMode" type="radio" value="last" />
-              {{ noEndDate ? 'More than' : 'In the last' }}
+              {{ t(noEndDate ? 'editor.moreThan' : 'editor.inTheLast') }}
               <input
                 v-model.number="draft.lastDays"
                 class="input small days"
                 type="number"
                 min="1"
                 :max="catalog.limits.max_days"
-                aria-label="Number of days"
+                :aria-label="t('editor.numberOfDays')"
                 :disabled="draft.timeMode !== 'last'"
               />
-              days{{ noEndDate ? ' ago' : '' }}
+              {{ t(noEndDate ? 'editor.daysAgo' : 'editor.days') }}
             </label>
-            <p class="hint">Counted back from when sending starts, so the window moves with the send time.</p>
+            <p class="hint">{{ t('editor.lastHint') }}</p>
             <label class="choice">
               <input v-model="draft.timeMode" type="radio" value="since" />
-              {{ noEndDate ? 'Before' : 'Since' }}
+              {{ t(noEndDate ? 'editor.before' : 'editor.since') }}
               <input
                 v-model="draft.from"
                 class="input small"
                 type="date"
                 :min="catalog.limits.min_date"
-                aria-label="Start date"
+                :aria-label="t('editor.startDate')"
                 :disabled="draft.timeMode !== 'since'"
               />
             </label>
             <label v-if="!noEndDate && draft.timeMode === 'since'" class="choice indent">
-              Until (optional)
-              <input v-model="draft.to" class="input small" type="date" :min="draft.from || catalog.limits.min_date" aria-label="End date" />
+              {{ t('editor.until') }}
+              <input v-model="draft.to" class="input small" type="date" :min="draft.from || catalog.limits.min_date" :aria-label="t('editor.endDate')" />
             </label>
-            <p class="hint">A fixed date stays fixed, even if the campaign is sent later.</p>
+            <p class="hint">{{ t('editor.sinceHint') }}</p>
           </fieldset>
 
           <label v-if="type === 'count' || type === 'amount'" class="row">
-            <span>{{ type === 'count' ? 'Orders' : 'Amount (TL)' }}</span>
+            <span>{{ t(type === 'count' ? 'editor.orders' : 'editor.amount') }}</span>
             <input
               v-model.number="draft.amount"
               class="input small"
@@ -127,9 +128,9 @@ function apply() {
           </div>
 
           <div class="actions">
-            <DialogClose class="btn" type="button">Cancel</DialogClose>
+            <DialogClose class="btn" type="button">{{ t('confirm.cancel') }}</DialogClose>
             <button type="submit" class="btn btn-primary" :class="{ busy: saving }" :aria-disabled="saving">
-              {{ saving ? 'Saving…' : 'Apply' }}
+              {{ t(saving ? 'editor.saving' : 'editor.apply') }}
             </button>
           </div>
         </form>
