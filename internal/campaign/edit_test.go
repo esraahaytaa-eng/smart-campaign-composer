@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"smart-campaign-composer/internal/llm"
 )
@@ -274,5 +275,55 @@ func TestRequest_EditDuringInterpretation_409(t *testing.T) {
 	got := decode[draft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
 	if got.Version != 3 || got.RequestText != caseExample {
 		t.Fatalf("want the concurrent edit kept and the brief unchanged, got %+v", got)
+	}
+}
+
+// Approval commits after a channel change has passed its draft check but
+// before its update runs: the approved campaign must keep its content. The
+// test holds the row lock to put the two in exactly that order.
+func TestChannels_ApprovedMeanwhile_KeepsContent(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	d := a.readyDraft()
+	ctx := context.Background()
+	tx, err := a.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM campaigns WHERE id = $1 FOR UPDATE`, d.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan int, 1)
+	go func() { code, _ := a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`); result <- code }()
+	waitForLockWait(t, a)
+	// What approve commits: status and a new version.
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'approved', version = 3 WHERE id = $1`, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := <-result; code != http.StatusConflict {
+		t.Fatalf("want 409, got %d", code)
+	}
+	if n := a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1`, d.ID); n != 2 {
+		t.Fatalf("the approved campaign lost content: %d rows left", n)
+	}
+	if got := decode[draft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), "")); len(got.Channels) != 2 {
+		t.Fatalf("the approved campaign's channels changed: %v", got.Channels)
+	}
+}
+
+// waitForLockWait returns once another session of the test database is
+// blocked on a row lock.
+func waitForLockWait(t *testing.T, a *app) {
+	t.Helper()
+	for give := time.Now().Add(10 * time.Second); a.count(`SELECT count(*) FROM pg_stat_activity
+		WHERE datname = current_database() AND wait_event_type = 'Lock'`) == 0; time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(give) {
+			t.Fatal("the request never blocked on the row lock")
+		}
 	}
 }

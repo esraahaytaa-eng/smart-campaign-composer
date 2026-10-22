@@ -172,7 +172,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits,
+		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits(),
 	})
 }
 
@@ -399,7 +399,7 @@ func (h *Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(ctx, `SELECT true FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
 		id, *in.Version).Scan(&found)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusConflict, "the campaign changed since you loaded it; reload and try again")
+		writeError(w, http.StatusConflict, errStale.Error())
 		return
 	}
 	if err != nil {
@@ -410,8 +410,14 @@ func (h *Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "delete content", err)
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM campaigns WHERE id = $1`, id); err != nil {
+	// Guarded again, so the delete stays draft-only even without the lock above.
+	tag, err := tx.Exec(ctx, `DELETE FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft'`, id, *in.Version)
+	if err != nil {
 		serverError(w, "delete draft", err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, errStale.Error())
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
