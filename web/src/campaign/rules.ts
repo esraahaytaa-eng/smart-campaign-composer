@@ -138,24 +138,24 @@ export function ruleErrors(errors: FieldError[]): { byRule: Map<number, string[]
 }
 
 const TITLES: Record<string, Key> = {
-  'city in': 'title.city',
-  'cart_added within': 'title.cartAdded',
-  'no_order within': 'title.noOrder',
-  'signed_up within': 'title.signedUp',
-  'last_order before': 'title.lastOrderBefore',
-  'last_order after': 'title.lastOrderAfter',
-  'ordered_category in': 'title.orderedCategory',
-  'carted_category in': 'title.cartedCategory',
-  'order_count gte': 'title.orderCountGte',
-  'order_count lte': 'title.orderCountLte',
-  'total_spend gte': 'title.totalSpendGte',
-  'total_spend lte': 'title.totalSpendLte',
-  'cart_value gte': 'title.cartValueGte',
+  'city.in': 'title.city',
+  'cart_added.within': 'title.cartAdded',
+  'no_order.within': 'title.noOrder',
+  'signed_up.within': 'title.signedUp',
+  'last_order.before': 'title.lastOrderBefore',
+  'last_order.after': 'title.lastOrderAfter',
+  'ordered_category.in': 'title.orderedCategory',
+  'carted_category.in': 'title.cartedCategory',
+  'order_count.gte': 'title.orderCountGte',
+  'order_count.lte': 'title.orderCountLte',
+  'total_spend.gte': 'title.totalSpendGte',
+  'total_spend.lte': 'title.totalSpendLte',
+  'cart_value.gte': 'title.cartValueGte',
 }
 
 // ruleTitle names a field and operator in the "+ Add rule" menu and the editor.
 export function ruleTitle(field: string, op: string): string {
-  const key = TITLES[`${field} ${op}`]
+  const key = TITLES[`${field}.${op}`]
   return key ? t(key) : `${field} ${op}`
 }
 

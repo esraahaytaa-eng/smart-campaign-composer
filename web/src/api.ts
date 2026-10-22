@@ -31,7 +31,7 @@ export async function api<T = unknown>(path: string, { method = 'GET', body }: O
       credentials: 'same-origin',
     })
   } catch {
-    throw new ApiError("Can't reach the server. Check that it is running.", 0)
+    throw new ApiError("Can't reach the server. Check that it is running.", 0) // i18n-ignore: the UI shows errorText()
   }
   if (res.status === 204) return undefined as T
   const data: unknown = await res.json().catch(() => undefined)
@@ -42,6 +42,6 @@ export async function api<T = unknown>(path: string, { method = 'GET', body }: O
   const message =
     typeof data === 'object' && data !== null && typeof (data as { error?: unknown }).error === 'string'
       ? (data as { error: string }).error
-      : `The server answered with an error (${res.status}).`
+      : `The server answered with an error (${res.status}).` // i18n-ignore: the UI shows errorText()
   throw new ApiError(message, res.status, data)
 }

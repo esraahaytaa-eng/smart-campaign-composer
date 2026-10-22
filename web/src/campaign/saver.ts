@@ -12,7 +12,7 @@ export function createSaver<T extends { version: number }>(currentVersion: () =>
 
   function save(op: (version: number) => Promise<T>): Promise<T> {
     const run = queue.then(async () => {
-      if (state.value === 'conflict') throw new ApiError('This draft was changed elsewhere. Reload to see the latest version.', 409)
+      if (state.value === 'conflict') throw new ApiError('changed elsewhere; reload', 409) // i18n-ignore
       state.value = 'saving'
       try {
         const doc = await op(currentVersion())
