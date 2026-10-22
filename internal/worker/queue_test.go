@@ -387,3 +387,59 @@ func TestFinishCampaigns(t *testing.T) {
 		t.Fatalf("all messages final: want completed, got n=%d err=%v", n, err)
 	}
 }
+
+// Option A (D31 history): a resend skips everyone whose delivery on the
+// channel is uncertain, anywhere in the parent's family of campaigns.
+func TestBuildAudience_ResendSkipsUncertainDeliveries(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
+		SELECT g, 'U', 'u' || g || '@example.com', '+90510' || g, 'Ankara', 'tr', true, true, $1 FROM generate_series(10, 15) g`, now)
+	parent := f.approved(cartAbandoners, "{sms}", now)
+	f.exec(`UPDATE campaigns SET status = 'completed' WHERE id = $1`, parent)
+	f.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason)
+		SELECT $1, g, 'sms', 'skipped', 'character_limit_exceeded' FROM generate_series(10, 15) g`, parent)
+	var old int64 // an earlier resend, cancelled with deliveries in every state
+	f.pool.QueryRow(context.Background(), `INSERT INTO campaigns (request_text, channels, status, send_at, time_zone, created_by, parent_campaign_id)
+		VALUES ('brief', '{sms}', 'cancelled', $1, 'Europe/Istanbul', 1, $2) RETURNING id`, now, parent).Scan(&old)
+	f.exec(`INSERT INTO messages (id, campaign_id, user_id, channel, status, delivery_uncertain) VALUES
+		(910, $1, 10, 'sms', 'sending', false),
+		(911, $1, 11, 'sms', 'cancelled', true),
+		(912, $1, 12, 'sms', 'cancelled', true),
+		(913, $1, 13, 'sms', 'cancelled', true),
+		(914, $1, 14, 'sms', 'cancelled', false)`, old)
+	f.exec(`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, outcome) VALUES
+		(911, 1, $1, 'timeout'), (912, 1, $1, 'network_error'), (913, 1, $1, 'interrupted'), (914, 1, $1, 'server_error')`, now)
+	var resend int64
+	f.pool.QueryRow(context.Background(), `INSERT INTO campaigns (request_text, channels, status, send_at, time_zone, created_by, parent_campaign_id)
+		VALUES ('brief', '{sms}', 'approved', $1, 'Europe/Istanbul', 1, $2) RETURNING id`, now, parent).Scan(&resend)
+
+	f.build(now)
+
+	rows, _ := f.pool.Query(context.Background(), `SELECT user_id FROM messages WHERE campaign_id = $1 ORDER BY 1`, resend)
+	var users []int64
+	for rows.Next() {
+		var u int64
+		rows.Scan(&u)
+		users = append(users, u)
+	}
+	// 10 still sending, 11–13 possibly delivered; 14 failed for sure (500), 15 never tried.
+	if len(users) != 2 || users[0] != 14 || users[1] != 15 {
+		t.Fatalf("want users 14 and 15 only, got %v", users)
+	}
+}
+
+func TestClaim_ExpiredLeaseMarksDeliveryUncertain(t *testing.T) {
+	f := newFixture(t)
+	f.sending()
+	ctx := context.Background()
+	first, _ := f.q.Claim(ctx, "sms", 1, now, 30*time.Second)
+	if f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, first[0].MessageID) != "false" {
+		t.Fatal("a first claim is not uncertain")
+	}
+
+	f.q.Claim(ctx, "sms", 1, now.Add(31*time.Second), 30*time.Second) // reclaim: the first worker may have sent it
+
+	if f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, first[0].MessageID) != "true" {
+		t.Fatal("reclaiming an expired lease must mark the delivery uncertain")
+	}
+}

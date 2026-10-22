@@ -114,10 +114,12 @@ type Job struct {
 
 // Claim leases up to n messages of a channel that are due: pending or
 // waiting for a retry whose time has come, or still "sending" under an
-// expired lease (a crashed worker). Each claim counts as an attempt.
+// expired lease. That last case means a worker died mid-attempt, so the
+// message may have been delivered: it is marked uncertain (D5 history).
 func (q *Queue) Claim(ctx context.Context, channel string, n int, now time.Time, lease time.Duration) ([]Job, error) {
 	rows, _ := q.Pool.Query(ctx, `UPDATE messages SET status = 'sending', lease_token = gen_random_uuid(),
-			lease_expires_at = $3, attempt_count = attempt_count + 1, updated_at = now()
+			lease_expires_at = $3, attempt_count = attempt_count + 1, updated_at = now(),
+			delivery_uncertain = delivery_uncertain OR status = 'sending'
 		WHERE id IN (SELECT id FROM messages WHERE channel = $1
 				AND ((status IN ('pending', 'retry_scheduled') AND next_attempt_at <= $2)
 					OR (status = 'sending' AND lease_expires_at < $2))
@@ -133,7 +135,7 @@ func (q *Queue) Claim(ctx context.Context, channel string, n int, now time.Time,
 // Attempt is one provider request, recorded for retry and 429 counts (D16).
 type Attempt struct {
 	StartedAt, FinishedAt time.Time
-	Outcome               string // accepted, rate_limited, server_error, timeout, network_error, rejected
+	Outcome               string // accepted, rate_limited, server_error, timeout, network_error, rejected, interrupted
 	HTTPStatus            int    // 0 when there was no response
 	Error                 string
 }
@@ -163,7 +165,9 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 	defer tx.Rollback(ctx)
 
 	var sentAt, nextAt *time.Time
+	outcome := ""
 	if a := r.Attempt; a != nil {
+		outcome = a.Outcome
 		// Recorded even if the lease was lost: the provider request did happen.
 		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (message_id, attempt_no, started_at, finished_at, outcome, http_status, error)
 			VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), NULLIF($7, ''))`,
@@ -179,10 +183,12 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 			status = CASE WHEN $2 = 'retry_scheduled' AND (SELECT c.status FROM campaigns c WHERE c.id = messages.campaign_id) = 'cancelled'
 				THEN 'cancelled' ELSE $2 END,
 			skip_reason = NULLIF($3, ''), last_error = NULLIF($4, ''), next_attempt_at = coalesce($5, next_attempt_at),
+			-- No clear answer: the provider may have sent it (D5 history).
+			delivery_uncertain = delivery_uncertain OR $8 IN ('timeout', 'network_error', 'interrupted'),
 			sent_at = CASE WHEN $2 = 'sent' THEN coalesce($6, now()) ELSE sent_at END,
 			lease_token = NULL, lease_expires_at = NULL, updated_at = now()
 		WHERE id = $1 AND lease_token = $7::uuid AND status = 'sending'`,
-		j.MessageID, r.Status, r.SkipReason, r.LastError, nextAt, sentAt, j.LeaseToken)
+		j.MessageID, r.Status, r.SkipReason, r.LastError, nextAt, sentAt, j.LeaseToken, outcome)
 	if err != nil {
 		return fmt.Errorf("complete message: %w", err)
 	}
