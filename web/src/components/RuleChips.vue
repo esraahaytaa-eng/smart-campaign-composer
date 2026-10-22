@@ -19,13 +19,15 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
         <button type="button" class="chip-label" :disabled="disabled" :aria-describedby="errors?.has(i) ? `rule-error-${i}` : undefined" @click="emit('edit', i)">
           {{ ruleLabel(r) }}<span class="sr-only">. Edit</span>
         </button>
+        <!-- aria-disabled keeps the button focusable, so its reason can be heard. -->
         <button
           type="button"
           class="chip-remove"
-          :disabled="disabled || lastRule"
-          :title="lastRule ? 'A campaign needs at least one audience rule.' : undefined"
+          :disabled="disabled"
+          :aria-disabled="lastRule"
+          :aria-describedby="lastRule ? 'last-rule-hint' : undefined"
           :aria-label="`Remove rule: ${ruleLabel(r)}`"
-          @click="emit('remove', i)"
+          @click="!lastRule && emit('remove', i)"
         >
           ×
         </button>
@@ -37,6 +39,7 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
       Has consent for the channel<span class="sr-only"> (always applied)</span>
     </span>
+    <span v-if="lastRule" id="last-rule-hint" class="hint">A campaign needs at least one audience rule.</span>
     <DropdownMenuRoot v-if="addable.length">
       <DropdownMenuTrigger class="add" :disabled="disabled">+ Add rule</DropdownMenuTrigger>
       <DropdownMenuPortal>
@@ -102,6 +105,12 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
   font-size: 18px;
   cursor: pointer;
 }
+.hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--muted);
+}
+.chip-remove[aria-disabled='true'],
 .chip-remove:disabled,
 .chip-label:disabled {
   cursor: default;

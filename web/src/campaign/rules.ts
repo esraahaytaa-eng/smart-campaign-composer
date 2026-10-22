@@ -195,3 +195,18 @@ export function formProblems(form: RuleForm, catalog: Catalog): string[] {
   }
   return problems
 }
+
+// A rule's identity: the backend allows each field and operator once (D14).
+export const ruleKey = (r: Rule) => `${r.field} ${r.op}`
+
+// withRule replaces the rule with key (the one being edited) or appends a new
+// one. It is applied when a save runs, to the latest rules, so queued edits
+// never undo each other.
+export function withRule(rules: Rule[], key: string | null, next: Rule): Rule[] {
+  const i = key === null ? -1 : rules.findIndex((r) => ruleKey(r) === key)
+  return i < 0 ? [...rules, next] : rules.map((r, j) => (j === i ? next : r))
+}
+
+export function withoutRule(rules: Rule[], key: string): Rule[] {
+  return rules.filter((r) => ruleKey(r) !== key)
+}

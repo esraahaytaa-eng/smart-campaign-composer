@@ -61,7 +61,8 @@ async function signOut() {
       </div>
     </nav>
     <main class="content">
-      <RouterView />
+      <!-- Keyed by path: moving between campaigns gives each its own page state and save queue. -->
+      <RouterView :key="$route.path" />
     </main>
   </div>
 </template>

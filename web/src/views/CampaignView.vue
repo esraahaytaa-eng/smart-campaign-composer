@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../api'
 import { channelsLosingContent } from '../campaign/channels'
 import { campaigns, loadCatalog } from '../campaign/client'
-import { defaultForm, fromForm, ruleErrors, toForm, type RuleForm } from '../campaign/rules'
+import { defaultForm, fromForm, ruleErrors, ruleKey, toForm, withoutRule, withRule, type RuleForm } from '../campaign/rules'
 import { createSaver } from '../campaign/saver'
 import { briefTitle } from '../campaign/title'
-import type { Campaign, Catalog, Channel, FieldError } from '../campaign/types'
+import type { Campaign, Catalog, Channel, FieldError, Rule } from '../campaign/types'
 import AudiencePanel from '../components/AudiencePanel.vue'
 import ChannelPicker from '../components/ChannelPicker.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -35,7 +35,9 @@ const saveLabel = computed(
   () => ({ idle: '', saving: 'Saving…', saved: 'All changes saved', error: 'Not saved', conflict: 'Changed elsewhere' })[saver.state.value],
 )
 
-const id = computed(() => Number(route.params.id))
+// The layout gives each campaign its own page instance, so the id, the save
+// queue and every message belong to exactly one campaign.
+const id = Number(route.params.id)
 const isDraft = computed(() => campaign.value?.status === 'draft')
 const isResend = computed(() => campaign.value?.parent_campaign_id != null)
 const locked = computed(() => saver.state.value === 'conflict')
@@ -44,7 +46,7 @@ async function load() {
   loadError.value = ''
   campaign.value = null
   try {
-    const [c, cat] = await Promise.all([campaigns.get(id.value), loadCatalog()])
+    const [c, cat] = await Promise.all([campaigns.get(id), loadCatalog()])
     campaign.value = c
     catalog.value = cat
     brief.value = c.request_text
@@ -52,7 +54,7 @@ async function load() {
     loadError.value = err instanceof ApiError && err.status === 404 ? 'This campaign doesn’t exist, or it was deleted.' : err instanceof ApiError ? err.message : 'Something went wrong.'
   }
 }
-watch(id, load, { immediate: true })
+load()
 
 const message = (err: unknown) => (err instanceof ApiError ? err.message : 'Something went wrong. Try again.')
 
@@ -80,29 +82,47 @@ function pickChannels(next: Channel[]) {
 function applyChannels(next: Channel[]) {
   channelConfirm.value = null
   const before = campaign.value?.counts?.total
-  save((v) => campaigns.setChannels(id.value, v, next), 'Channels saved.')
+  save((v) => campaigns.setChannels(id, v, next), 'Channels saved.')
     .then(() => (change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before))
     .catch(() => {})
 }
 const channelName = (c: Channel) => (c === 'sms' ? 'SMS' : 'Email')
 
 // ---- rules ----
-const editor = ref<{ index: number; form: RuleForm; errors: string[]; saving: boolean } | null>(null)
-const ruleErrorMap = ref<Map<number, string[]>>(new Map())
+// key: the rule being edited (field and operator), null for a new rule.
+const editor = ref<{ key: string | null; form: RuleForm; errors: string[]; saving: boolean } | null>(null)
+const errorsByKey = ref<Map<string, string[]>>(new Map()) // the backend's field errors, per rule
+const chipErrors = computed(() => {
+  const byIndex = new Map<number, string[]>()
+  campaign.value?.rules?.forEach((r, i) => errorsByKey.value.has(ruleKey(r)) && byIndex.set(i, errorsByKey.value.get(ruleKey(r))!))
+  return byIndex
+})
 
 function editRule(index: number) {
-  editor.value = { index, form: toForm(campaign.value!.rules![index]!, catalog.value!), errors: [], saving: false }
+  const r = campaign.value!.rules![index]!
+  editor.value = { key: ruleKey(r), form: toForm(r, catalog.value!), errors: [], saving: false }
 }
 function addRule(field: string, op: string) {
-  editor.value = { index: -1, form: defaultForm(field, op, catalog.value!), errors: [], saving: false }
+  editor.value = { key: null, form: defaultForm(field, op, catalog.value!), errors: [], saving: false }
 }
 
-async function saveRules(next: NonNullable<Campaign['rules']>, target: number): Promise<string[]> {
+// saveRules saves build(latest rules). The list is built when the save runs,
+// not when the marketer clicked, so quick edits never undo each other. It
+// returns the problems to show for the rule with targetKey.
+async function saveRules(build: (rules: Rule[]) => Rule[], targetKey: string | null): Promise<string[]> {
   const before = campaign.value?.counts?.total
+  let sent: Rule[] = []
   rulesProblem.value = []
   try {
-    await save((v) => campaigns.setRules(id.value, v, next), 'Audience rules saved.', false)
-    ruleErrorMap.value = new Map()
+    await save(
+      (v) => {
+        sent = build(campaign.value?.rules ?? [])
+        return campaigns.setRules(id, v, sent)
+      },
+      'Audience rules saved.',
+      false,
+    )
+    errorsByKey.value = new Map()
     change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before
     return []
   } catch (err) {
@@ -110,24 +130,34 @@ async function saveRules(next: NonNullable<Campaign['rules']>, target: number): 
     const fieldErrors = err instanceof ApiError ? ((err.body as { field_errors?: FieldError[] })?.field_errors ?? []) : []
     if (fieldErrors.length === 0) return [message(err)]
     const { byRule, general } = ruleErrors(fieldErrors)
-    return [...(byRule.get(target) ?? []), ...general]
+    const byKey = new Map<string, string[]>()
+    byRule.forEach((msgs, i) => sent[i] && byKey.set(ruleKey(sent[i]!), msgs))
+    errorsByKey.value = byKey
+    const own = targetKey === null ? [] : (byKey.get(targetKey) ?? [])
+    const others = [...byKey].filter(([k]) => k !== targetKey).flatMap(([, msgs]) => msgs)
+    // Never report success: if the problem is on another rule, say so.
+    return own.length || general.length ? [...own, ...general] : others.map((m) => `Another rule has a problem: ${m}`)
   }
 }
 
 async function applyRule(form: RuleForm) {
   const e = editor.value!
-  const rules = [...(campaign.value!.rules ?? [])]
-  const index = e.index >= 0 ? e.index : rules.length
-  rules[index] = fromForm(form, catalog.value!)
+  const next = fromForm(form, catalog.value!)
   e.saving = true
-  e.errors = await saveRules(rules, index)
+  const problems = await saveRules((rules) => withRule(rules, e.key, next), ruleKey(next))
   e.saving = false
-  if (e.errors.length === 0) editor.value = null
+  if (editor.value !== e) {
+    if (problems.length) rulesProblem.value = problems // the editor was closed meanwhile
+    return
+  }
+  e.errors = problems
+  if (problems.length === 0) editor.value = null
 }
 
 async function removeRule(index: number) {
-  const rules = campaign.value!.rules!.filter((_, i) => i !== index)
-  rulesProblem.value = await saveRules(rules, -1)
+  const key = ruleKey(campaign.value!.rules![index]!)
+  const problems = await saveRules((rules) => withoutRule(rules, key), null)
+  if (problems.length) rulesProblem.value = problems
 }
 
 // ---- brief ----
@@ -140,11 +170,12 @@ const briefChanged = computed(() => brief.value.trim() !== (campaign.value?.requ
 async function reinterpret() {
   reinterpretConfirm.value = false
   briefProblem.value = null
+  saveError.value = ''
   briefBusy.value = true
   const before = campaign.value?.counts?.total
   const hadContent = !!campaign.value?.content
   try {
-    await saver.save((v) => campaigns.setRequest(id.value, v, brief.value.trim()))
+    await saver.save((v) => campaigns.setRequest(id, v, brief.value.trim()))
     notice.value = 'The AI read the brief again and replaced the audience rules.'
     change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before
     staleContent.value = hadContent
@@ -161,9 +192,10 @@ async function reinterpret() {
 const deleteConfirm = ref(false)
 async function deleteDraft() {
   deleteConfirm.value = false
+  saveError.value = ''
   try {
     await saver.save(async (v) => {
-      await campaigns.remove(id.value, v)
+      await campaigns.remove(id, v)
       return campaign.value!
     })
     await router.replace({ name: 'campaigns' })
@@ -241,7 +273,7 @@ function reload() {
             <section class="card section" aria-labelledby="rules-title">
               <div class="section-head">
                 <h2 id="rules-title" class="section-title">Audience rules</h2>
-                <span v-if="!isResend" class="help">Suggested by the AI · click a rule to edit it</span>
+                <span v-if="!isResend" class="help">Click a rule to edit it</span>
               </div>
               <p v-if="isResend" class="help">
                 A resend goes to the recipients of the original campaign who were skipped because the {{ channelName(campaign.channels[0]!) }} was too
@@ -251,7 +283,7 @@ function reload() {
                 <RuleChips
                   :rules="campaign.rules ?? []"
                   :catalog="catalog"
-                  :errors="ruleErrorMap"
+                  :errors="chipErrors"
                   :disabled="locked || briefBusy"
                   @edit="editRule"
                   @add="addRule"
