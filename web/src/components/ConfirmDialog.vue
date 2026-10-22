@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -11,8 +10,9 @@ import {
 } from 'reka-ui'
 
 defineProps<{ open: boolean; title: string; confirmLabel: string; cancelLabel?: string; danger?: boolean }>()
-// confirm: the action was chosen. close: the dialog closed, by any means
-// (action, cancel, Escape); the parent hides it then.
+// confirm: the action was chosen; the parent acts and hides the dialog.
+// close: cancelled (button or Escape). A plain button, not AlertDialogAction:
+// that one closes first, so the parent would act on cleared state.
 const emit = defineEmits<{ confirm: []; close: [] }>()
 </script>
 
@@ -25,7 +25,7 @@ const emit = defineEmits<{ confirm: []; close: [] }>()
         <AlertDialogDescription as="div" class="body"><slot /></AlertDialogDescription>
         <div class="actions">
           <AlertDialogCancel class="btn">{{ cancelLabel ?? 'Cancel' }}</AlertDialogCancel>
-          <AlertDialogAction class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm')">{{ confirmLabel }}</AlertDialogAction>
+          <button type="button" class="btn" :class="danger ? 'btn-danger' : 'btn-primary'" @click="emit('confirm')">{{ confirmLabel }}</button>
         </div>
       </AlertDialogContent>
     </AlertDialogPortal>
