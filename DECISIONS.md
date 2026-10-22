@@ -43,6 +43,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** A crash or timeout after the provider has accepted a message is unavoidable, and exactly-once delivery to an external system is not achievable.
 - **Rejected:** *At-most-once:* messages would be lost. *Claiming exactly-once:* inaccurate.
 - **Trade-offs:** Leases must be implemented and expired ones recovered. Depends on the provider's idempotency (D6).
+- **History:** 2026-10-22 (Milestone D review). Each message records when its delivery is uncertain (an attempt without a clear answer, or a worker that died mid-attempt). An attempt interrupted by a worker shutdown is recorded as `interrupted`, does not count toward the attempt limit, and the message is retried at once with the same key.
 
 ### D6 — Mock provider stores idempotency records in the existing database
 - **Status:** Accepted · 2026-10-21
@@ -154,6 +155,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Recovers missed recipients without ever resending to anyone else.
 - **Rejected:** *An alternative template at approval:* more content to write and review up front. *Reusing the original messages:* approved content would change (D11).
 - **Trade-offs:** Skipped recipients get their message later.
+- **History:** 2026-10-22 (Milestone D review). A resend also excludes anyone whose delivery on that channel is uncertain (a message still sending, or an attempt that timed out, failed on the network or was interrupted), so a cancelled resend followed by a new one never sends twice. Cost: a recipient whose message really was lost is not resent. Engineer's choice (option A).
 
 ### D32 — AI replies in the request's language
 - **Status:** Accepted · 2026-10-21
