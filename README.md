@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9), mock SMS/email provider (T10), sending queue (T11), sending worker with retries and the 100/s limit (T12). Not yet built: worker, mock providers, frontend.
+> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9), mock SMS/email provider (T10), sending queue (T11), sending worker with retries and the 100/s limit (T12), end-to-end send tests (T13). Not yet built: worker, mock providers, frontend.
 
 ## Requirements
 
@@ -114,7 +114,7 @@ make test-local   # needs local Go and DATABASE_URL pointing to a Postgres
 make lint         # in Docker: gofmt check + go vet
 ```
 
-Integration tests fail, never skip, when no database is available.
+Integration tests fail, never skip, when no database is available. `internal/e2e` runs the API, the worker and the mock provider together on a seeded database: a send through a provider that fails, rate-limits and loses responses, a scheduled send, and an over-limit send followed by a resend.
 
 The first run compiles all dependencies and takes a few minutes; compiled packages are kept in the `gobuildcache` volume (and in BuildKit cache mounts for image builds), so later runs take seconds. `docker compose down -v` also clears these caches.
 
