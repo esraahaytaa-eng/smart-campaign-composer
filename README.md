@@ -45,6 +45,7 @@ All endpoints need a login session (see above).
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/campaigns` `{"request", "channels", "time_zone"}` | The AI reads the brief and a **draft** is saved with its audience rules, current per-channel counts, and a proposed send time if the brief named one (only a proposal; nothing is scheduled). Add `"rules": [...]` to build the audience by hand without the AI. |
+| `DELETE /api/campaigns/{id}` `{"version"}` | Delete a draft and its content for good (204). Deleting an abandoned resend draft lets that channel be resent again. Approved, sending, completed and cancelled campaigns are never deleted (409); stop a send with cancel (D37). |
 | `PUT /api/campaigns/{id}/rules` `{"rules", "version"}` | Replace the draft's rules; they are validated and recounted. |
 | `PUT /api/campaigns/{id}/schedule` `{"send_at", "version"}` | Change or clear (`null`) the proposed send time: RFC 3339 with offset, between now and 30 days ahead. |
 | `GET /api/campaigns`, `GET /api/campaigns/{id}` | List (newest 200) / one campaign; drafts include current counts, a single campaign its content. |
@@ -52,7 +53,7 @@ All endpoints need a login session (see above).
 | `PUT /api/campaigns/{id}/content` `{"content", "version"}` | Save messages edited by hand: `{"sms": {"body"}, "email": {"subject", "body"}}`. |
 | `GET /api/campaigns/{id}/estimate` | Current audience and over-limit counts per channel, labelled as estimates (draft or approved). |
 | `POST /api/campaigns/{id}/approve` `{"version", "send"}` | `send` is required: `"now"` or `{"at": "<RFC 3339>"}` (1 minute to 30 days ahead); a proposed time is never used implicitly. Checks content and a non-empty audience, freezes rules and content, and stores the current counts as `approval_estimate`. No messages are created yet: the audience is evaluated again when sending starts (D30). |
-| `POST /api/campaigns/{id}/cancel` | Stops an approved or sending campaign; messages still waiting are cancelled. |
+| `POST /api/campaigns/{id}/cancel` | Stops an approved or sending campaign; messages still waiting are cancelled. Drafts are deleted instead. |
 | `GET /api/campaigns/{id}/events` | Live status as a `text/event-stream` (D16, D36): a `status` snapshot at once and then whenever it changes (checked every second), with the campaign's status and times, `approval_estimate`, and per channel the actual audience, counts by message status, retries, 429s, skip reasons, the 10 most frequent failure reasons, uncertain deliveries, how many a resend would reach now and any active resend. `retries` counts attempts after a message's first. Once the campaign is completed or cancelled and no message is in flight, the final snapshot is followed by `end` and the stream closes; close the `EventSource` then, or the browser reconnects. On a server shutdown or a database error the stream closes without an event, and the browser's reconnect picks it up again. A resend created after `end` is not streamed; fetch the campaign again. |
 | `POST /api/campaigns/{id}/resend` `{"channel"}` | After a campaign completes or is cancelled: a draft follow-up for the recipients skipped for the character limit on that channel, minus anyone who may already have it (sent, still sending, or with an uncertain delivery). One active resend per campaign and channel. |
 
@@ -138,6 +139,10 @@ The first run compiles all dependencies and takes a few minutes; compiled packag
 ## Architecture (current)
 
 One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `worker`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics and counts HTTP requests, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue (the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease, D5, D18) and the dispatcher. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
+
+## Future improvements
+
+- **Archiving campaigns:** hide finished campaigns from the list. Not built: deleting drafts removes most of the clutter, and archiving can be added later without changing how deletion works (D37).
 
 ## Known limitations
 

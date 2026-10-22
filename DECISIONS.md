@@ -288,6 +288,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Keep the stream open until the client leaves:* one query per second per open tab for nothing.
 - **Trade-offs:** The frontend must close its `EventSource` on `end`, or the browser reconnects every few seconds. A resend created after `end` changes the parent's resend fields without a new event, so the frontend fetches the campaign again after a resend.
 
+### D37 — Drafts can be deleted; nothing else can
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `DELETE /api/campaigns/{id}` with the draft's `version` hard-deletes a `draft` and its content in one transaction. Anything approved or later is never deleted and is still stopped only by cancel (D11, unchanged). Deleting a resend draft frees its channel for a new resend (D31). No archiving (see Deferred).
+- **Why:** An abandoned resend draft blocked resends on that channel forever, because drafts cannot be cancelled. Abandoned drafts also clutter the list. A draft has no messages, so no delivery history is lost.
+- **Rejected:** *Cancelling drafts:* mixes "stopped a send" with "never sent", and the drafts stay in the list. *Deleting sent campaigns:* messages and attempts are the audit trail and the basis for duplicate prevention (D4, D31).
+- **Trade-offs:** A deleted draft cannot be restored. A content stream still running for it fails to save.
+
 ## Open Questions
 
 None currently.
@@ -295,3 +302,4 @@ None currently.
 ## Deferred
 
 - **Optional features from `CASE.md`:** A/B testing, messages in the user's language (a `language` field will be seeded now), CI pipeline. Scheduled sending moved into scope (D29). Resend to skipped recipients moved into scope (D31).
+- **Archiving campaigns** (2026-10-22): hiding finished campaigns from the list. Deleting drafts (D37) removes most of the clutter; it can be added later without changing D37.
