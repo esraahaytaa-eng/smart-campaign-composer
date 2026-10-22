@@ -271,4 +271,4 @@ Git details (D35): branches named `milestone-a-foundation`, …; commit prefixes
 
 ## Execution
 
-Approved 2026-10-21. Execution method (subagent-driven or native) to be chosen before T1.
+Approved 2026-10-21. Execution method: inline (superpowers:executing-plans), chosen 2026-10-22; approval before each task.
