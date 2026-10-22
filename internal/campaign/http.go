@@ -41,6 +41,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/campaigns", h.list)
 	mux.HandleFunc("POST /api/campaigns", h.create)
 	mux.HandleFunc("GET /api/campaigns/{id}", h.get)
+	mux.HandleFunc("DELETE /api/campaigns/{id}", h.deleteDraft)
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
@@ -238,6 +239,53 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	// The brief's note no longer describes a time the marketer chose.
 	h.update(w, r.Context(), id, *in.Version, `send_at = $4, schedule_note = NULL`, sendAt)
+}
+
+// deleteDraft removes a draft and its content if it still has the expected
+// version (D37). Approved and later campaigns are only ever cancelled (D11).
+func (h *Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version *int `json:"version"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) {
+		return
+	}
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	// The row lock makes a concurrent approve or content save wait, then see it gone.
+	var found bool
+	err = tx.QueryRow(ctx, `SELECT true FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
+		id, *in.Version).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, "the campaign changed since you loaded it; reload and try again")
+		return
+	}
+	if err != nil {
+		serverError(w, "lock draft", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1`, id); err != nil {
+		serverError(w, "delete content", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM campaigns WHERE id = $1`, id); err != nil {
+		serverError(w, "delete draft", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // editableDraft answers 404/409/422 unless the campaign exists, is a draft
