@@ -36,6 +36,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60s}
+      WEB_DIR: /srv/web # the built frontend in the image (T15)
     ports:
       - "8080:8080"
     depends_on:
@@ -128,7 +129,21 @@ services:
       test-db:
         condition: service_healthy
 
+  # Frontend checks (make test / make lint): Vitest and the type check.
+  web-test:
+    profiles: ["test"]
+    image: node:22-alpine
+    working_dir: /web
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run typecheck && npm test"]
+    volumes:
+      - ./web:/web
+      # Its own node_modules, so npm ci never replaces the host's copy.
+      - webnodemodules:/web/node_modules
+      - npmcache:/root/.npm
+
 volumes:
   pgdata:
   gomodcache:
   gobuildcache:
+  webnodemodules:
+  npmcache:
