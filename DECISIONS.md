@@ -114,11 +114,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D15 — Handling invalid or failed AI output
 - **Status:** Accepted · 2026-10-21
-- **Decision:** Every response is checked against the schema, the catalog (D14), the variables (D12) and the length limits. If invalid, Claude is asked once more with the validation errors. If it is still invalid, or the call times out or the API fails, nothing is saved, a clear error is shown, and the marketer can rephrase or build the rules by hand. Claude replies `unsupported` with a reason for off-topic or impossible requests, and when any part of the requested audience cannot be expressed: conditions are never dropped, approximated or added. The mock LLM follows the same rule and understands only the example briefs listed in the README. Claude never receives user records, only the request, catalog and allowlist. Streamed content is validated once the stream completes. Tests use a mock LLM.
+- **Decision:** Every response is checked against the schema, the catalog (D14), the variables (D12) and the length limits. If invalid, Claude is asked once more with the validation errors. If it is still invalid, or the call times out or the API fails, nothing is saved, a clear error is shown, and the marketer can rephrase or build the rules by hand. Claude replies `unsupported` with a reason for off-topic or impossible requests, and when any part of the requested audience cannot be expressed: conditions are never dropped, approximated or added. The mock LLM follows the same rule and understands only the example briefs listed in the README. Claude never receives user records, only the request, catalog and allowlist. The brief is limited to 1,000 characters: a longer one is rejected before Claude is called, never truncated. Streamed content is validated once the stream completes. Tests use a mock LLM.
 - **Why:** Recovers from most formatting mistakes, never acts on unvalidated output, and keeps personal data away from the LLM.
 - **Rejected:** *Failing on the first error:* more failures reach the user. *Keeping the valid parts:* can silently change the audience.
 - **Trade-offs:** The retry adds latency and cost. Streamed content is confirmed valid only at the end.
-- **History:** 2026-10-21 (planning). `unsupported` made mandatory for briefs that are only partly understood, and applied to the mock: sending to the wrong users is unacceptable.
+- **History:** 2026-10-21 (planning). `unsupported` made mandatory for briefs that are only partly understood, and applied to the mock: sending to the wrong users is unacceptable. 2026-10-22: brief limit of 1,000 characters approved (was an open question): about 150 words, far more than a brief needs, while keeping AI cost and the space for hidden instructions small.
 
 ### D16 — Delivery status reflects provider acceptance only
 - **Status:** Accepted · 2026-10-21
@@ -279,7 +279,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ## Open Questions
 
-- **Operational defaults (confirm before T10/T12):** mock-provider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 workers per channel, request text ≤ 1,000 characters. All proposed, not yet approved.
+- **Operational defaults (confirm before T10/T12):** mock-provider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 workers per channel. All proposed, not yet approved.
 
 ## Deferred
 

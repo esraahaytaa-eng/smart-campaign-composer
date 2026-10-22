@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	maxRequestChars = 1000 // proposed default (DECISIONS.md Open Questions)
+	maxRequestChars = 1000 // D15
 	maxReasonChars  = 500
 	maxNoteChars    = 200
 	maxScheduleAge  = 30 * 24 * time.Hour // D29
