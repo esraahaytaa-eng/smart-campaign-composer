@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { ApiError } from '../api'
 import { campaigns, streamContent, type Estimate } from '../campaign/client'
 import { createSaver } from '../campaign/saver'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Channel, Content } from '../campaign/types'
 import { render, SAMPLES } from '../content/preview'
+import { chosenContent, fromContent, generationOutcome, hasUnsavedChanges, needsOverwriteConfirm, type Draft } from '../content/editing'
 import { contentWasStale, markContentFresh } from '../content/stale'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessageField from '../components/MessageField.vue'
@@ -25,7 +26,7 @@ const estimate = ref<Estimate | null>(null)
 const loadError = ref<unknown>(null)
 const saveError = ref<unknown>(null)
 const notice = ref<Key | null>(null)
-const draft = ref<Required<Content>>({ sms: { body: '' }, email: { subject: '', body: '' } })
+const draft = ref<Draft>(fromContent(null))
 const fieldErrors = ref<Record<string, string[]>>({})
 const incomplete = ref(false)
 const stale = ref(contentWasStale(id))
@@ -40,10 +41,7 @@ const channels = computed<Channel[]>(() => campaign.value?.channels ?? [])
 const uses = (c: Channel) => channels.value.includes(c)
 
 function fromCampaign(c: Campaign) {
-  draft.value = {
-    sms: { body: c.content?.sms?.body ?? '' },
-    email: { subject: c.content?.email?.subject ?? '', body: c.content?.email?.body ?? '' },
-  }
+  draft.value = fromContent(c.content)
 }
 
 async function refreshEstimate() {
@@ -63,20 +61,23 @@ async function load() {
 load()
 
 // The content to save: only the chosen channels.
-const chosen = (): Content => ({
-  ...(uses('sms') ? { sms: { body: draft.value.sms.body } } : {}),
-  ...(uses('email') ? { email: { subject: draft.value.email.subject, body: draft.value.email.body } } : {}),
-})
+const chosen = (): Content => chosenContent(draft.value, channels.value)
 const complete = () =>
   (!uses('sms') || draft.value.sms.body.trim() !== '') &&
   (!uses('email') || (draft.value.email.subject.trim() !== '' && draft.value.email.body.trim() !== ''))
-const unchanged = () => JSON.stringify(chosen()) === JSON.stringify(campaign.value?.content ?? {})
+const unsaved = () => !!campaign.value && hasUnsavedChanges(draft.value, campaign.value.content, channels.value)
 
-// Autosave when a field loses focus; the content is read when the save runs.
-async function commit() {
-  if (!campaign.value || streaming.value || unchanged()) return
-  incomplete.value = !complete()
-  if (incomplete.value) return
+// Autosave when a field loses focus, after a pause in typing, and before
+// leaving; the content is read when the save runs. Returns whether nothing
+// is left unsaved. quiet: a typing pause doesn't nag about empty fields.
+async function commit(quiet = false): Promise<boolean> {
+  if (!campaign.value || streaming.value || locked.value) return !unsaved()
+  if (!unsaved()) return true
+  if (!complete()) {
+    if (!quiet) incomplete.value = true
+    return false
+  }
+  incomplete.value = false
   saveError.value = null
   try {
     await saver.save((v) => campaigns.setContent(id, v, chosen()))
@@ -85,6 +86,7 @@ async function commit() {
     stale.value = false
     markContentFresh(id)
     await refreshEstimate()
+    return !unsaved()
   } catch (err) {
     const list = err instanceof ApiError ? ((err.body as { field_errors?: { field: string; message: string }[] })?.field_errors ?? []) : []
     if (list.length) {
@@ -93,8 +95,46 @@ async function commit() {
       for (const e of list) (byField[e.field] ??= []).push(`${t('error.invalid')} ${t('error.details', { message: e.message })}`)
       fieldErrors.value = byField
     } else if (saver.state.value !== 'conflict') saveError.value = err
+    return false
   }
 }
+
+// Typing pause: save without waiting for the field to lose focus.
+let pause: ReturnType<typeof setTimeout> | undefined
+watch(
+  draft,
+  () => {
+    clearTimeout(pause)
+    pause = setTimeout(() => commit(true), 1500)
+  },
+  { deep: true },
+)
+
+// Leaving (link, Back, a step, another campaign's content page) saves first;
+// if that can't happen, ask. Another campaign's content page is the same
+// route with a new id, which is a route *update*, so both guards are needed.
+async function beforeLeaving(): Promise<boolean> {
+  clearTimeout(pause)
+  if (streaming.value) {
+    if (!window.confirm(t('content.leaveWhileWriting'))) return false
+    stop?.abort()
+    return true
+  }
+  if (await commit()) return true
+  return window.confirm(t(complete() ? 'content.leaveUnsaved' : 'content.leaveIncomplete'))
+}
+onBeforeRouteLeave(beforeLeaving)
+onBeforeRouteUpdate((to, from) => (to.params.id === from.params.id ? true : beforeLeaving()))
+
+// Closing or reloading the tab: the browser's own "leave site?" prompt.
+function guardUnload(e: BeforeUnloadEvent) {
+  if (streaming.value || unsaved()) e.preventDefault()
+}
+onMounted(() => window.addEventListener('beforeunload', guardUnload))
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', guardUnload)
+  clearTimeout(pause)
+})
 
 // ---- AI writing (D34): live text while it streams; nothing saved if stopped ----
 const streaming = ref(false)
@@ -104,8 +144,9 @@ const aiProblem = ref<string | null>(null) // the stream's own error text (Engli
 let stop: AbortController | null = null
 const regenerateConfirm = ref(false)
 
+// Ask before the AI replaces anything: saved content or text not saved yet.
 function askToWrite() {
-  if (campaign.value?.content) regenerateConfirm.value = true
+  if (needsOverwriteConfirm(draft.value, campaign.value?.content ?? null, channels.value)) regenerateConfirm.value = true
   else write()
 }
 
@@ -120,6 +161,9 @@ async function write() {
   stop = new AbortController()
   const signal = stop.signal
   let finished = false
+  // Set inside the queued save; an object so TypeScript sees it change there.
+  const result: { outcome: ReturnType<typeof generationOutcome> } = { outcome: 'failed' }
+  clearTimeout(pause)
   try {
     await saver.save(async (version) => {
       try {
@@ -140,16 +184,21 @@ async function write() {
       } catch (err) {
         if (!(err instanceof DOMException && err.name === 'AbortError')) throw err
       }
-      return campaigns.get(id) // the saved content and its new version, or unchanged
+      const fresh = await campaigns.get(id)
+      result.outcome = generationOutcome({ finished, aborted: signal.aborted, sentVersion: version, version: fresh.version })
+      // A newer version without a finished generation is someone else's
+      // change: show "changed elsewhere" instead of adopting it.
+      if (result.outcome === 'conflict') throw new ApiError('changed elsewhere', 409) // i18n-ignore: the page shows its conflict banner
+      return fresh
     })
-    if (finished) {
+    if (result.outcome === 'done') {
       fromCampaign(campaign.value!)
       notice.value = 'content.done'
       fieldErrors.value = {}
       stale.value = false
       markContentFresh(id)
       await refreshEstimate()
-    } else if (signal.aborted) notice.value = 'content.stopped'
+    } else if (result.outcome === 'stopped') notice.value = 'content.stopped'
   } catch (err) {
     if (saver.state.value !== 'conflict') saveError.value = err
   } finally {
@@ -172,6 +221,11 @@ const previewContent = computed<Content>(() => ({
   email: { subject: shown('email.subject', draft.value.email.subject), body: shown('email.body', draft.value.email.body) },
 }))
 const over = computed(() => estimate.value?.over_limit ?? null)
+const statusText = computed(() => {
+  if (streaming.value) return t(retrying.value ? 'content.retrying' : 'content.writing')
+  if (aiProblem.value) return t('content.aiError')
+  return notice.value ? t(notice.value) : ''
+})
 </script>
 
 <template>
@@ -201,7 +255,8 @@ const over = computed(() => estimate.value?.over_limit ?? null)
           · <RouterLink :to="{ name: 'campaign', params: { id } }">{{ t('content.editAudience') }}</RouterLink>
         </p>
 
-        <p class="sr-only" role="status">{{ notice ? t(notice) : '' }}</p>
+        <!-- One status region, always mounted, so screen readers announce changes. -->
+        <p class="sr-only" role="status">{{ statusText }}</p>
         <div v-if="locked" role="alert" class="alert alert-warning">
           <span>{{ t('error.changed') }}</span>
           <button type="button" class="btn btn-sm" @click="reload">{{ t('campaign.reload') }}</button>
@@ -210,10 +265,10 @@ const over = computed(() => estimate.value?.over_limit ?? null)
         <div v-if="stale" role="alert" class="alert alert-warning">{{ t('campaign.staleContent') }}</div>
 
         <div class="ai-bar" :class="{ busy: streaming }">
-          <span v-if="streaming" role="status">
+          <span v-if="streaming">
             <strong>{{ t(retrying ? 'content.retrying' : 'content.writing') }}</strong> {{ t('content.writingHint') }}
           </span>
-          <span v-else-if="aiProblem" role="alert" class="problem">
+          <span v-else-if="aiProblem" class="problem">
             {{ t('content.aiError') }} {{ t('error.details', { message: aiProblem }) }}
           </span>
           <span v-else-if="notice === 'content.stopped' || notice === 'content.done'">{{ t(notice) }}</span>
