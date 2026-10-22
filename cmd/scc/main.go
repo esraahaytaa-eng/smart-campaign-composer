@@ -22,12 +22,13 @@ import (
 	"smart-campaign-composer/internal/llm"
 	"smart-campaign-composer/internal/obs"
 	"smart-campaign-composer/internal/provider"
+	"smart-campaign-composer/internal/worker"
 )
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: scc migrate|api|mock-provider")
+		fmt.Fprintln(os.Stderr, "usage: scc migrate|api|worker|mock-provider")
 		os.Exit(2)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -41,9 +42,9 @@ func main() {
 
 func run(ctx context.Context, process string) error {
 	switch process {
-	case "migrate", "api", "mock-provider":
+	case "migrate", "api", "worker", "mock-provider":
 	default:
-		return fmt.Errorf("unknown process %q (want migrate, api or mock-provider)", process)
+		return fmt.Errorf("unknown process %q (want migrate, api, worker or mock-provider)", process)
 	}
 	cfg, err := config.Load(process)
 	if err != nil {
@@ -60,6 +61,8 @@ func run(ctx context.Context, process string) error {
 		return migrate(ctx, cfg, pool)
 	case "mock-provider":
 		return serveProvider(ctx, cfg, pool)
+	case "worker":
+		return runWorker(ctx, cfg, pool)
 	}
 	return serveAPI(ctx, cfg, pool)
 }
@@ -106,6 +109,28 @@ func serveProvider(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) e
 	provider.New(pool, cfg.Provider, cfg.ProviderSeed).Routes(mux)
 	slog.Info("mock provider starting", "addr", cfg.HTTPAddr, "sms", cfg.Provider["sms"], "email", cfg.Provider["email"])
 	return serve(ctx, cfg.HTTPAddr, mux)
+}
+
+// runWorker sends approved campaigns (D18, D19) and serves health and metrics.
+func runWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	mux := http.NewServeMux()
+	obs.Routes(mux, pool)
+	var serveErr error
+	served := make(chan struct{})
+	go func() {
+		serveErr = serve(ctx, cfg.HTTPAddr, mux)
+		cancel() // a server that cannot start stops the worker too
+		close(served)
+	}()
+
+	w := &worker.Worker{Queue: &worker.Queue{Pool: pool}, ProviderURL: cfg.ProviderURL, MaxAttempts: cfg.MaxAttempts}
+	slog.Info("worker starting", "provider", cfg.ProviderURL, "max_attempts", cfg.MaxAttempts)
+	err := w.Run(ctx)
+	cancel()
+	<-served
+	return errors.Join(err, serveErr)
 }
 
 // serve runs an HTTP server until ctx ends, then shuts it down gracefully.

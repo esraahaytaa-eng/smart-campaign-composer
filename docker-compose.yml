@@ -47,6 +47,26 @@ services:
       timeout: 3s
       retries: 10
 
+  # Sends approved campaigns through the provider (D18, D19). Exactly one
+  # replica: the 100/s per-channel limit lives in this process.
+  worker:
+    build: .
+    command: ["worker"]
+    environment:
+      DATABASE_URL: *db-url
+      PROVIDER_URL: http://mock-provider:8080
+      MAX_ATTEMPTS: ${MAX_ATTEMPTS:-5}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mock-provider:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   # Mock SMS and email provider (D20). Logs in as its own role, which can only
   # use the provider schema (D6). Behaviour per channel: SMS_* / EMAIL_* in .env.example.
   mock-provider:
