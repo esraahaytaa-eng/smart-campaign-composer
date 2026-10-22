@@ -117,6 +117,69 @@ export default () =>
       check((await page.locator('#sms-body').getAttribute('readonly')) !== null, 'editing stays locked until reload')
     }
 
+    // re-review: one edit is one save, and a queued save rechecks its content
+    {
+      const d = await t.draft(CART_BRIEF)
+      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 1, content: content() } })
+      await viaApp(d)
+      let puts = 0
+      const count = (req) => req.method() === 'PUT' && req.url().endsWith(`/campaigns/${d}/content`) && puts++
+      page.on('request', count)
+      await page.locator('#sms-body').fill('One edit {{first_name}}')
+      await page.locator('#email-subject').click() // blur saves
+      await page.waitForTimeout(2500) // past the typing pause
+      check(puts === 1, `one edit is saved once (${puts} saves)`)
+
+      // a slow save in flight, another queued, then the SMS is cleared: the
+      // queued save must not send the empty text (a 422)
+      await page.route(`**/api/campaigns/${d}/content`, async (route) => {
+        await new Promise((r) => setTimeout(r, 800))
+        await route.continue().catch(() => {}) // the route may be removed meanwhile
+      })
+      let rejected = 0
+      page.on('response', (r) => r.url().endsWith(`/campaigns/${d}/content`) && r.status() === 422 && rejected++)
+      await page.locator('#sms-body').fill('First {{first_name}}')
+      await page.locator('#email-subject').click()
+      await page.locator('#sms-body').fill('Second {{first_name}}')
+      await page.locator('#email-subject').click()
+      await page.locator('#sms-body').fill('')
+      await page.locator('#email-subject').click()
+      await page.waitForTimeout(3000)
+      await page.unroute(`**/api/campaigns/${d}/content`)
+      page.off('request', count)
+      check(rejected === 0, `a queued save never sends text cleared meanwhile (${rejected} rejected)`)
+      check(await page.getByText('Not saved yet: fill in every message first.').isVisible(), 'the empty message is reported as not saved yet')
+      await page.locator('#sms-body').fill('Restored {{first_name}}')
+      await page.locator('#email-subject').click()
+      await page.getByText('All changes saved').waitFor()
+    }
+
+    // re-review critical: an expired session while editing goes to sign-in once,
+    // with no save loop and no dialogs
+    {
+      const d = await t.draft(CART_BRIEF)
+      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 1, content: content() } })
+      await viaApp(d)
+      let puts = 0
+      let dialogs = 0
+      const count = (req) => req.method() === 'PUT' && req.url().includes('/content') && puts++
+      const dismiss = (dlg) => {
+        dialogs++
+        dlg.dismiss()
+      }
+      page.on('request', count)
+      page.on('dialog', dismiss)
+      const cookies = await t.context.cookies()
+      await t.context.clearCookies() // the session expires
+      await page.locator('#sms-body').fill('Typed after the session expired')
+      await page.waitForTimeout(4000)
+      page.off('request', count)
+      page.off('dialog', dismiss)
+      check(page.url().includes('/login'), 'an expired session leads to sign-in')
+      check(puts <= 2 && dialogs === 0, `no save loop and no dialogs (${puts} saves, ${dialogs} dialogs)`)
+      await t.context.addCookies(cookies) // signed in again for the rest
+    }
+
     // review: the suggestion is preselected and labelled; approval stays explicit
     await page.goto(`${BASE}/campaigns/${id}/review`)
     await page.getByRole('heading', { name: 'When should it send?' }).waitFor()
