@@ -49,6 +49,9 @@ func TestHandler_PageRoutesGetTheApp(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != "<!doctype html>app" {
 			t.Errorf("%s: want the app, got %d %q", path, rec.Code, rec.Body)
 		}
+		if rec.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" {
+			t.Errorf("%s: the app must not be framed by other sites (clickjacking)", path)
+		}
 		if rec.Header().Get("Cache-Control") != "no-cache" {
 			t.Errorf("%s: index.html must be revalidated so a new build is picked up, got %q", path, rec.Header().Get("Cache-Control"))
 		}
@@ -67,6 +70,9 @@ func TestHandler_ServesFiles(t *testing.T) {
 	}
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("want nosniff")
+	}
+	if rec.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" {
+		t.Error("the app must not be framed by other sites (clickjacking)")
 	}
 	if rec := get(h, http.MethodGet, "/favicon.svg"); rec.Code != http.StatusOK || rec.Body.String() != "<svg/>" {
 		t.Fatalf("want the favicon, got %d", rec.Code)

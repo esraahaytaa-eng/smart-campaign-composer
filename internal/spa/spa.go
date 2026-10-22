@@ -22,6 +22,8 @@ func Handler(dir string) http.Handler {
 			return
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// Other sites may not frame the app (clickjacking of approve and send).
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
 		p := path.Clean("/" + r.URL.Path) // never leaves dir
 		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err == nil && !info.IsDir() {
 			if strings.HasPrefix(p, "/assets/") {
