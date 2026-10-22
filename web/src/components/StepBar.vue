@@ -2,7 +2,10 @@
 // The composer's five steps from the design; earlier steps show a check.
 import { t, type Key } from '../i18n'
 
-const props = defineProps<{ current: number }>()
+// With campaignId, the steps a draft can visit (audience, content, review)
+// are links.
+const props = defineProps<{ current: number; campaignId?: number }>()
+const routes = ['campaign', 'campaign-content', 'campaign-review']
 const steps: Key[] = ['steps.audience', 'steps.content', 'steps.review', 'steps.sending', 'steps.monitor']
 const state = (i: number) => (i + 1 < props.current ? 'done' : i + 1 === props.current ? 'current' : 'todo')
 </script>
@@ -10,8 +13,14 @@ const state = (i: number) => (i + 1 < props.current ? 'done' : i + 1 === props.c
 <template>
   <ol class="steps" :aria-label="t('steps.label')">
     <li v-for="(label, i) in steps" :key="label" :class="state(i)" :aria-current="state(i) === 'current' ? 'step' : undefined">
-      <span class="dot" aria-hidden="true">{{ state(i) === 'done' ? '✓' : i + 1 }}</span>
-      <span>{{ t(label) }}<span v-if="state(i) === 'done'" class="sr-only"> {{ t('steps.done') }}</span></span>
+      <RouterLink v-if="campaignId && i < 3 && i + 1 !== current" :to="{ name: routes[i]!, params: { id: campaignId } }" class="step-link">
+        <span class="dot" aria-hidden="true">{{ state(i) === 'done' ? '✓' : i + 1 }}</span>
+        <span>{{ t(label) }}<span v-if="state(i) === 'done'" class="sr-only"> {{ t('steps.done') }}</span></span>
+      </RouterLink>
+      <template v-else>
+        <span class="dot" aria-hidden="true">{{ state(i) === 'done' ? '✓' : i + 1 }}</span>
+        <span>{{ t(label) }}<span v-if="state(i) === 'done'" class="sr-only"> {{ t('steps.done') }}</span></span>
+      </template>
     </li>
   </ol>
 </template>
@@ -44,6 +53,16 @@ li.current {
 }
 li.done {
   color: var(--ink);
+}
+.step-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+.step-link:hover span:last-child {
+  text-decoration: underline;
 }
 .dot {
   width: 24px;

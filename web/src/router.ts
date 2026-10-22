@@ -26,6 +26,8 @@ export function createAppRouter(history: RouterHistory = createWebHistory()) {
           { path: 'campaigns', name: 'campaigns', component: () => import('./views/CampaignsView.vue'), meta: { title: 'page.campaigns' } },
           { path: 'campaigns/new', name: 'new-campaign', component: () => import('./views/NewCampaignView.vue'), meta: { title: 'page.newCampaign' } },
           { path: 'campaigns/:id(\\d+)', name: 'campaign', component: () => import('./views/CampaignView.vue'), meta: { title: 'page.campaign' } },
+          { path: 'campaigns/:id(\\d+)/content', name: 'campaign-content', component: () => import('./views/ContentView.vue'), meta: { title: 'page.content' } },
+          { path: 'campaigns/:id(\\d+)/review', name: 'campaign-review', component: () => import('./views/ReviewView.vue'), meta: { title: 'page.review' } },
           { path: ':pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue'), meta: { title: 'page.notFound' } },
         ],
       },

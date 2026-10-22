@@ -66,11 +66,16 @@ export const formatAmount = (n: number) =>
 
 // "2026-10-01" → "1 Oct 2026" / "1 Eki 2026". Read as UTC so the day never shifts.
 export function formatDate(iso: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '—' // a rule without its date: show a gap, not 1900
   const [y, m, d] = iso.split('-').map(Number)
   return new Intl.DateTimeFormat(formats[current.value], { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(
     Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1),
   )
 }
+
+// An instant in the browser's zone: "23 Oct 2026, 10:00" / "23 Eki 2026 10:00".
+export const formatDateTime = (iso: string) =>
+  new Intl.DateTimeFormat(formats[current.value], { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso))
 
 export const formatOr = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'disjunction' }).format(items)
 export const formatAnd = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'conjunction' }).format(items)

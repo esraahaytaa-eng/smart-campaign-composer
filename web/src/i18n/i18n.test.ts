@@ -108,6 +108,10 @@ describe('formatting', () => {
     expect(i18n.formatDate('2026-10-01')).toBe('1 Eki 2026')
   })
 
+  it('shows a gap for a missing date, not 1900', () => {
+    expect(i18n.formatDate('')).toBe('—')
+  })
+
   it('never shifts a date across time zones', () => {
     expect(i18n.formatDate('2026-01-01')).toBe('1 Jan 2026')
   })

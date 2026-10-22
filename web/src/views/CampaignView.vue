@@ -7,6 +7,7 @@ import { campaigns, loadCatalog } from '../campaign/client'
 import { defaultForm, fromForm, ruleErrors, ruleKey, toForm, withoutRule, withRule, type RuleForm } from '../campaign/rules'
 import { createSaver } from '../campaign/saver'
 import { briefTitle } from '../campaign/title'
+import { contentWasStale, markContentStale } from '../content/stale'
 import type { Campaign, Catalog, Channel, FieldError, Rule } from '../campaign/types'
 import AudiencePanel from '../components/AudiencePanel.vue'
 import ChannelPicker from '../components/ChannelPicker.vue'
@@ -30,7 +31,7 @@ const saveError = ref<unknown>(null)
 const rulesProblem = ref<Text[]>([])
 const notice = ref<Key | null>(null) // announced politely: what just happened
 const change = ref<number | null>(null)
-const staleContent = ref(false)
+const staleContent = ref(contentWasStale(Number(route.params.id)))
 
 const saver = createSaver<Campaign>(
   () => campaign.value?.version ?? 0,
@@ -92,7 +93,9 @@ function applyChannels(next: Channel[]) {
     .catch(() => {})
 }
 const channelName = (c: Channel) => t(c === 'sms' ? 'channel.sms' : 'channel.email')
-const channelList = (cs: Channel[]) => formatAnd(cs.map(channelName))
+// Inside a sentence: "email" / "e-posta", not "Email".
+const channelInline = (c: Channel) => t(c === 'sms' ? 'channel.inline.sms' : 'channel.inline.email')
+const channelList = (cs: Channel[]) => formatAnd(cs.map(channelInline))
 
 // ---- rules ----
 // key: the rule being edited (field and operator), null for a new rule.
@@ -189,6 +192,7 @@ async function reinterpret() {
     notice.value = 'notice.reinterpreted'
     change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before
     staleContent.value = hadContent
+    if (hadContent) markContentStale(id) // the content step warns too (D40)
   } catch (err) {
     // Nothing was saved (D15); the new text stays so it can be rephrased.
     briefProblem.value = saver.state.value === 'conflict' ? null : { err, reason: aiReason(err) }
@@ -250,7 +254,7 @@ function reload() {
       </div>
 
       <template v-else>
-        <StepBar :current="1" />
+        <StepBar :current="1" :campaign-id="id" />
         <div v-if="staleContent" role="alert" class="alert alert-warning">
           {{ t('campaign.staleContent') }}
         </div>
@@ -284,7 +288,7 @@ function reload() {
                 <h2 id="rules-title" class="section-title">{{ t('campaign.rules') }}</h2>
                 <span v-if="!isResend" class="help">{{ t('campaign.rulesHelp') }}</span>
               </div>
-              <p v-if="isResend" class="help">{{ t('campaign.resendAudience', { channel: channelName(campaign.channels[0]!) }) }}</p>
+              <p v-if="isResend" class="help">{{ t('campaign.resendAudience', { channel: channelInline(campaign.channels[0]!) }) }}</p>
               <template v-else>
                 <RuleChips
                   :rules="campaign.rules ?? []"
@@ -308,8 +312,7 @@ function reload() {
         <div class="footer">
           <span class="help">{{ t('campaign.next', { channels: channelList(campaign.channels), count: campaign.channels.length }) }}</span>
           <span class="next">
-            <button type="button" class="btn btn-primary btn-lg" aria-disabled="true" aria-describedby="next-help">{{ t('campaign.generate') }}</button>
-            <span id="next-help" class="help">{{ t('campaign.generateLater') }}</span>
+            <RouterLink :to="{ name: 'campaign-content', params: { id } }" class="btn btn-primary btn-lg">{{ t('campaign.generate') }}</RouterLink>
           </span>
         </div>
       </template>
