@@ -23,7 +23,6 @@ var (
 type mockOutput struct {
 	Unsupported     bool              `json:"unsupported"`
 	Reason          string            `json:"reason"`
-	Channels        []string          `json:"channels"`
 	Rules           []json.RawMessage `json:"rules"`
 	SuggestedSendAt *string           `json:"suggested_send_at"`
 	ScheduleNote    *string           `json:"schedule_note"`

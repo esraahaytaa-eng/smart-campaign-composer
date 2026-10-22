@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -36,7 +35,6 @@ var (
 type Interpretation struct {
 	Unsupported     bool
 	Reason          string
-	Channels        []string // suggestion only; the marketer chooses (D1)
 	Rules           []audience.Rule
 	SuggestedSendAt *time.Time // nil unless usable: within now..now+30 days
 	ScheduleNote    string
@@ -86,7 +84,6 @@ func checkRequestText(text string) (string, error) {
 type aiAnswer struct {
 	Unsupported     bool            `json:"unsupported"`
 	Reason          string          `json:"reason"`
-	Channels        []string        `json:"channels"`
 	Rules           []audience.Rule `json:"rules"`
 	SuggestedSendAt *string         `json:"suggested_send_at"`
 	ScheduleNote    *string         `json:"schedule_note"`
@@ -116,13 +113,6 @@ func parseInterpretation(raw json.RawMessage, in llm.InterpretInput, loc *time.L
 
 	var problems []string
 	got := Interpretation{}
-	for _, ch := range out.Channels {
-		if ch != "sms" && ch != "email" {
-			problems = append(problems, fmt.Sprintf("unknown channel %q", ch))
-		} else if !slices.Contains(got.Channels, ch) {
-			got.Channels = append(got.Channels, ch)
-		}
-	}
 	rules, errs := audience.Validate(out.Rules, in.Catalog)
 	for _, e := range errs {
 		if e.Rule < 0 {

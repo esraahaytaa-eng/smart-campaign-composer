@@ -32,13 +32,12 @@ type InterpretInput struct {
 type interpretOutput struct {
 	Unsupported     bool            `json:"unsupported"`
 	Reason          string          `json:"reason"`
-	Channels        []string        `json:"channels"`
 	Rules           []audience.Rule `json:"rules"`
 	SuggestedSendAt *string         `json:"suggested_send_at"`
 	ScheduleNote    *string         `json:"schedule_note"`
 }
 
 func unsupported(reason string) json.RawMessage {
-	b, _ := json.Marshal(interpretOutput{Unsupported: true, Reason: reason, Channels: []string{}, Rules: []audience.Rule{}})
+	b, _ := json.Marshal(interpretOutput{Unsupported: true, Reason: reason, Rules: []audience.Rule{}})
 	return b
 }

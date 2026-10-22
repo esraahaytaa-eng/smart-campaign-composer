@@ -12,7 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-const validOutput = `{"unsupported":false,"reason":"","channels":[],"rules":[{"field":"city","op":"in","value":["İstanbul"]}],"suggested_send_at":null,"schedule_note":null}`
+const validOutput = `{"unsupported":false,"reason":"","rules":[{"field":"city","op":"in","value":["İstanbul"]}],"suggested_send_at":null,"schedule_note":null}`
 
 type captured struct {
 	body   map[string]any
@@ -166,6 +166,10 @@ func TestInterpretSchema_AllObjectsClosed(t *testing.T) {
 				walk(path+"[]", c)
 			}
 		}
+	}
+	// Channels are the marketer's choice (D1), so the AI is not asked for them.
+	if _, ok := interpretSchema["properties"].(map[string]any)["channels"]; ok || strings.Contains(interpretSystemPrompt, "Channels") {
+		t.Error("schema or prompt still asks the AI for channels")
 	}
 	// Round-trip so typed slices become []any like the API sees them.
 	b, _ := json.Marshal(interpretSchema)

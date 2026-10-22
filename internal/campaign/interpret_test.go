@@ -38,7 +38,7 @@ func (s *scripted) InterpretRequest(ctx context.Context, in llm.InterpretInput) 
 }
 
 func output(rules, sendAt, note string) string {
-	return `{"unsupported":false,"reason":"","channels":["sms"],"rules":` + rules +
+	return `{"unsupported":false,"reason":"","rules":` + rules +
 		`,"suggested_send_at":` + sendAt + `,"schedule_note":` + note + `}`
 }
 
@@ -65,9 +65,6 @@ func TestInterpret_ValidFirstTry(t *testing.T) {
 	if got.Unsupported || len(got.Rules) != 2 || string(got.Rules[0].Value) != `["İstanbul"]` {
 		t.Fatalf("want normalized rules, got %+v", got)
 	}
-	if len(got.Channels) != 1 || got.Channels[0] != "sms" {
-		t.Fatalf("channels: %v", got.Channels)
-	}
 }
 
 func TestInterpret_InvalidThenValid_RetriesWithErrors(t *testing.T) {
@@ -88,16 +85,16 @@ func TestInterpret_InvalidThenValid_RetriesWithErrors(t *testing.T) {
 
 func TestInterpret_InvalidTwice_ErrAIInvalid(t *testing.T) {
 	for name, bad := range map[string]string{
-		"unknown city":        output(badRules, "null", "null"),
-		"not JSON":            `Sure! Here are the rules: city = Istanbul`,
-		"unknown key":         `{"unsupported":false,"reason":"","channels":[],"rules":` + goodRules + `,"suggested_send_at":null,"schedule_note":null,"sql":"DROP"}`,
-		"no rules":            output(`[]`, "null", "null"),
-		"bad channel":         strings.Replace(output(goodRules, "null", "null"), `["sms"]`, `["fax"]`, 1),
-		"bad time format":     output(goodRules, `"tomorrow 10:00"`, `"tomorrow"`),
+		"unknown city":         output(badRules, "null", "null"),
+		"not JSON":             `Sure! Here are the rules: city = Istanbul`,
+		"unknown key":          `{"unsupported":false,"reason":"","rules":` + goodRules + `,"suggested_send_at":null,"schedule_note":null,"sql":"DROP"}`,
+		"no rules":             output(`[]`, "null", "null"),
+		"channels (not asked)": strings.Replace(output(goodRules, "null", "null"), `"rules":`, `"channels":["sms"],"rules":`, 1),
+		"bad time format":      output(goodRules, `"tomorrow 10:00"`, `"tomorrow"`),
 		// 10:00 written in UTC for an Istanbul campaign would silently become 13:00 local.
-		"wrong zone offset": output(goodRules, `"2026-10-22T10:00:00Z"`, `"tomorrow at 10:00"`),
-		"unsupported, no why": `{"unsupported":true,"reason":"","channels":[],"rules":[],"suggested_send_at":null,"schedule_note":null}`,
-		"reason too long":     `{"unsupported":true,"reason":"` + strings.Repeat("x", 501) + `","channels":[],"rules":[],"suggested_send_at":null,"schedule_note":null}`,
+		"wrong zone offset":   output(goodRules, `"2026-10-22T10:00:00Z"`, `"tomorrow at 10:00"`),
+		"unsupported, no why": `{"unsupported":true,"reason":"","rules":[],"suggested_send_at":null,"schedule_note":null}`,
+		"reason too long":     `{"unsupported":true,"reason":"` + strings.Repeat("x", 501) + `","rules":[],"suggested_send_at":null,"schedule_note":null}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := &scripted{outputs: []string{bad, bad}}
@@ -112,7 +109,7 @@ func TestInterpret_InvalidTwice_ErrAIInvalid(t *testing.T) {
 }
 
 func TestInterpret_UnsupportedPassthrough(t *testing.T) {
-	s := &scripted{outputs: []string{`{"unsupported":true,"reason":"Age is not in the catalog.","channels":[],"rules":[{"field":"city","op":"in","value":["Ankara"]}],"suggested_send_at":null,"schedule_note":null}`}}
+	s := &scripted{outputs: []string{`{"unsupported":true,"reason":"Age is not in the catalog.","rules":[{"field":"city","op":"in","value":["Ankara"]}],"suggested_send_at":null,"schedule_note":null}`}}
 
 	got, err := interpret(t, s, "brief")
 

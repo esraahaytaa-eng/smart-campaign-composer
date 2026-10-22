@@ -187,7 +187,7 @@ func (m *Mock) InterpretRequest(ctx context.Context, in InterpretInput) (json.Ra
 	if !ok {
 		return unsupported(MockUnsupportedReason), nil
 	}
-	out := interpretOutput{Channels: []string{}}
+	out := interpretOutput{}
 	for _, s := range sentences[1:] {
 		switch {
 		case toneRe.MatchString(s):

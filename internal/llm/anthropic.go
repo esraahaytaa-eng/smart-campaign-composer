@@ -96,8 +96,6 @@ A window is either {"last_days": N} (1-365, counted back from when the campaign 
 
 Never guess. If any part of the requested audience cannot be expressed exactly with these rules (an attribute that is not listed such as age, gender or interests, an OR between conditions, an unknown city or category, an unclear time span), set "unsupported" to true, explain briefly in "reason" what cannot be expressed, and return no rules. Do not drop, approximate, broaden or add conditions. Off-topic or harmful requests are also unsupported.
 
-Channels: list "sms" and/or "email" only if the brief names them; otherwise [].
-
 Send time: if the brief says when to send, set "suggested_send_at" to that moment in RFC 3339 with the time zone's offset, and "schedule_note" to the brief's exact phrase. If the timing is vague ("sometime next week"), set suggested_send_at to null and put the phrase in schedule_note. Without timing, both are null.
 
 Write "reason" in the language of the brief.`
@@ -121,7 +119,6 @@ var (
 var interpretSchema = object(map[string]any{
 	"unsupported": map[string]any{"type": "boolean"},
 	"reason":      map[string]any{"type": "string"},
-	"channels":    map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"sms", "email"}}},
 	"rules": map[string]any{"type": "array", "items": map[string]any{"anyOf": []any{
 		rule([]string{"city"}, []string{"in"}, stringList),
 		rule([]string{"cart_added", "no_order", "signed_up"}, []string{"within"}, window),
