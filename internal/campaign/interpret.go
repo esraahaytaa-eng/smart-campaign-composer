@@ -58,10 +58,16 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
 		raw, err := model.InterpretRequest(callCtx, in)
 		cancel()
-		if err != nil {
+		var got Interpretation
+		var problems []string
+		switch {
+		case errors.Is(err, llm.ErrTruncated):
+			problems = []string{"the answer was cut off; keep it short"}
+		case err != nil:
 			return Interpretation{}, fmt.Errorf("AI request failed: %w", err)
+		default:
+			got, problems = parseInterpretation(raw, in, loc)
 		}
-		got, problems := parseInterpretation(raw, in, loc)
 		if len(problems) == 0 {
 			return got, nil
 		}

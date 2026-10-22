@@ -41,7 +41,16 @@ func (f failingLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.
 	return nil, nil
 }
 
+func (f failingLLM) StreamContent(context.Context, llm.ContentInput, func(string)) (json.RawMessage, error) {
+	f.t.Fatal("the AI must not be called")
+	return nil, nil
+}
+
 type garbageLLM struct{}
+
+func (garbageLLM) StreamContent(context.Context, llm.ContentInput, func(string)) (json.RawMessage, error) {
+	return json.RawMessage(`not json`), nil
+}
 
 func (garbageLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.RawMessage, error) {
 	return json.RawMessage(`not json`), nil

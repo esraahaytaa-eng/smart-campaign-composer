@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"smart-campaign-composer/internal/audience"
 )
@@ -127,5 +128,22 @@ func TestValidate_ReportsEveryBadRule(t *testing.T) {
 	_, errs := audience.Validate(rules, catalog)
 	if len(errs) != 2 || errs[0].Rule != 0 || errs[1].Rule != 2 {
 		t.Fatalf("want errors on rules 0 and 2, got %v", errs)
+	}
+}
+
+func TestFixedWindowStarts(t *testing.T) {
+	istanbul, _ := time.LoadLocation("Europe/Istanbul")
+	rules := []audience.Rule{
+		rule("city", "in", `["Ankara"]`),
+		rule("cart_added", "within", `{"last_days": 30}`),
+		rule("signed_up", "within", `{"from": "2026-11-01", "to": null}`),
+		rule("ordered_category", "in", `{"categories": ["books"], "from": "2026-10-01", "to": "2026-10-05"}`),
+	}
+
+	starts, err := audience.FixedWindowStarts(rules, istanbul)
+
+	want := []time.Time{time.Date(2026, 11, 1, 0, 0, 0, 0, istanbul), time.Date(2026, 10, 1, 0, 0, 0, 0, istanbul)}
+	if err != nil || len(starts) != 2 || !starts[0].Equal(want[0]) || !starts[1].Equal(want[1]) {
+		t.Fatalf("want %v, got %v (%v)", want, starts, err)
 	}
 }
