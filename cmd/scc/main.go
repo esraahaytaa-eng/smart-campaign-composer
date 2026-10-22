@@ -22,6 +22,7 @@ import (
 	"smart-campaign-composer/internal/llm"
 	"smart-campaign-composer/internal/obs"
 	"smart-campaign-composer/internal/provider"
+	"smart-campaign-composer/internal/spa"
 	"smart-campaign-composer/internal/worker"
 )
 
@@ -97,7 +98,10 @@ func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error 
 	obs.Routes(mux, pool)
 	api := auth.Routes(mux, pool, cfg.LLMMode)
 	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}).Routes(api)
-	slog.Info("api starting", "addr", cfg.HTTPAddr, "llm_mode", cfg.LLMMode)
+	if cfg.WebDir != "" {
+		mux.Handle("/", spa.Handler(cfg.WebDir))
+	}
+	slog.Info("api starting", "addr", cfg.HTTPAddr, "llm_mode", cfg.LLMMode, "web_dir", cfg.WebDir)
 	return serve(ctx, cfg.HTTPAddr, mux)
 }
 

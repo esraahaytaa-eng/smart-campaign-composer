@@ -18,6 +18,7 @@ type Config struct {
 	AnthropicAPIKey string
 	AnthropicModel  string
 	LLMTimeout      time.Duration // per AI call (D15)
+	WebDir          string        // built frontend the api serves (T15); empty serves none
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
 	ProviderDBPassword   string // migrate sets it on the mock provider's database role (D6)
@@ -47,6 +48,7 @@ func Load(process string) (Config, error) {
 		LLMMode:         getenv("LLM_MODE", "mock"),
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:  getenv("ANTHROPIC_MODEL", "claude-opus-5-5"),
+		WebDir:          os.Getenv("WEB_DIR"),
 
 		DemoMarketerPassword: os.Getenv("DEMO_MARKETER_PASSWORD"),
 		ProviderDBPassword:   os.Getenv("PROVIDER_DB_PASSWORD"),
