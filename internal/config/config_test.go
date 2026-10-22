@@ -3,11 +3,12 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
-	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "DEMO_MARKETER_PASSWORD"} {
+	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "DEMO_MARKETER_PASSWORD", "LLM_TIMEOUT"} {
 		t.Setenv(k, env[k])
 	}
 }
@@ -28,7 +29,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LLMMode != "mock" || cfg.AnthropicModel != "claude-opus-5-5" || cfg.HTTPAddr != ":8080" {
+	if cfg.LLMMode != "mock" || cfg.AnthropicModel != "claude-opus-5-5" || cfg.HTTPAddr != ":8080" || cfg.LLMTimeout != 60*time.Second {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }
@@ -56,6 +57,8 @@ func TestLoadConfig_Errors(t *testing.T) {
 		{"migrate needs database url", "migrate", map[string]string{}, "DATABASE_URL"},
 		{"migrate needs marketer password", "migrate", map[string]string{"DATABASE_URL": "postgres://db"}, "DEMO_MARKETER_PASSWORD"},
 		{"marketer password too short", "migrate", map[string]string{"DATABASE_URL": "postgres://db", "DEMO_MARKETER_PASSWORD": "short"}, "DEMO_MARKETER_PASSWORD"},
+		{"bad llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "soon"}, "LLM_TIMEOUT"},
+		{"zero llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "0s"}, "LLM_TIMEOUT"},
 		{"unknown llm mode", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_MODE": "fake"}, "LLM_MODE"},
 	}
 	for _, tc := range cases {
@@ -78,5 +81,14 @@ func TestLoadConfig_MigrateIgnoresLLMSettings(t *testing.T) {
 	}
 	if cfg.DemoMarketerPassword != "demo-password" {
 		t.Fatalf("password not loaded: %+v", cfg)
+	}
+}
+
+func TestLoadConfig_LLMTimeout(t *testing.T) {
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "90s"})
+
+	cfg, err := Load("api")
+	if err != nil || cfg.LLMTimeout != 90*time.Second {
+		t.Fatalf("want 90s, got %v (%v)", cfg.LLMTimeout, err)
 	}
 }

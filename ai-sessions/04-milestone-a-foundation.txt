@@ -1,0 +1,2527 @@
+ ▐▛███▛█   Claude Code v2.1.306
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   ~/smart-campaign-composer
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+  1 more notice hidden
+
+❯ /rename 04-project-initialization 
+  ⎿  Session renamed to: 04-project-initialization
+
+❯ first, check that T0 is complete and consistent with the approved plan. then  
+  start T1 and initialize the project. keep the architecture simple and follow  
+  the plan. run the build and tests, and show me the results.                   
+
+⏺ I'll start by reading the plan, decisions, and case to verify T0.
+
+  Read 2 files, listed 1 directory (ctrl+o to expand)
+
+⏺ T0 checks: the CASE wording, the memory entry, the git state, and the session
+  exports (scanned before anything gets committed).
+
+  Listed 1 directory, ran 2 shell commands (ctrl+o to expand)
+
+⏺ Found two issues: no initial commit exists, and the plan's open items aren't
+  reflected in DECISIONS.md's "Open Questions" section. I'll fix the docs gap
+  and then make the initial commit.
+
+⏺ Update(DECISIONS.md)
+  ⎿  Added 1 line, removed 1 line
+      278  
+      279  ## Open Questions
+      280  
+      281 -None currently.                                               
+      281 +- **Operational defaults (confirm before T10/T12):** mock-prov
+          +ider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-Af
+          +ter: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 wor
+          +kers per channel, request text ≤ 1,000 characters, session TTL
+          + 12 h. All proposed, not yet approved.                        
+      282  
+      283  ## Deferred
+      284  
+
+  Wrote 1 memory (ctrl+o to expand)
+
+⏺ Now the approved T0 commit. It holds only the docs and session exports
+  (already scanned). .claude/settings.local.json stays out because it's
+  machine-local.
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  PostToolUse:Bash says: Tip: Run /ultrareview before you push to catch bugs 
+     with a cloud-based multi-agent review — 3 free reviews left.
+
+⏺ T0 is now complete: commit f9c2114 is on main. Two things block T1, and both
+  are your call:
+
+⏺ User answered Claude's questions:
+  ⎿  · Neither Go nor Docker (nor Homebrew) is installed on this Mac, so I can't
+     run the build or `make test` (D27 runs tests in Docker). How should we get
+     the toolchain? → Install Docker Desktop (Recommended)
+     · The plan says to choose the execution method before T1. Which one? → 
+     Inline (Recommended)
+
+⏺ Skill(superpowers:executing-plans)
+  ⎿  Successfully loaded skill
+
+⏺ Using executing-plans inline for T1 only: CLAUDE.md requires approval before
+  the next major task. Per D35 the work goes on branch milestone-a-foundation,
+  with no worktree.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ The plan uses T1 headings, which the brief script can't parse, so the T1
+  section of the plan serves as the brief. I'll record that in the ledger. Next
+  I'm loading the required TDD skill.
+
+⏺ Skill(superpowers:test-driven-development)
+  ⎿  Successfully loaded skill
+
+⏺ Docker isn't installed yet, so I can't run RED, but I'll write the T1 tests
+  and config files now and run RED → GREEN once it's available—still no
+  production code until the tests fail first.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Tests first:
+
+⏺ Write(internal/config/config_test.go)
+  ⎿  Wrote 76 lines to internal/config/config_test.go
+       1 package config
+       2 
+       3 import (
+       4   "strings"
+       5   "testing"
+       7 
+       8 func setEnv(t *testing.T, env map[string]string) {
+       9   t.Helper()
+      10   for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "LLM_M
+         ODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL"} {
+     … +78 lines (ctrl+o to expand)
+
+⏺ Write(internal/obs/obs_test.go)
+  ⎿  Wrote 56 lines to internal/obs/obs_test.go
+       1 package obs
+       2 
+       3 import (
+       4   "context"
+       5   "net/http"
+       6   "net/http/httptest"
+       7   "strings"
+       8   "testing"
+       9 
+      10   "github.com/jackc/pgx/v5/pgxpool"
+     … +50 lines (ctrl+o to expand)
+
+⏺ Write(internal/dbtest/dbtest_test.go)
+  ⎿  Wrote 40 lines to internal/dbtest/dbtest_test.go
+       1 package dbtest
+       2 
+       3 import (
+       4   "sync"
+       5   "testing"
+       7 
+       8 // fatalRecorder records Fatal calls instead of failing the real
+          test.
+       9 type fatalRecorder struct {
+      10   testing.TB
+     … +36 lines (ctrl+o to expand)
+
+⏺ The goroutine isn't needed because the recorder panics. Simplifying:
+
+⏺ Write(internal/dbtest/dbtest_test.go)
+  ⎿  Added 3 lines, removed 10 lines
+      1  package dbtest
+      2  
+      3 -import (                                                        
+      4 -  "sync"                                                        
+      5 -  "testing"                                                     
+      6 -)                                                               
+      3 +import "testing"                                                
+      4  
+      5  // fatalRecorder records Fatal calls instead of failing the real
+          test.
+      6  type fatalRecorder struct {
+     ...
+      18    t.Setenv("DATABASE_URL", "")
+      19    rec := &fatalRecorder{TB: t}
+      20  
+      24 -  var wg sync.WaitGroup                                        
+      25 -  wg.Add(1)                                                    
+      26 -  go func() {                                                  
+      27 -    defer wg.Done()                                            
+      21 +  func() {                                                     
+      22      defer func() {
+      23        if p := recover(); p != rec {
+      30 -        t.Errorf("want Fatal, got %v", p)                      
+      24 +        t.Fatalf("want Fatal, got %v", p)                      
+      25        }
+      26      }()
+      27      Pool(rec)
+      28    }()
+      35 -  wg.Wait()                                                    
+      29  
+      30    if !rec.failed {
+      31      t.Fatal("Pool must fail the test when DATABASE_URL is unset
+          ")
+
+⏺ Now the config files, which TDD exempts: go.mod, Dockerfile, Compose,
+  Makefile, .env.example, .gitignore.
+
+⏺ Bash(cat > go.mod <<'EOF'
+      module smart-campaign-composer…)  ⎿  total 144
+     drwxr-xr-x  17 esra  staff    544 Oct 22 11:45 .
+     drwxr-x---+ 36 esra  staff   1152 Oct 22 11:45 ..
+     … +15 lines (ctrl+o to expand)
+  ⎿  Created .env.example (+10 -0)
+       1 +# Copy to .env and adjust. docker compose reads .env automatica
+         +lly.                                                           
+       2 +                                                               
+       3 +# mock (default): canned AI output, no API key needed.         
+       4 +# real: calls Claude; the api exits on startup if ANTHROPIC_API
+         +_KEY is empty.                                                 
+       5 +LLM_MODE=mock                                                  
+       6 +ANTHROPIC_API_KEY=                                             
+       7 +ANTHROPIC_MODEL=claude-opus-5-5                                
+       8 +                                                               
+       9 +# Local demo database credentials.                             
+      10 +POSTGRES_PASSWORD=scc                                          
+  ⎿  Created .gitignore (+4 -0)
+      1 +.env                                                            
+      2 +.superpowers/                                                   
+      3 +.claude/settings.local.json                                     
+      4 +/bin/                                                           
+  ⎿  Created Dockerfile (+13 -0)
+       1 +FROM golang:1.24-alpine AS build                               
+       2 +WORKDIR /src                                                   
+       3 +COPY go.mod go.sum ./                                          
+       4 +RUN go mod download                                            
+       5 +COPY . .                                                       
+       6 +RUN CGO_ENABLED=0 go build -o /out/scc ./cmd/scc               
+       7 +                                                               
+       8 +# alpine (not distroless) so compose healthchecks can use busyb
+         +ox wget.                                                       
+       9 +FROM alpine:3.20                                               
+      10 +RUN adduser -D -u 10001 scc                                    
+      11 +COPY --from=build /out/scc /usr/local/bin/scc                  
+      12 +USER scc                                                       
+      13 +ENTRYPOINT ["scc"]                                             
+  ⎿  Created Makefile (+12 -0)
+       1 +.PHONY: test test-local                                        
+       2 +                                                               
+       3 +# Runs all tests in Docker; only Docker and make are needed (D2
+         +7).                                                            
+       4 +# The test database is removed afterwards; the app's pgdata vol
+         +ume is never touched.                                          
+       5 +test:                                                          
+       6 +        docker compose --profile test run --rm go-test; status=
+         +$$?; \                                                         
+       7 +        docker compose --profile test rm --stop --force test-db
+         +; \                                                            
+       8 +        exit $$status                                          
+       9 +                                                               
+      10 +# Development: needs Go and a Postgres reachable via DATABASE_U
+         +RL.                                                            
+      11 +test-local:                                                    
+      12 +        go test -count=1 ./...                                 
+  ⎿  Created docker-compose.yml (+79 -0)
+       1 +x-db-url: &db-url postgres://scc:${POSTGRES_PASSWORD:-scc}@post
+         +gres:5432/scc?sslmode=disable                                  
+       2 +                                                               
+       3 +services:                                                      
+       4 +  postgres:                                                    
+       5 +    image: postgres:16-alpine                                  
+       6 +    environment:                                               
+       7 +      POSTGRES_USER: scc                                       
+       8 +      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scc}             
+       9 +      POSTGRES_DB: scc                                         
+      10 +    volumes:                                                   
+      11 +      - pgdata:/var/lib/postgresql/data                        
+      12 +    healthcheck:                                               
+      13 +      test: ["CMD-SHELL", "pg_isready -U scc -d scc"]          
+      14 +      interval: 2s                                             
+      15 +      timeout: 3s                                              
+      16 +      retries: 30                                              
+      17 +                                                               
+      18 +  migrate:                                                     
+      19 +    build: .                                                   
+      20 +    command: ["migrate"]                                       
+      21 +    environment:                                               
+      22 +      DATABASE_URL: *db-url                                    
+      23 +    depends_on:                                                
+      24 +      postgres:                                                
+      25 +        condition: service_healthy                             
+      26 +                                                               
+      27 +  api:                                                         
+      28 +    build: .                                                   
+      29 +    command: ["api"]                                           
+      30 +    environment:                                               
+      31 +      DATABASE_URL: *db-url                                    
+      32 +      LLM_MODE: ${LLM_MODE:-mock}                              
+      33 +      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}                
+      34 +      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}     
+      35 +    ports:                                                     
+      36 +      - "8080:8080"                                            
+      37 +    depends_on:                                                
+      38 +      migrate:                                                 
+      39 +        condition: service_completed_successfully              
+      40 +    healthcheck:                                               
+     … 39 more lines (ctrl+o to expand)
+  ⎿  … 1 more file changed
+
+⏺ The tests and infrastructure are written. Production code waits until I can
+  watch the tests fail. Checking whether Docker is available yet:
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ I can't run the build or tests yet because Docker isn't installed. Nothing in
+  T1 has been run.
+
+  T0 is now complete. The check found two gaps, and I fixed both:
+  - No initial commit existed. I made it on main as the plan says: f9c2114 docs:
+    add case, decisions and implementation plan. It holds CASE, CLAUDE,
+    DECISIONS, the plan and the three session exports. I scanned the exports
+    first and found no API keys, emails or phone numbers.
+  - The plan and DECISIONS.md disagreed on open items. The plan lists defaults
+    still to confirm before T10/T12 (mock-provider failure rates, lease time,
+    timeouts, worker count, request length limit, session expiry). DECISIONS.md
+    said "Open Questions: None". I listed them under Open Questions, marked as
+    proposed, not approved.
+  - I also added the "keep DECISIONS.md short" rule to memory word for word;
+    before, it was only covered loosely.
+
+  Everything else matches the plan: no "5,000" left in CASE.md, D28–D35
+  complete, D8 marked superseded by D30, dated notes on D3/D11/D14/D15.
+
+  T1 is started on branch milestone-a-foundation, with nothing committed yet:
+  - Tests:
+    - config: real mode without a key fails and the error names
+      ANTHROPIC_API_KEY; defaults; a missing or bad setting is rejected; migrate
+      doesn't need the key.
+    - health and metrics: /readyz returns 503 with the database down and 200
+      with it up; /healthz and /metrics respond.
+    - TestDBRequired: the database test helper fails the test when DATABASE_URL
+      is unset; it never skips.
+  - Infrastructure: docker-compose.yml (postgres, migrate, api, plus a test
+    profile with a throwaway database), Dockerfile, Makefile (test, test-local),
+    .env.example, .gitignore.
+  - Still to do once Docker works: generate go.sum, watch the tests fail, then
+    write cmd/scc, internal/config, internal/obs and the test helper until they
+    pass. After that I'll run docker compose up and make test and show you the
+    output.
+
+  Choices I made within T1 (I'll record them in the progress log):
+  - In T1, migrate only checks the database connection and exits 0. The
+    migration library and real migrations come in T2, which owns the schema.
+  - The Vitest container comes in T15, since there's no frontend yet.
+  - I added a database test helper package, internal/dbtest, which the plan's
+    layout doesn't list.
+  - make test removes only the test database. It never deletes volumes, so your
+    app data survives.
+
+  Next step for you: install Docker Desktop for Mac (Intel chip) from docker.com
+  and start it, then tell me. I'll run RED → GREEN, the build, make test and
+  docker compose up, and show you the results.
+
+  I haven't changed anything for T2 or later.
+
+✻ Crunched for 2m 55s · done 11:45 AM
+
+※ recap: I'm checking T0 and starting T1, the project skeleton. T0 is done and committed, and the T1 tests and Docker files are written. Next, install Docker Desktop and tell me, so I can write the code, then run the build and tests and show you the results. (disable recaps in /config)
+
+❯ docker is running. continue T1 with TDD, complete the GO backend setup, and   
+  run the build and tests.show me the results                                   
+
+  Listed 1 directory, ran 1 shell command (ctrl+o to expand)
+
+⏺ The Docker CLI is in ~/.docker/bin, which isn't on PATH (there's no
+  /usr/local/bin). I'll prefix PATH in each command.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Docker is up. Next I add the two approved dependencies (pgx/v5,
+  prometheus/client_golang) through the Go container, so no local Go is needed:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The latest libraries need Go ≥ 1.26, so I'm moving the image to
+  golang:1.26-alpine. The plan says "Go 1.22+", so this stays within it.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Dependencies are added. RED: run make test before any production code exists:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ RED as expected: Load and Pool are undefined. obs stops earlier on a missing
+  go.sum entry, which go mod tidy will fix once real imports exist. GREEN,
+  starting with config:
+
+⏺ Write(internal/config/config.go)
+  ⎿  Wrote 51 lines to internal/config/config.go
+       1 // Package config reads each process's settings from environment
+          variables.
+       2 package config
+       3 
+       4 import (
+       6   "fmt"
+       7   "os"
+       8 )
+       9 
+      10 type Config struct {
+     … +46 lines (ctrl+o to expand)
+
+⏺ Write(internal/dbtest/dbtest.go)
+  ⎿  Wrote 29 lines to internal/dbtest/dbtest.go
+       1 // Package dbtest gives integration tests a real Postgres connec
+         tion.
+       2 package dbtest
+       3 
+       4 import (
+       6   "os"
+       7   "testing"
+       8 
+       9   "github.com/jackc/pgx/v5/pgxpool"
+      10 )
+     … +23 lines (ctrl+o to expand)
+
+⏺ Write(internal/obs/obs.go)
+  ⎿  Wrote 30 lines to internal/obs/obs.go
+       1 // Package obs serves the health and metrics endpoints shared by
+          every process (D26).
+       2 package obs
+       3 
+       4 import (
+       6   "log/slog"
+       7   "net/http"
+       8   "time"
+       9 
+      10   "github.com/jackc/pgx/v5/pgxpool"
+     … +24 lines (ctrl+o to expand)
+
+⏺ Now the entrypoint. migrate only checks the database connection until T2
+  brings migrations. api serves the obs routes and shuts down gracefully.
+
+⏺ Write(cmd/scc/main.go)
+  ⎿  Wrote 84 lines to cmd/scc/main.go
+       1 // Command scc runs one of the app's processes: migrate or api (
+         D20).
+       2 package main
+       3 
+       4 import (
+       6   "errors"
+       7   "fmt"
+       8   "log/slog"
+       9   "net/http"
+      10   "os"
+     … +83 lines (ctrl+o to expand)
+
+⏺ Next, tidy the modules, then gofmt, vet, build and make test (GREEN):
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ GREEN: all 3 packages pass. A verbose run lists each test by name:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ All 10 tests pass. Next I check that the database-backed tests fail without a
+  database (D27):
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Without a database the test fails rather than skipping. Now the T1 acceptance
+  check: docker compose up.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The stack meets T1 acceptance. Two failure-path checks on the live stack: real
+  LLM mode without a key, and readiness with Postgres stopped.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Everything passes. Now a minimal, accurate README (CLAUDE.md wants it kept
+  current), plus the execution choice in the plan:
+
+⏺ Write(README.md)
+  ⎿  Wrote 35 lines to README.md
+      1 # Smart Campaign Composer
+      3 AI-assisted SMS and email campaign tool: Claude suggests the audi
+        he system sends to mock providers. Requirements: [`CASE.md`](CASE
+        ns/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-impl
+      4 
+      5 > **Status: work in progress.** Only the project skeleton exists 
+        se connection, and an `api` with health and metrics endpoints. No
+         yet.
+      7 ## Requirements
+      9 Docker with Compose, and `make`.
+     … +39 lines (ctrl+o to expand)
+
+⏺ Update(docs/plans/2026-10-21-implementation-plan.md)  ⎿  Added 1 line, removed 1 line
+      271  
+      272  ## Execution
+      273  
+      274 -Approved 2026-10-21. Execution method (subagent-driven or nati
+          -ve) to be chosen before T1.                                   
+      274 +Approved 2026-10-21. Execution method: inline (superpowers:exe
+          +cuting-plans), chosen 2026-10-22; approval before each task.  
+
+⏺ Review before committing. Checking what's staged and that no secrets or .env
+  slip in:
+
+  Searched for 1 pattern, ran 2 shell commands (ctrl+o to expand)
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Cooked for 12m 43s · done 12:46 PM
+
+❯ before committing T1, i want to create a private GitHub repository named      
+  smart-campaign-composer, connect it as origin, and push the existing T0       
+  commit on main. keep my uncommitted T1 changes untouched                      
+
+⏺ I'll push only main (git push origin main works from the current branch), so
+  nothing gets checked out and your working tree stays as it is. First, checking
+  for the GitHub CLI and its login:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ gh is logged in as esraahaytaa-eng and there's no remote yet. Before anything
+  is created, checking the repo name is free:
+
+  Pushed to main, ran 1 shell command (ctrl+o to expand)
+
+⏺ Verifying the remote state and that the T1 work is untouched:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I created the private repo
+  https://github.com/esraahaytaa-eng/smart-campaign-composer, connected it as
+  origin, and pushed the T0 commit.
+
+  - GitHub: the repo has only main, at f9c2114 docs: add case, decisions and 
+    implementation plan. Local main now tracks origin/main.
+  - Your T1 work is untouched. You're still on milestone-a-foundation, and all
+    T1 files are still uncommitted. No checkout, stash or commit happened.
+
+  Where T1 stands. I ran all of this before you stopped the commit:
+  - RED: make test failed to compile because Load and Pool didn't exist yet, as
+    expected.
+  - GREEN: make test passes 10 of 10 tests across config, dbtest and obs. go vet
+    and gofmt are clean and the binary builds.
+  - Database tests: with no database set, the readiness test fails instead of
+    skipping.
+  - docker compose up: postgres is healthy, migrate exits with code 0 and api is
+    healthy. /healthz, /readyz and /metrics all return 200.
+  - Failure paths:
+    - With real AI mode and no key, the api exits with "LLM_MODE=real requires
+      ANTHROPIC_API_KEY to be set".
+    - With Postgres stopped, /readyz returns 503 while /healthz stays 200. It's
+      back to 200 after a restart.
+
+  Choices I made within T1:
+  - I used Go 1.26 instead of 1.24, because the current pgx and Prometheus
+    client libraries need at least 1.25 and 1.26. The plan allows "Go 1.22+".
+  - migrate only checks the database connection for now. T2 adds the migrations
+    and seed.
+  - I added a database test helper package, internal/dbtest.
+  - The Vitest container waits until T15, when the frontend exists.
+
+  Your call: should I go ahead with the T1 commits that were interrupted? They
+  are feat: add Go skeleton… for the code and docs: add README… for the README
+  and the execution-method note in the plan. Per D35 they go on
+  milestone-a-foundation and are not pushed until you approve.
+
+  Export this session to ai-sessions/ before you end it.
+
+✻ Cogitated for 38s · done 12:49 PM
+
+❯ review the final T1 diff for architectural issues, unnecessary complexity and 
+  secrets. if everything looks good, create the two proposed commits and show   
+  me the hashes. keep the changes on milestone-a-foundation.                    
+
+⏺ Skill(ponytail:ponytail-review)
+  ⎿  Successfully loaded skill
+
+⏺ Reviewing the T1 diff: every new file, plus the build context Docker sees.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I found a real security issue: without a .dockerignore, COPY . . would bake
+  your .env file—including the ANTHROPIC_API_KEY—into a cached Docker build
+  layer. I'll add a .dockerignore and make a small change within T1, then verify
+  it before committing.
+
+⏺ Write(.dockerignore)
+  ⎿  Wrote 8 lines to .dockerignore
+      1 # Keep secrets and non-build files out of the image build context
+        .
+      2 .env
+      3 .git
+      4 .claude
+      5 .superpowers
+      6 ai-sessions
+      7 docs
+      8 *.md
+
+⏺ To test the ignore list, I'll make a temporary dummy .env (none exists now),
+  check it doesn't reach the build stage, then delete it. After that, a rebuild
+  and the full test run:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ Tests and the stack are still green. Final secret scan on exactly what will be
+  committed, then the two commits:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ I reviewed the T1 changes, fixed the one problem the review found, and created
+  both commits on milestone-a-foundation:
+
+  ┌─────────┬────────────────────────────────────────────────────────────────┐
+  │  Hash   │                            Message                             │
+  ├─────────┼────────────────────────────────────────────────────────────────┤
+  │ 683c068 │ feat: add Go skeleton with config, health/metrics, compose and │
+  │         │  make test                                                     │
+  ├─────────┼────────────────────────────────────────────────────────────────┤
+  │ 307ed55 │ docs: add README for current skeleton and record execution     │
+  │         │ method                                                         │
+  └─────────┴────────────────────────────────────────────────────────────────┘
+
+  Nothing was pushed: origin/main is still at the T0 commit f9c2114, and the
+  working tree is clean.
+
+  What T1 adds: one Go binary that runs as migrate (for now it only checks the
+  database connection) or api (health and metrics endpoints). Settings come from
+  environment variables, and real AI mode stops at startup if the key is
+  missing. Compose runs Postgres, migrate and api, and make test runs the tests
+  in Docker against a throwaway database.
+
+  Review findings:
+
+  Must fix (fixed before committing):
+  1. The API key could end up in a Docker build layer (Dockerfile:5, COPY . .)
+     - What this is: the build copies the whole project folder into the Go build
+       stage.
+     - Problem: there was no .dockerignore. Once you create .env with a real
+       ANTHROPIC_API_KEY, as the README says, the key would be stored in that
+       build stage's cached layer. The final image wasn't affected.
+     - Fix: a .dockerignore that leaves out .env, .git, .claude, .superpowers,
+       ai-sessions, docs and *.md. This also stops doc edits from forcing a
+       rebuild.
+     - Check: I built the image with a dummy .env; the build stage held only the
+       build files, and I deleted the dummy afterwards.
+
+  Architecture and complexity: no issues found. The code follows D20 (one
+  binary, separate services) and D27 (tests run in Docker and fail, never skip,
+  without a database). The only dependencies are the two already approved, pgx
+  and the Prometheus client. There are no extra layers or settings nobody uses.
+
+  Secrets: none in the committed changes. .env is ignored by git and Docker.
+  .env.example has an empty key. The default Postgres password scc is only for
+  the local demo database. The key never appears in logs or error messages.
+
+  Checked again after the fix: make test passes 10 of 10. docker compose up:
+  postgres and api are healthy, migrate exits with code 0, and /readyz returns
+  200.
+
+  Verdict: Ship.
+
+  Not checked: a code review by a separate reviewer; this was a self-review by
+  the author. One risk to know: docker compose down -v deletes the database
+  volume, which will matter once T2 seeds data.
+
+  Next is T2 (schema and the 3,000-user seed). I'll wait for your approval
+  before starting it. Please also export this session to ai-sessions/ now that
+  this milestone step is done.
+
+✻ Cogitated for 4m 35s · done 1:01 PM
+
+❯ push milestone-a-foundation to GitHub and verify the remote commits.          
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The push worked. Only the GitHub API check failed, because zsh treated the ?
+  in the URL as a wildcard. Re-running it with the URL quoted:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I pushed milestone-a-foundation to GitHub, and GitHub shows the same commits
+  as your local branch.
+
+  - Branch on GitHub: it points to 307ed55, the same commit as your local
+    branch, which now tracks the GitHub copy.
+  - Commits GitHub lists for the branch:
+    - 307ed55 docs: add README for current skeleton and record execution method
+    - 683c068 feat: add Go skeleton with config, health/metrics, compose and
+      make test
+    - f9c2114 docs: add case, decisions and implementation plan
+  - Compared with main: the branch is 2 commits ahead and 0 behind, with 17
+    files changed. So it holds exactly the two T1 commits on top of T0.
+  - No secrets pushed: GitHub has no .env on the branch.
+  - main is unchanged: it's still at f9c2114. Nothing was merged; under D35 that
+    waits for your approval at the end of Milestone A.
+
+  Your local branch and GitHub match, and there are no uncommitted changes.
+
+  Before you end this session, export it to
+  ai-sessions/04-project-initialization.txt and check it for keys before
+  committing. Earlier in this session the gh auth status output printed a partly
+  hidden GitHub token (gho_****…); the hidden version is harmless, but a search
+  for gho_ and sk-ant before committing is still worth doing.
+
+✻ Sautéed for 19s · done 1:05 PM
+
+※ recap: We're building Smart Campaign Composer; T1 (Go skeleton, Docker, tests) is committed and pushed to `milestone-a-foundation`. Next, export this session to `ai-sessions/` and approve starting T2, the database schema and 3,000-user seed. (disable recaps in /config)
+
+❯ start T2                                                                      
+
+⏺ Starting T2 with executing-plans and TDD, as before. I'm re-reading the T2
+  brief and the pieces of D28/D33 that bear on it, and checking the code these
+  changes touch:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ T2 only needs already-approved dependencies (goose, bcrypt), so no new
+  approvals needed—minor decisions will be logged in the ledger and final
+  report. I'll start by setting up test infrastructure, using dbtest.FreshDB to
+  give the determinism test two separate fresh databases.
+
+⏺ Update(internal/dbtest/dbtest.go)
+  ⎿  Added 27 lines
+      27    }
+      28    return pool
+      29  }
+      30 +                                                               
+      31 +// FreshDB creates an empty database for one test and drops it 
+         +afterwards.                                                    
+      32 +func FreshDB(t testing.TB) *pgxpool.Pool {                     
+      33 +  t.Helper()                                                   
+      34 +  ctx := context.Background()                                  
+      35 +  admin := Pool(t)                                             
+      36 +  name := fmt.Sprintf("scc_test_%d", rand.Int64())             
+      37 +  if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err !=
+         + nil {                                                         
+      38 +    t.Fatalf("create database: %v", err)                       
+      39 +  }                                                            
+      40 +  cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))   
+      41 +  if err != nil {                                              
+      42 +    t.Fatal(err)                                               
+      43 +  }                                                            
+      44 +  cfg.ConnConfig.Database = name                               
+      45 +  pool, err := pgxpool.NewWithConfig(ctx, cfg)                 
+      46 +  if err != nil {                                              
+      47 +    t.Fatalf("connect to %s: %v", name, err)                   
+      48 +  }                                                            
+      49 +  t.Cleanup(func() {                                           
+      50 +    pool.Close()                                               
+      51 +    if _, err := admin.Exec(ctx, "DROP DATABASE "+name+" WITH (
+         +FORCE)"); err != nil {                                         
+      52 +      t.Errorf("drop database %s: %v", name, err)              
+      53 +    }                                                          
+      54 +  })                                                           
+      55 +  return pool                                                  
+      56 +}                                                              
+⏺ Update(internal/dbtest/dbtest.go)
+  ⎿  Added 2 lines
+       3  
+       4  import (
+       5    "context"
+       6 +  "fmt"                                                        
+       7 +  "math/rand/v2"                                               
+       8    "os"
+       9    "testing"
+      10  
+
+⏺ Now the T2 tests. First the database-backed tests, covering every test the
+  brief names plus two small extras: migrations run twice, and order totals
+  equal their items.
+
+⏺ Write(internal/db/seed_test.go)
+  ⎿  Wrote 288 lines to internal/db/seed_test.go
+       1 package db_test
+       2 
+       3 import (
+       4   "context"
+       5   "errors"
+       6   "testing"
+       7   "time"
+       8 
+       9   "github.com/jackc/pgx/v5/pgconn"
+      10   "github.com/jackc/pgx/v5/pgxpool"
+     … +342 lines (ctrl+o to expand)
+
+⏺ Two spots in that test are harder to read than they need to be: an extra
+  helper wrapping strings.ReplaceAll, and a cryptic - 9 check. Cleaning both up:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Now the pure generator test, in package db, which checks the profile counts
+  from the brief:
+
+⏺ Write(internal/db/generate_test.go)
+  ⎿  Wrote 41 lines to internal/db/generate_test.go
+      1 package db
+      2 
+      3 import (
+      4   "reflect"
+      5   "testing"
+      6 )
+      7 
+      8 func TestGenerate_EveryProfileHasAtLeast50Users(t *testing.T) {
+      9   data := generate(20261021)
+     … +33 lines (ctrl+o to expand)
+
+⏺ Config needs DEMO_MARKETER_PASSWORD for migrate, so the config tests come
+  first:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Adding the two dependencies D22 already approved (goose, x/crypto/bcrypt),
+  then RED:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ RED, for the right reasons: the new field, generate, profiles and
+  emailLocalPart don't exist yet. GREEN, starting with config:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Now the schema migration. It's one file holding the whole public schema from
+  the plan's data model, with categories as fixed reference rows:
+
+⏺ Write(internal/db/migrations/00001_init.sql)
+  ⎿  Wrote 173 lines to internal/db/migrations/00001_init.sql
+      1 -- +goose Up
+      2 -- Data model: implementation plan "Data model (D33)". Statuses a
+        re text + CHECK.
+      3 
+      4 -- Customers and shopping history (all fictional)
+      5 
+      6 CREATE TABLE categories (
+      7     code text PRIMARY KEY,
+      8     name text NOT NULL
+      9 );
+     … +178 lines (ctrl+o to expand)
+
+⏺ Write(internal/db/migrate.go)
+  ⎿  Wrote 32 lines to internal/db/migrate.go
+       1 // Package db owns the schema migrations and the deterministic s
+         eed (D28, D33).
+       2 package db
+       3 
+       4 import (
+       6   "embed"
+       7   "io/fs"
+       8 
+       9   "github.com/jackc/pgx/v5/pgxpool"
+      10   "github.com/jackc/pgx/v5/stdlib"
+     … +25 lines (ctrl+o to expand)
+
+⏺ Next, the generator: pure Go with no database, so it can be tested on its own.
+  It sits beside the name and city lists.
+
+⏺ Write(internal/db/generate.go)
+  ⎿  Wrote 237 lines to internal/db/generate.go
+       1 package db
+       2 
+       3 import (
+       5   "math/rand/v2"
+       6   "strings"
+       7 )
+       8 
+         e is stored as
+      10 // seconds before the reference time, so the data is the same wh
+         enever it runs.
+     … +241 lines (ctrl+o to expand)
+
+⏺ Write(internal/db/names.go)
+  ⎿  Wrote 26 lines to internal/db/names.go
+       1 package db
+       3 // Fictional Turkish names. Combined at random, they belong to n
+         o real person.
+       5 var firstNames = []string{
+       6   "Ayşe", "Fatma", "Zeynep", "Elif", "Merve", "Büşra", "Esra", "
+       7   "Özge", "Şeyma", "Çağla", "Derya", "Ebru", "Selin", "Deniz", "
+         Melis", "Nur", "Tuğba",
+         him", "İsmail", "Murat", "Ömer",
+       9   "Can", "Emre", "Burak", "Çağrı", "Oğuz", "Barış", "Kerem", "Se
+      10 }
+     … +27 lines (ctrl+o to expand)
+
+⏺ On review, the generator's vip flag isn't needed: 8–20 orders already make
+  VIPs the top spenders. Deleting it:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Now Seed. The seed_meta row is claimed first, in the same transaction, so a
+  second run (even one running at the same moment) sees it and does nothing.
+  Bulk inserts use COPY.
+
+⏺ Write(internal/db/seed.go)
+  ⎿  Wrote 127 lines to internal/db/seed.go
+       1 package db
+       2 
+       3 import (
+       4   "context"
+       5   "errors"
+       6   "fmt"
+       7   "math/big"
+       8   "time"
+       9 
+      10   "github.com/jackc/pgx/v5"
+     … +142 lines (ctrl+o to expand)
+
+⏺ Now migrate in main.go runs the real migrations and the seed, replacing T1's
+  connection check:
+
+⏺ Update(cmd/scc/main.go)
+  ⎿  Added 18 lines, removed 6 lines
+      50    defer pool.Close()
+      51  
+      52    if process == "migrate" {
+      53 -    // shortcut: only checks the connection; T2 adds the schema
+         - migrations and seed.                                          
+      54 -    if err := pool.Ping(ctx); err != nil {                     
+      55 -      return fmt.Errorf("database unreachable: %w", err)       
+      56 -    }                                                          
+      57 -    slog.Info("migrate: database reachable, no migrations yet")
+      58 -    return nil                                                 
+      53 +    return migrate(ctx, cfg, pool)                             
+      54    }
+      55    return serveAPI(ctx, cfg, pool)
+      56  }
+      57  
+      58 +// migrate applies the schema and seeds the demo data once (D20
+         +, D28).                                                        
+      59 +func migrate(ctx context.Context, cfg config.Config, pool *pgxp
+         +ool.Pool) error {                                              
+      60 +  if err := db.Migrate(ctx, pool); err != nil {                
+      61 +    return fmt.Errorf("migrations: %w", err)                   
+      62 +  }                                                            
+      63 +  if err := db.Seed(ctx, pool, db.DefaultRNGSeed, time.Now(), c
+         +fg.DemoMarketerPassword); err != nil {                         
+      64 +    return err                                                 
+      65 +  }                                                            
+      66 +  var users int                                                
+      67 +  var ref time.Time                                            
+      68 +  if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM us
+         +ers), reference_time FROM seed_meta`).Scan(&users, &ref); err !
+         += nil {                                                        
+      69 +    return err                                                 
+      70 +  }                                                            
+      71 +  slog.Info("migrate: done", "users", users, "seed_reference_ti
+         +me", ref)                                                      
+      72 +  return nil                                                   
+      73 +}                                                              
+      74 +                                                               
+      75  func serveAPI(ctx context.Context, cfg config.Config, pool *pgx
+          pool.Pool) error {
+      76    mux := http.NewServeMux()
+      77    obs.Routes(mux, pool)
+
+⏺ Update(cmd/scc/main.go)
+  ⎿  Added 1 line
+      15    "github.com/jackc/pgx/v5/pgxpool"
+      16  
+      17    "smart-campaign-composer/internal/config"
+      18 +  "smart-campaign-composer/internal/db"                        
+      19    "smart-campaign-composer/internal/obs"
+      20  )
+      21  
+
+⏺ Focused run of the new packages:
+
+⏺ Bash(export PATH=$HOME/.docker/bin:$PATH; cd
+      /Users/esra/smart-campaign-composer && docker compose --profile test run
+      --rm go-test sh -c 'go mod tidy && gofmt -l . ;…)
+  ⎿  internal/db/seed_test.go
+     --- PASS: TestGenerate_EveryProfileHasAtLeast50Users (0.01s)
+     --- PASS: TestGenerate_SameSeedSameData (0.05s)
+     … +22 lines (ctrl+o to expand)
+  ⎿  Updated go.mod (+2 -2)
+       4  
+       5  require (
+       6          github.com/jackc/pgx/v5 v5.11.0
+       7 +        github.com/pressly/goose/v3 v3.29.0                    
+       8          github.com/prometheus/client_golang v1.25.0
+       9 +        golang.org/x/crypto v0.58.0                            
+      10  )
+      11  
+      12  require (
+     ...
+      17          github.com/jackc/puddle/v2 v2.2.3 // indirect
+      18          github.com/mfridman/interpolate v0.0.2 // indirect
+      19          github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc
+          8b61c822 // indirect
+      18 -        github.com/pressly/goose/v3 v3.29.0 // indirect        
+      20          github.com/prometheus/client_model v0.6.3 // indirect
+      21          github.com/prometheus/common v0.72.0 // indirect
+      22          github.com/prometheus/procfs v0.22.0 // indirect
+      23          github.com/sethvargo/go-retry v0.5.0 // indirect
+      24          go.uber.org/multierr v1.11.0 // indirect
+      24 -        golang.org/x/crypto v0.58.0 // indirect                
+      25          golang.org/x/sync v0.24.0 // indirect
+      26          golang.org/x/sys v0.49.0 // indirect
+      27          golang.org/x/text v0.43.0 // indirect
+  ⎿  Updated go.sum (+18 -8)
+       3  github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXho
+          g7bL6oX9BbNZnL2UFvs=
+       4  github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAe
+          ZDth3/j3BFtOZR5XLFGgcrjCOs=
+       5  github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv
+          3lAwl/skON4iLHjSsI+c5H38=
+       6 +github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMu
+         +ZogJACoMlvWIWZ5b2xWg=                                          
+       7 +github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmj
+         +MQF3QNRAZBwY8AXBAzKYoSX9sFI=                                   
+       8  github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBs
+          YLSJiTsyBybVuN8=
+       9  github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W
+          4E7lf9JzCmGVUdgjX3N/iU=
+      10 +github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr
+         ++hNrb57e+94F0=                                                 
+      11 +github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGG
+         +pEw/LqOeaOT+nhxU+yHo=                                          
+      12  github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1w
+          chn8zjSGOBJ6icpsIM=
+      13  github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxP
+          j5JhEz+xB6uRky5eyVu/W2HEg=
+      14  github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a7
+          61 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
+      15  github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a7
+          61/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=
+      16  github.com/jackc/pgx/v5 v5.11.0 h1:IzBBtyK9AHqf98cctWFifYSci2hg
+          QR/cd56wB4p+ogg=
+      17  github.com/jackc/pgx/v5 v5.11.0/go.mod h1:mal1tBGAFfLHvZzaYh77Y
+          S/eC6IX9OWbRV1QIIM0Jn4=
+      14 -github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6Uoo
+         -Mp6KJv0/61nB7icHo=                                             
+      15 -github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXj
+         -OvZM39qJ0q+azkZFrfEOc3H4=                                      
+      18  github.com/jackc/puddle/v2 v2.2.3 h1:f8HoREISb3l5eO9coPgK7U3hKL
+          hWGokOFVcThl5jrao=
+      19  github.com/jackc/puddle/v2 v2.2.3/go.mod h1:vriiEXHvEE654aYKXXj
+          OvZM39qJ0q+azkZFrfEOc3H4=
+      20  github.com/klauspost/compress v1.20.1 h1:T7kKElXUMXrUJ2E9QhQhxF
+          tcK5rPyLdsGZvdbLMPdiQ=
+      21  github.com/klauspost/compress v1.20.1/go.mod h1:LUdAzn7YLVvxLpc
+          7y3V1m40wESHTgc1422pwwBSKYuI=
+      22  github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWt
+          l7Z6Sb1BR0xunSBf0SNc=
+      23  github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bht
+          WyNeEfOS8JIWk580+fNqagV/RAw=
+      24 +github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8B
+         +SWMRd47J3Lbz7vsReI=                                            
+      25 +github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDg
+         +nfIwz6ydEQApk5oEI3HqDio6A=                                     
+      26  github.com/mfridman/interpolate v0.0.2 h1:pnuTK7MQIxxFz1Gr+rjSI
+          x9u7qVjf5VOoM/u6BbAxPY=
+      27  github.com/mfridman/interpolate v0.0.2/go.mod h1:p+7uk6oE07mpE/
+          Ik1b8EckO0O4ZXiGAfshKBWLUM9Xg=
+      28  github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+           h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
+      29  github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+          /go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
+      30 +github.com/ncruces/go-strftime v1.1.0 h1:vtPmPWMkb539RGV9WpWT9E
+         +wJGvrOCKvMNI4obWL47Hk=                                         
+      31 +github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRr
+         +KBrrflXT0M9tTMG2KmZ9Fj7xeG/g=                                  
+      32  github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pc
+          RnkKkqfTogsbg7gZNVY4sRDYZ/4=
+      33  github.com/pressly/goose/v3 v3.29.0 h1:dtEnBCT7CqkHIUCdgrXsrmei
+          saN8gFkRU4Y5OEwif4o=
+      34  github.com/pressly/goose/v3 v3.29.0/go.mod h1:plA4aP4+u+Q3FMTgb
+          FbhF8TuAWpAdfWpoFGkJsIFWh0=
+     ...
+      40  github.com/prometheus/common v0.72.0/go.mod h1:77NWqAQ2tXT7BIK4
+          0qjJdw5Acrsrg1TlHAnsQi3i6mk=
+      41  github.com/prometheus/procfs v0.22.0 h1:6q9+/JL9IKAPbCmBrv9n5O5
+          Ty3NKnciV5X7YGw0oics=
+      42  github.com/prometheus/procfs v0.22.0/go.mod h1:CvmFr/GVhIjIvWJZ
+          W3tgkODBQMRIf0EyWMQLHCHab58=
+      43 +github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8
+         +daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=           
+      44 +github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8
+         +daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=    
+      45  github.com/sethvargo/go-retry v0.5.0 h1:JYfFKmVJ8ER06GReN1efzc5
+          cm52BrVsFVzmcHiKJwfY=
+     … 29 more lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ All 19 tests pass, including the case example with 197 matching users. gofmt
+  flagged formatting, so I'll fix it and list everything it touched:
+⏺ Bash(export PATH=$HOME/.docker/bin:$PATH; cd
+      /Users/esra/smart-campaign-composer && docker compose --profile test run
+      --rm --no-deps go-test sh -c 'gofmt -l . ; gofm…)
+  ⎿  internal/db/generate.go
+     internal/db/seed_test.go
+     --- after:
+     … +3 lines (ctrl+o to expand)
+  ⎿  Updated internal/db/generate.go (+9 -9)
+      15  )
+      16  
+      17  type genUser struct {
+      18 -        id                     int64                           
+      19 -        firstName, lastName    string // lastName "" is stored 
+         -as NULL (D12)                                                  
+      20 -        email, phone, city     string                          
+      21 -        language               string                          
+      22 -        smsOptIn, emailOptIn   bool                            
+      23 -        signedUpAgo            int64 // seconds before the refe
+         -rence time                                                     
+      24 -        profile                string                          
+      18 +        id                   int64                             
+      19 +        firstName, lastName  string // lastName "" is stored as
+         + NULL (D12)                                                    
+      20 +        email, phone, city   string                            
+      21 +        language             string                            
+      22 +        smsOptIn, emailOptIn bool                              
+      23 +        signedUpAgo          int64 // seconds before the refere
+         +nce time                                                       
+      24 +        profile              string                            
+      25  }
+      26  
+      27  type genItem struct {
+     ...
+      86  }
+      87  
+      88  type category struct {
+      89 -        code             string                                
+      90 -        minTRY, maxTRY   int64                                 
+      89 +        code           string                                  
+      90 +        minTRY, maxTRY int64                                   
+      91  }
+      92  
+      93  // Codes match the categories rows in the first migration.
+  ⎿  Updated internal/db/seed_test.go (+14 -14)
+      218          pool := seeded(t, refTime)
+      219  
+      220          rules := map[string]string{
+      221 -                "İstanbul":                  `SELECT count(*) 
+          -FROM users WHERE city = 'İstanbul'`,                          
+      222 -                "at least 10 cities":        `SELECT (count(DI
+          -STINCT city) >= 10)::int FROM users`,                         
+      223 -                "sms only":                  `SELECT count(*) 
+          -FROM users WHERE sms_opt_in AND NOT email_opt_in`,            
+      224 -                "email only":                `SELECT count(*) 
+          -FROM users WHERE email_opt_in AND NOT sms_opt_in`,            
+      225 -                "no consent":                `SELECT count(*) 
+          -FROM users WHERE NOT sms_opt_in AND NOT email_opt_in`,        
+      226 -                "both channels":             `SELECT count(*) 
+          -FROM users WHERE sms_opt_in AND email_opt_in`,                
+      227 -                "zero orders":               `SELECT count(*) 
+          -FROM users u WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.
+          -user_id = u.id)`,                                             
+      228 -                "lapsed buyer (>90d)":       `SELECT count(*) 
+          -FROM users u, seed_meta m WHERE ` + anyOrder + ` AND NOT EXIST
+          -S (SELECT 1 FROM orders o WHERE o.user_id = u.id AND o.ordered
+          -_at >= m.reference_time - interval '90 days')`,               
+      229 -                "high spender (≥10,000)":    `SELECT count(*) 
+          -FROM (SELECT user_id FROM orders GROUP BY user_id HAVING sum(t
+          -otal_amount) >= 10000) s`,                                    
+      230 -                "frequent buyer (≥8)":       `SELECT count(*) 
+          -FROM (SELECT user_id FROM orders GROUP BY user_id HAVING count
+          -(*) >= 8) s`,                                                 
+      231 -                "high-value cart (≥5,000)":  `SELECT count(*) 
+          -FROM (SELECT user_id FROM cart_items GROUP BY user_id HAVING s
+          -um(quantity * unit_price) >= 5000) s`,                        
+      232 -                "NULL last_name":            `SELECT count(*) 
+          -FROM users WHERE last_name IS NULL`,                          
+      233 -                "English speakers":          `SELECT count(*) 
+          -FROM users WHERE language = 'en'`,                            
+      234 -                "cart ≤30d, no order ≤30d":  usersFromRef + st
+          -rings.ReplaceAll(cartWithin+" AND NOT "+orderWithin, "$1", "30
+          -"),                                                           
+      221 +                "İstanbul":                 `SELECT count(*) F
+          +ROM users WHERE city = 'İstanbul'`,                           
+      222 +                "at least 10 cities":       `SELECT (count(DIS
+          +TINCT city) >= 10)::int FROM users`,                          
+      223 +                "sms only":                 `SELECT count(*) F
+          +ROM users WHERE sms_opt_in AND NOT email_opt_in`,             
+      224 +                "email only":               `SELECT count(*) F
+          +ROM users WHERE email_opt_in AND NOT sms_opt_in`,             
+      225 +                "no consent":               `SELECT count(*) F
+          +ROM users WHERE NOT sms_opt_in AND NOT email_opt_in`,         
+      226 +                "both channels":            `SELECT count(*) F
+          +ROM users WHERE sms_opt_in AND email_opt_in`,                 
+      227 +                "zero orders":              `SELECT count(*) F
+          +ROM users u WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.u
+          +ser_id = u.id)`,                                              
+      228 +                "lapsed buyer (>90d)":      `SELECT count(*) F
+          +ROM users u, seed_meta m WHERE ` + anyOrder + ` AND NOT EXISTS
+          + (SELECT 1 FROM orders o WHERE o.user_id = u.id AND o.ordered_
+          +at >= m.reference_time - interval '90 days')`,                
+      229 +                "high spender (≥10,000)":   `SELECT count(*) F
+          +ROM (SELECT user_id FROM orders GROUP BY user_id HAVING sum(to
+          +tal_amount) >= 10000) s`,                                     
+      230 +                "frequent buyer (≥8)":      `SELECT count(*) F
+          +ROM (SELECT user_id FROM orders GROUP BY user_id HAVING count(
+          +*) >= 8) s`,                                                  
+      231 +                "high-value cart (≥5,000)": `SELECT count(*) F
+          +ROM (SELECT user_id FROM cart_items GROUP BY user_id HAVING su
+          +m(quantity * unit_price) >= 5000) s`,                         
+      232 +                "NULL last_name":           `SELECT count(*) F
+          +ROM users WHERE last_name IS NULL`,                           
+      233 +                "English speakers":         `SELECT count(*) F
+          +ROM users WHERE language = 'en'`,                             
+      234 +                "cart ≤30d, no order ≤30d": usersFromRef + str
+          +ings.ReplaceAll(cartWithin+" AND NOT "+orderWithin, "$1", "30"
+          +),                                                            
+      235          }
+      236          for name, sql := range rules {
+      237                  if n := count(t, pool, sql); n <= 0 {
+  ⎿  (timeout 5m)
+
+⏺ Vet and format checks are clean, and the tests passed on the first run since
+  RED was just a compile failure. To confirm the idempotency tests actually
+  catch regressions, I'll temporarily remove the "already seeded" guard and see
+  if they fail.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ With the guard removed, both tests fail on duplicate keys; with it restored
+  they pass. Now the Compose default for the demo password (D10 says local use
+  only) and the env example:
+
+⏺ Bash(python3 - <<'EOF'
+      p='docker-compose.yml'; s=open(p).read()…)
+  ⎿  diff --git a/.env.example b/.env.example
+     index 2ead17a..373ba63 100644
+     --- a/.env.example
+     … +25 lines (ctrl+o to expand)
+  ⎿  Updated .env.example (+4 -0)
+       6  ANTHROPIC_API_KEY=
+       7  ANTHROPIC_MODEL=claude-opus-5-5
+       8  
+       9 +# Password for the seeded demo marketers (ayse@ / mert@marketer
+         +.example.com).                                                 
+      10 +# Read only on the first seed; local use only. At least 8 chara
+         +cters.                                                         
+      11 +DEMO_MARKETER_PASSWORD=demo-password                           
+      12 +                                                               
+      13  # Local demo database credentials.
+      14  POSTGRES_PASSWORD=scc
+  ⎿  Updated docker-compose.yml (+2 -0)
+      20      command: ["migrate"]
+      21      environment:
+      22        DATABASE_URL: *db-url
+      23 +      # Demo logins for local use only (D10); override in .env.
+      24 +      DEMO_MARKETER_PASSWORD: ${DEMO_MARKETER_PASSWORD:-demo-pa
+         +ssword}                                                        
+      25      depends_on:
+      26        postgres:
+      27          condition: service_healthy
+
+⏺ Full suite, build and lint:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+❯ i only want one seeded demo marketer account: marketer@marketer.com with      
+  password Demo1234!. remove the ayse and mert demo accounts. document the      
+  credentials in README and keep docker compose up working without extra setup. 
+
+⏺ Got it: one demo account, marketer@marketer.com with password Demo1234!. The
+  test comes first (TDD); it should fail now, because the seed currently creates
+  two accounts.
+
+⏺ Update(internal/db/seed_test.go)
+  ⎿  Added 20 lines
+      147    }
+      148  }
+      149  
+      150 +func TestSeed_OneDemoMarketer(t *testing.T) {                 
+      151 +  pool := seeded(t, refTime)                                  
+      152 +                                                              
+      153 +  rows, err := pool.Query(context.Background(), `SELECT email,
+          + password_hash FROM marketers`)                               
+      154 +  if err != nil {                                             
+      155 +    t.Fatal(err)                                              
+      156 +  }                                                           
+      157 +  type marketer struct{ email, hash string }                  
+      158 +  got, err := pgx.CollectRows(rows, pgx.RowToStructByPos[marke
+          +ter])                                                         
+      159 +  if err != nil {                                             
+      160 +    t.Fatal(err)                                              
+      161 +  }                                                           
+      162 +  if len(got) != 1 || got[0].email != "marketer@marketer.com" 
+          +{                                                             
+      163 +    t.Fatalf("want only marketer@marketer.com, got %v", got)  
+      164 +  }                                                           
+      165 +  if err := bcrypt.CompareHashAndPassword([]byte(got[0].hash),
+          + []byte(password)); err != nil {                              
+      166 +    t.Fatalf("stored hash does not match the seed password: %v
+          +", err)                                                       
+      167 +  }                                                           
+      168 +}                                                             
+      169 +                                                              
+      170  func TestSeed_EmptyPasswordFailsAndLeavesNothing(t *testing.T)
+            {
+      171    pool := migrated(t)
+      172  
+
+⏺ Update(internal/db/seed_test.go)
+  ⎿  Added 1 line
+       7    "testing"
+       8    "time"
+       9  
+      10 +  "github.com/jackc/pgx/v5"                                    
+      11    "github.com/jackc/pgx/v5/pgconn"
+      12    "github.com/jackc/pgx/v5/pgxpool"
+      13  
+
+⏺ Update(internal/db/seed_test.go)
+  ⎿  Added 1 line
+      10    "github.com/jackc/pgx/v5"
+      11    "github.com/jackc/pgx/v5/pgconn"
+      12    "github.com/jackc/pgx/v5/pgxpool"
+      13 +  "golang.org/x/crypto/bcrypt"                                 
+      14  
+      15    "smart-campaign-composer/internal/db"
+      16    "smart-campaign-composer/internal/dbtest"
+
+⏺ pgx's struct scanning skips unexported fields, so the test struct needs
+  exported ones:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ RED for the right reason. Now one account in the seed, the Compose default
+  Demo1234! so no setup is needed, and the env example:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The remaining matches are harmless: "Mersin" contains "mer", and the config
+  test uses an arbitrary value. Next, D10 gets a dated history note, since
+  you've changed its seeded accounts:
+
+⏺ Update(DECISIONS.md)
+  ⎿  Added 1 line
+      80  - **Why:** Prevents unauthenticated sends and wasted API credit
+          s, and records who approved what, at minimal cost.
+      81  - **Rejected:** *No authentication:* anyone could trigger sends
+          . *Roles such as editor and approver:* beyond the case.
+      82  - **Trade-offs:** No four-eyes approval. The demo login details
+           are not suitable for production.
+      83 +- **History:** 2026-10-22. The seed creates a single demo login
+         +, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWOR
+         +D`, default documented in the README), at the engineer's reques
+         +t. The schema still supports several marketers.                
+      84  
+      85  ### D11 — Campaign lifecycle with cancel only
+      86  - **Status:** Accepted · 2026-10-21
+
+⏺ Write(README.md)
+  ⎿  Added 22 lines, removed 3 lines
+      2  
+      3  AI-assisted SMS and email campaign tool: Claude suggests the aud
+         ience and content, the backend validates, the marketer approves,
+          the system sends to mock providers. Requirements: [`CASE.md`](C
+         ASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs
+         /plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21
+         -implementation-plan.md).
+      4  
+      5 -> **Status: work in progress.** Only the project skeleton exists
+        - (plan task T1): Postgres, a `migrate` step that checks the data
+        -base connection, and an `api` with health and metrics endpoints.
+        - No campaign features, seed data, worker, mock providers or fron
+        -tend yet.                                                       
+      5 +> **Status: work in progress.** Done: project skeleton (T1) and 
+        +database schema with fictional seed data (T2). Not yet built: lo
+        +gin, campaign features, worker, mock providers, frontend.       
+      6  
+      7  ## Requirements
+      8  
+     ...
+      11  ## Run
+      12  
+      13  ```sh
+      14 -cp .env.example .env   # optional; defaults work without it    
+      14  docker compose up
+      15  ```
+      16  
+      17 +No `.env` is needed. To change settings, `cp .env.example .env`
+         + and edit it.                                                  
+      18 +                                                               
+      19  - `http://localhost:8080/healthz`: liveness
+      20  - `http://localhost:8080/readyz`: database reachable (503 other
+          wise)
+      21  - `http://localhost:8080/metrics`: Prometheus metrics
+      22  
+      23  `LLM_MODE=mock` is the default. With `LLM_MODE=real`, `ANTHROPI
+          C_API_KEY` must be set in `.env`, otherwise the api exits on st
+          artup.
+      24  
+      25 +### Demo login                                                 
+      26 +                                                               
+      27 +| Email | Password |                                           
+      28 +|---|---|                                                      
+      29 +| `marketer@marketer.com` | `Demo1234!` |                      
+      30 +                                                               
+      31 +For local use only. The password can be changed with `DEMO_MARK
+         +ETER_PASSWORD` in `.env`, but only before the first `docker com
+         +pose up`: the seed runs once and never changes existing rows. (
+         +The login page arrives with T3.)                               
+      32 +                                                               
+      33 +## Seed data                                                   
+      34 +                                                               
+      35 +The `migrate` service applies the schema and, on the first run,
+         + creates 3,000 fictional users with order and cart histories, g
+         +enerated from a fixed random seed. Every date is relative to th
+         +at first run. Later runs do nothing, so restarting never create
+         +s duplicates or changes data.                                  
+      36 +                                                               
+      37 +Relative audiences such as "carted in the last 30 days" shrink 
+         +as real time passes. To regenerate the data relative to today (
+         +this also deletes all campaigns):                              
+      38 +                                                               
+      39 +```sh                                                          
+      40 +docker compose down -v && docker compose up                    
+      41 +```                                                            
+      42 +                                                               
+      43  ## Test
+      44  
+      45  ```sh
+     ...
+      51  
+      52  ## Architecture (current)
+      53  
+      35 -One Go module (`cmd/scc`) built into one image and run as separ
+         -ate Compose services (D20): `postgres`, `migrate` (one-shot), `
+         -api`. `internal/config` reads environment variables; `internal/
+         -obs` serves health and metrics.                                
+      54 +One Go module (`cmd/scc`) built into one image and run as separ
+         +ate Compose services (D20): `postgres`, `migrate` (one-shot: mi
+         +grations + seed), `api`. `internal/config` reads environment va
+         +riables, `internal/obs` serves health and metrics, `internal/db
+         +` holds the embedded migrations and the seed.                  
+
+⏺ Full suite, format, vet and build:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Everything is green. Now the T2 acceptance check needs docker compose down -v,
+  which deletes the database volume. First, a look at what that volume holds:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The volume just holds an empty, table-less database from T1, so it's safe to
+  delete—down -v will also clear the Go module cache, but that's just a download
+  cache. Now I'll run the acceptance check: fresh start, then a second up,
+  comparing data across both.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The acceptance check passed. One last check: Compose should pass the default
+  password through intact (the ! is quoted in the YAML). Then the ledger:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ T2 is done and all checks pass; nothing is committed yet. The seed now creates
+  only the one demo account you asked for, marketer@marketer.com with password
+  Demo1234!, and docker compose up still works with no .env.
+
+  Demo account change
+  - The ayse and mert accounts are gone. A new test confirms exactly one account
+    exists and its stored password hash matches the seed password. It failed
+    before the change and passes now.
+  - Demo1234! is the built-in default, so no setup is needed. You can override
+    it in .env before the first start.
+  - The login is in a new "Demo login" section of the README, and in
+    .env.example.
+  - I added a dated history note to D10, since it said "demo accounts" (plural).
+    The database still supports several marketers.
+  - marketer.com is a real domain someone owns. That's harmless here because
+    nothing ever emails a marketer.
+
+  Results
+
+  ┌───────────────────────────────┬─────────────────────────────────────────┐
+  │             Check             │                 Result                  │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │                               │ all 4 packages pass; 20 tests in        │
+  │ make test                     │ internal/db, including every test the   │
+  │                               │ plan names for T2                       │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │                               │ with the "already seeded" check         │
+  │ Proof a key test can fail     │ removed, the two re-run tests fail on   │
+  │                               │ duplicate keys; restored, they pass     │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │ gofmt / go vet / build        │ clean                                   │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │ Fresh start (down -v, then    │ 3,000 users, 6,496 orders, 2,608 cart   │
+  │ up)                           │ items, 1 account; migrate exits 0, api  │
+  │                               │ healthy                                 │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │                               │ same counts and the same fingerprint of │
+  │ Second up                     │  all stored rows (2073319b…): nothing   │
+  │                               │ duplicated or changed                   │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │ CASE example audience         │                                         │
+  │ (İstanbul, cart in the last   │ 197 users                               │
+  │ 30 days, no order since)      │                                         │
+  └───────────────────────────────┴─────────────────────────────────────────┘
+
+  Before down -v I checked the database volume: it held only T1's empty database
+  (0 tables), so nothing was lost. It also cleared the Go module download
+  cache.
+
+  Choices I made within T2
+  - Re-run protection: the plan suggested skipping duplicate emails row by row.
+    Instead the seed claims a single "seeded" marker row first, in the same
+    transaction. Re-runs, even two at once, then do nothing, and an unexpected
+    email clash fails loudly instead of quietly mixing old and new data.
+  - Seed signature: Seed takes the marketer password as a fifth argument, so
+    only the config package reads environment variables.
+  - Mock-provider tables: their schema and database role wait for T10, which
+    builds the mock provider.
+  - Test helper: a new dbtest.FreshDB gives each test its own empty database.
+    The determinism test needs two.
+
+  Proposed commits on milestone-a-foundation, not pushed:
+  1. feat: add schema migrations and deterministic seed: internal/db, test
+     helper, config, main.go, Compose, .env.example, go.mod/go.sum.
+  2. docs: document seed data, demo login and D10 change: README.md,
+     DECISIONS.md.
+
+  CLAUDE.md also shows as modified: that's your own edit, adding the TDD and
+  full-check rules. I'll leave it out of the T2 commits unless you want it
+  committed separately.
+
+  Should I create these commits? The stack is still running at localhost:8080
+  with the seeded data.
+
+✻ Worked for 14m 42s · done 2:05 PM
+
+❯ finish T2 by committing and pushing the changes to milestone-a-foundation.    
+  verify the remote state and show me the results                               
+
+⏺ Committing both T2 commits. CLAUDE.md stays out as I proposed, since you
+  didn't ask to include it. First, a secret scan of exactly what gets staged:
+
+  Pushed to milestone-a-foundation, ran 2 shell commands (ctrl+o to expand)
+
+⏺ T2 is committed and pushed to milestone-a-foundation, and GitHub matches your
+  local branch exactly.
+
+  New commits
+
+  ┌─────────┬─────────────────────────────────────────────────────┐
+  │  Hash   │                       Message                       │
+  ├─────────┼─────────────────────────────────────────────────────┤
+  │ 2624668 │ feat: add schema migrations and deterministic seed  │
+  ├─────────┼─────────────────────────────────────────────────────┤
+  │ 0b3cfa0 │ docs: document seed data, demo login and D10 change │
+  └─────────┴─────────────────────────────────────────────────────┘
+
+  Remote check
+  - Branch: milestone-a-foundation on GitHub points to 0b3cfa0, the same commit
+    as your local branch, and the two are in sync.
+  - Commits on the branch: 0b3cfa0 → 2624668 → 307ed55 → 683c068 → f9c2114.
+  - Compared with main: 4 commits ahead (T1 and T2) and 0 behind. main is
+    unchanged at f9c2114; nothing was merged.
+  - Files: the new internal/db files are on GitHub (generate.go, migrate.go,
+    migrations/, names.go, seed.go and their tests).
+  - Secrets: .env isn't on GitHub. A scan of the staged changes found no keys or
+    tokens; the only credential is the documented demo password Demo1234!.
+
+  These are the same tests and checks from my last report; nothing changed
+  between that run and the commit.
+
+  Not committed: CLAUDE.md is still modified locally. That's your own edit
+  adding the TDD and full-check rules, and I left it out on purpose. If you want
+  it in the repo, I can commit it separately as docs: add TDD and verification 
+  rules to CLAUDE.md.
+
+  T1 and T2 are complete. T3 (login) is next in Milestone A; I'll wait for your
+  go-ahead. Merging into main waits until the milestone is finished and you
+  approve it.
+
+  Please export this session to ai-sessions/04-project-initialization.txt before
+  you end it. Before committing it, search it for gho_ and sk-ant: the masked
+  GitHub token from gh auth status appears earlier in this session.
+✻ Baked for 29s · done 2:10 PM
+
+❯ commit the claude.md changes and push them to milestone-a-foundation          
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ This diff goes beyond the TDD rules I mentioned—it also updates the
+  collaboration rules (handle routine work autonomously, ask only for
+  significant decisions). I'll make sure the commit message reflects both
+  changes.
+
+  Pushed to milestone-a-foundation (ctrl+o to expand)
+
+⏺ I committed your CLAUDE.md changes and pushed them to milestone-a-foundation;
+  GitHub now matches your local branch.
+
+  - Commit: d5e4de6 docs: refine collaboration and verification rules in 
+    CLAUDE.md
+  - What it contains: besides the TDD and full-check rules, your edit also
+    changes how we work together: routine work inside an approved task goes
+    ahead without asking, and approval is needed only for significant decisions,
+    unexpected problems or plan changes. The commit message mentions both
+    parts. The diff has no secrets.
+  - Remote check: the branch on GitHub is at d5e4de6, the same as your local
+    branch. It's 5 commits ahead of main and 0 behind, and main is unchanged.
+  - Working tree: clean.
+
+  T3 (login) is next. I'll wait for your go-ahead.
+
+✻ Baked for 17s · done 2:14 PM
+
+❯ start T3 in auto mode. handle routine work independently and ask me only      
+  about important decisions or unexpected issues. don't move to T4 without my   
+  approval                                                                      
+
+⏺ Starting T3 in auto mode: I'll handle routine work myself, ask only for real
+  decisions, and stop before T4. The brief:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I'll proceed with a 12h session lifetime as a named constant (flagged for your
+  confirmation later, easy to change if needed) and leave it out of
+  DECISIONS.md for now. Starting with tests first.
+
+⏺ Write(internal/auth/auth_test.go)
+  ⎿  Wrote 253 lines to internal/auth/auth_test.go
+       1 package auth_test
+       2 
+       3 import (
+       4   "context"
+       5   "crypto/sha256"
+       6   "encoding/json"
+       7   "net/http"
+       8   "net/http/httptest"
+       9   "strings"
+      10   "testing"
+     … +268 lines (ctrl+o to expand)
+
+⏺ One check in that test is clumsier than it needs to be. Simplifying the "raw
+  token not stored" assertion:
+
+⏺ Update(internal/auth/auth_test.go)
+  ⎿  Added 1 line, removed 1 line
+      150    if n := s.count(`SELECT count(*) FROM sessions WHERE token_h
+           ash = $1`, hash[:]); n != 1 {
+      151      t.Fatalf("want 1 session stored by hash, got %d", n)
+      152    }
+      153 -  if n := s.count(`SELECT count(*) FROM sessions s WHERE posit
+          -ion($1::bytea IN s::text::bytea) > 0`, []byte(c.Value)); n != 
+          -0 {                                                           
+      153 +  if n := s.count(`SELECT count(*) FROM sessions s WHERE token
+          +_hash = $1 OR position($2 IN s::text) > 0`, []byte(c.Value), c
+          +.Value); n != 0 {                                             
+      154      t.Fatal("raw token stored in sessions")
+      155    }
+      156  }
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ RED: the auth package doesn't exist yet. GREEN:
+
+⏺ Write(internal/auth/auth.go)
+  ⎿  Wrote 190 lines to internal/auth/auth.go
+       1 // Package auth handles marketer login, logout and session check
+         s (D10, D22).
+       2 package auth
+       3 
+       4 import (
+       6   "crypto/rand"
+       7   "crypto/sha256"
+       8   "encoding/base64"
+       9   "encoding/json"
+      10   "errors"
+     … +202 lines (ctrl+o to expand)
+
+⏺ I'll make three cleanups before running: remove the unnecessary base64 step in
+  dummyHash, turn the error message into a constant, and fix the test since
+  crypto/rand.Text() returns 26 characters, making the old 40-character minimum
+  arbitrary.
+
+⏺ Bash(python3 - <<'EOF'
+      p='internal/auth/auth.go'; s=open(p).read()…)
+  ⎿  --- PASS: TestLogin_SetsHttpOnlyLaxCookie (0.25s)
+     --- PASS: TestLogin_EmailIsCaseInsensitive (0.42s)
+     --- PASS: TestLogin_WrongPasswordSameAsUnknownEmail (0.81s)
+     … +9 lines (ctrl+o to expand)
+  ⎿  Updated internal/auth/auth.go (+2 -3)
+       5          "context"
+       6          "crypto/rand"
+       7          "crypto/sha256"
+       8 -        "encoding/base64"                                      
+       8          "encoding/json"
+       9          "errors"
+      10          "log/slog"
+     ...
+      25          maxLoginBody = 4 << 10
+      26  )
+      27  
+      29 -var errInvalidLogin = "invalid email or password"              
+      28 +const errInvalidLogin = "invalid email or password"            
+      29  
+      30  // Routes registers POST /api/login and guards every other /api
+          / path with
+      31  // Require. It returns the guarded mux, where later tasks add t
+          heir routes.
+     ...
+      169  
+      170  // dummyHash has the same cost as real password hashes (bcrypt
+           .DefaultCost).
+      171  var dummyHash = sync.OnceValue(func() []byte {
+      173 -        h, _ := bcrypt.GenerateFromPassword([]byte(base64.StdE
+          -ncoding.EncodeToString([]byte("no-such-user"))), bcrypt.Defaul
+          -tCost)                                                        
+      172 +        h, _ := bcrypt.GenerateFromPassword([]byte("no-such-us
+          +er"), bcrypt.DefaultCost)                                     
+      173          return h
+      174  })
+      175  
+  ⎿  Updated internal/auth/auth_test.go (+1 -1)
+       98          if !c.HttpOnly || c.SameSite != http.SameSiteLaxMode |
+           | c.Path != "/" || c.MaxAge <= 0 {
+       99                  t.Fatalf("cookie flags wrong: %+v", c)
+      100          }
+      101 -        if len(c.Value) < 40 {                                
+      101 +        if len(c.Value) < 26 { // crypto/rand.Text: 128 bits  
+      102                  t.Fatalf("token too short: %d chars", len(c.Va
+           lue))
+      103          }
+      104  }
+  ⎿  (timeout 5m)
+
+⏺ All 11 auth tests pass. As in T2, I'll prove a key test can fail: removing the
+  expiry check from Require should break the expired-session test.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The test catches it. Next I wire auth into the api:
+
+⏺ Update(cmd/scc/main.go)
+  ⎿  Added 1 line
+      76  func serveAPI(ctx context.Context, cfg config.Config, pool *pgx
+          pool.Pool) error {
+      77    mux := http.NewServeMux()
+      78    obs.Routes(mux, pool)
+      79 +  auth.Routes(mux, pool, cfg.LLMMode)                          
+      80    // No WriteTimeout: SSE responses (T8, T14) stay open.
+      81    srv := &http.Server{Addr: cfg.HTTPAddr, Handler: mux, ReadHea
+          derTimeout: 10 * time.Second}
+      82  
+
+⏺ Update(cmd/scc/main.go)
+  ⎿  Added 1 line
+      14  
+      15    "github.com/jackc/pgx/v5/pgxpool"
+      16  
+      17 +  "smart-campaign-composer/internal/auth"                      
+      18    "smart-campaign-composer/internal/config"
+      19    "smart-campaign-composer/internal/db"
+      20    "smart-campaign-composer/internal/obs"
+
+⏺ Full suite, format, vet and build:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Everything is green. Now the live check against the running stack, using the
+  seeded demo login:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The live flow behaves as specified. Next, the README: it currently says login
+  "arrives with T3".
+
+⏺ Bash(python3 - <<'EOF'
+      p='README.md'; s=open(p).read()…)
+  ⎿  5:> **Status: work in progress.** Done: project skeleton (T1), databas
+     e schema with fictional seed data (T2), login API (T3). Not yet built:
+      campaign features, worker, mock providers, frontend.
+     … +10 lines (ctrl+o to expand)
+  ⎿  Updated README.md (+11 -3)
+      2  
+      3  AI-assisted SMS and email campaign tool: Claude suggests the aud
+         ience and content, the backend validates, the marketer approves,
+          the system sends to mock providers. Requirements: [`CASE.md`](C
+         ASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs
+         /plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21
+         -implementation-plan.md).
+      4  
+      5 -> **Status: work in progress.** Done: project skeleton (T1) and 
+        -database schema with fictional seed data (T2). Not yet built: lo
+        -gin, campaign features, worker, mock providers, frontend.       
+      5 +> **Status: work in progress.** Done: project skeleton (T1), dat
+        +abase schema with fictional seed data (T2), login API (T3). Not 
+        +yet built: campaign features, worker, mock providers, frontend. 
+      6  
+      7  ## Requirements
+      8  
+     ...
+      28  |---|---|
+      29  | `marketer@marketer.com` | `Demo1234!` |
+      30  
+      31 -For local use only. The password can be changed with `DEMO_MARK
+         -ETER_PASSWORD` in `.env`, but only before the first `docker com
+         -pose up`: the seed runs once and never changes existing rows. (
+         -The login page arrives with T3.)                               
+      31 +For local use only. The password can be changed with `DEMO_MARK
+         +ETER_PASSWORD` in `.env`, but only before the first `docker com
+         +pose up`: the seed runs once and never changes existing rows. T
+         +he login page arrives with the frontend (T15); until then, use 
+         +the API:                                                       
+      32 +                                                               
+      33 +```sh                                                          
+      34 +curl -c cookies.txt -X POST localhost:8080/api/login \         
+      35 +  -d '{"email":"marketer@marketer.com","password":"Demo1234!"}'
+      36 +curl -b cookies.txt localhost:8080/api/me                      
+      37 +```                                                            
+      38 +                                                               
+      39 +Every `/api/*` endpoint except `POST /api/login` returns 401 wi
+         +thout a session. Sessions last 12 hours and live in an HttpOnly
+         +, SameSite=Lax cookie; the database stores only the token's SHA
+         +-256 hash. The cookie is not marked `Secure` because the demo r
+         +uns on plain `http://localhost`.                               
+      40  
+      41  ## Seed data
+      42  
+     ...
+      59  
+      60  ## Architecture (current)
+      61  
+      54 -One Go module (`cmd/scc`) built into one image and run as separ
+         -ate Compose services (D20): `postgres`, `migrate` (one-shot: mi
+         -grations + seed), `api`. `internal/config` reads environment va
+         -riables, `internal/obs` serves health and metrics, `internal/db
+         -` holds the embedded migrations and the seed.                  
+      62 +One Go module (`cmd/scc`) built into one image and run as separ
+         +ate Compose services (D20): `postgres`, `migrate` (one-shot: mi
+         +grations + seed), `api`. `internal/config` reads environment va
+         +riables, `internal/obs` serves health and metrics, `internal/db
+         +` holds the embedded migrations and the seed, `internal/auth` t
+         +he login, logout and session check.                            
+
+⏺ Adding cookies.txt to .gitignore to prevent the live session token from being
+  accidentally committed, then I'll review the diff and commit locally.
+
+⏺ Bash(echo "cookies.txt" >> .gitignore && git status --short && echo "---
+      secret scan:" && (git diff; cat internal/auth/*.go) | grep -nE
+      "sk-ant|gho_|ghp_|scc_session…)
+  ⎿   M .gitignore
+      M README.md
+      M cmd/scc/main.go
+     … +3 lines (ctrl+o to expand)
+  ⎿  Updated .gitignore (+1 -0)
+      2  .superpowers/
+      3  .claude/settings.local.json
+      4  /bin/
+      5 +cookies.txt                                                     
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ T3 (login) is done and committed locally on milestone-a-foundation; I haven't
+  pushed it. Milestone A (T1–T3) is now complete, and I've stopped before T4 as
+  you asked.
+
+  What T3 adds
+  - POST /api/login checks the email (case doesn't matter) and password. A wrong
+    password and an unknown email get the same 401 message and take about the
+    same time. Bad input gets 400, including bodies over 4 KB.
+  - On success the browser gets a random session token in an HttpOnly,
+    SameSite=Lax cookie. The database stores only the token's SHA-256 hash.
+  - GET /api/me returns the logged-in marketer plus llm_mode, which the "Mock
+    AI" banner in T15 will use.
+  - POST /api/logout deletes the session and clears the cookie.
+  - Every /api/* path except login needs a valid, unexpired session. Later tasks
+    add their routes behind the same check, so new endpoints are protected
+    automatically.
+
+  Results
+
+  Check: make test
+  Result: all 5 packages pass; 11 new auth tests
+  ────────────────────────────────────────
+  Check: Proof a test can fail
+  Result: with the expiry check removed, the expired-session test fails (200
+  instead of 401); restored, it passes
+  ────────────────────────────────────────
+  Check: gofmt / go vet / go mod tidy / build
+  Result: clean
+  ────────────────────────────────────────
+  Check: Live check with the running stack
+  Result: 401 without a session on /api/me, /api/campaigns, /api/logout; 200 on
+  /healthz, /readyz, /metrics; identical 401 for wrong password and unknown
+  email; demo login returns 200 with the cookie flags above; /api/me returns
+  the demo marketer with llm_mode: mock; after logout the old cookie gets 401
+
+  Commits (local only)
+  - d6f3b02 feat: add marketer login, logout and session guard
+  - 091c14e docs: document login API and ignore curl cookie jar. The README's
+    curl example saves a cookies.txt holding a live token in the project folder,
+    so I added that file to .gitignore.
+
+  Choices I made
+  - Require takes the database pool as an argument (the plan showed it with only
+    next).
+  - GET /api/me already returns llm_mode, which the plan's T15 needs.
+  - The cookie isn't marked Secure, because the demo runs on plain
+    http://localhost. A shortcut: comment in the code and a README note say to
+    turn it on behind HTTPS.
+
+  Decisions for you
+  1. Session length: I used 12 hours, the value still listed under Open
+     Questions. Do you approve it? If so, I'll record it in DECISIONS.md;
+     changing it is one constant.
+  2. Push: should I push these two commits to milestone-a-foundation?
+  3. Merge: Milestone A is complete. Under D35 the next step is your review and
+     approval to merge it into main. Should I show the milestone summary and
+     diff now?
+
+  T4 waits for your approval. The session export to ai-sessions/ is also due now
+  that a milestone is finished.
+
+✻ Sautéed for 8m 17s · done 2:25 PM
+
+❯ i approve the 12 hour session ttl. record it in decision.md, commit and push  
+  the remaining changes. then open pr for the feature. dont merge yet. show me  
+  the review findings                                                           
+
+⏺ I'll record the TTL first, then commit, push, and open the PR without merging.
+  Once the PR is up, a fresh reviewer goes over the whole branch.
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(python3 - <<'EOF'
+      p='DECISIONS.md'; s=open(p).read()…)
+  ⎿   DECISIONS.md          | 6 +++---
+      internal/auth/auth.go | 2 +-
+      2 files changed, 4 insertions(+), 4 deletions(-)
+     … +2 lines (ctrl+o to expand)
+  ⎿  Updated DECISIONS.md (+3 -3)
+      76  
+      77  ### D10 — Multiple marketers with a single role
+      78  - **Status:** Accepted · 2026-10-21
+      79 -- **Decision:** Seeded demo marketer accounts, all with the sam
+         -e role. Every marketer can create, edit, approve, send and canc
+         -el campaigns, and sees all campaigns. `created_by` and `approve
+         -d_by` are recorded with timestamps. Passwords are hashed, and t
+         -he demo login details are for local use only. Approval checks t
+         -he campaign's version, so a campaign changed since it was last 
+         -viewed cannot be approved. Health and metrics endpoints are ope
+         -n. No RBAC, registration or user-management UI.                
+      79 +- **Decision:** Seeded demo marketer accounts, all with the sam
+         +e role. Every marketer can create, edit, approve, send and canc
+         +el campaigns, and sees all campaigns. `created_by` and `approve
+         +d_by` are recorded with timestamps. Passwords are hashed, and t
+         +he demo login details are for local use only. Approval checks t
+         +he campaign's version, so a campaign changed since it was last 
+         +viewed cannot be approved. Sessions expire 12 hours after login
+         +, with no sliding renewal. Health and metrics endpoints are ope
+         +n. No RBAC, registration or user-management UI.                
+      80  - **Why:** Prevents unauthenticated sends and wasted API credit
+          s, and records who approved what, at minimal cost.
+      81  - **Rejected:** *No authentication:* anyone could trigger sends
+          . *Roles such as editor and approver:* beyond the case.
+      82  - **Trade-offs:** No four-eyes approval. The demo login details
+           are not suitable for production.
+      83 -- **History:** 2026-10-22. The seed creates a single demo login
+         -, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWOR
+         -D`, default documented in the README), at the engineer's reques
+         -t. The schema still supports several marketers.                
+      83 +- **History:** 2026-10-22. The seed creates a single demo login
+         +, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWOR
+         +D`, default documented in the README), at the engineer's reques
+         +t. The schema still supports several marketers. 2026-10-22: ses
+         +sion lifetime of 12 hours approved (was an open question): cove
+         +rs a working day without frequent logins, and a stolen cookie s
+         +tays useful for at most half a day.                            
+      84  
+      85  ### D11 — Campaign lifecycle with cancel only
+      86  - **Status:** Accepted · 2026-10-21
+     ...
+      279  
+      280  ## Open Questions
+      281  
+      282 -- **Operational defaults (confirm before T10/T12):** mock-prov
+          -ider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-Af
+          -ter: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 wor
+          -kers per channel, request text ≤ 1,000 characters, session TTL
+          - 12 h. All proposed, not yet approved.                        
+      282 +- **Operational defaults (confirm before T10/T12):** mock-prov
+          +ider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-Af
+          +ter: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 wor
+          +kers per channel, request text ≤ 1,000 characters. All propose
+          +d, not yet approved.                                          
+      283  
+      284  ## Deferred
+      285  
+  ⎿  Updated internal/auth/auth.go (+1 -1)
+      20  
+      21  const (
+      22          CookieName = "scc_session"
+      23 -        // Proposed default (DECISIONS.md Open Questions), not 
+         -yet confirmed.                                                 
+      23 +        // Fixed lifetime from login, no sliding renewal (D10).
+      24          sessionTTL   = 12 * time.Hour
+      25          maxLoginBody = 4 << 10
+      26  )
+
+⏺ That's a comment-only change in Go plus the DECISIONS.md entry. Commit and
+  push:
+
+  Pushed to milestone-a-foundation (ctrl+o to expand)
+
+⏺ Pushed. Next I open the PR into main (no merge):
+
+  Created PR #1 (ctrl+o to expand)
+
+⏺ PR #1 is open. For the review, executing-plans calls for a fresh reviewer on
+  the whole branch. I'll build the review package and dispatch it:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Agent(Review Milestone A branch)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+⏺ The 12-hour session lifetime is recorded, everything is pushed, and pull
+  request #1 is open but not merged. The review is still running, so I don't
+  have findings to show you yet.
+
+  - DECISIONS.md: D10 now says sessions expire 12 hours after login and aren't
+    extended by activity, with a dated note on why. I removed it from Open
+    Questions. The "not yet confirmed" comment in internal/auth/auth.go now
+    points to D10.
+  - Commit and push: 7f327b8 docs: record approved 12-hour session lifetime in 
+    D10. GitHub and your local branch are both at 7f327b8, and there are no
+    uncommitted changes.
+  - Pull request #1:
+    https://github.com/esraahaytaa-eng/smart-campaign-composer/pull/1. It merges
+    milestone-a-foundation into main and covers T1–T3. The description lists
+    the test results, known limits and "do not merge before review approval".
+  - Review: a separate reviewer is checking the whole branch against CASE.md,
+    DECISIONS.md and the plan. It's covering:
+    - the seed's repeatability and re-run safety
+    - login security
+    - secrets, including the ai-sessions/ exports
+    - Compose and make test safety
+    - the schema
+    - unnecessary complexity
+    - the choices I made along the way
+
+  I'll show you the findings as soon as the review finishes. I won't fix or
+  merge anything until you've seen them.
+
+✻ Sautéed for 1m 3s · done 2:30 PM
+
+› Message from general-purpose
+  ## Milestone A review (T1–T3): main..milestone-a-foundation, 8 commits
+
+  **Verdict: ready to merge.** I found no Critical or Important issues. The four
+  Minor findings below are optional cleanups and none of them blocks the merge.
+
+  **Checks I ran:** `make test` passed in every package (auth, config, db,
+  dbtest, obs). The test DB was removed afterwards and pgdata was not touched.
+  `go vet ./...` in the test container was clean. I did not edit, commit or push
+  anything.
+
+  ### What holds up (checked against the six focus areas)
+  1. **Seed:**
+     - Seeding is all-or-nothing. It runs in one transaction that first claims
+  `seed_meta` with `ON CONFLICT DO NOTHING`.
+     - A second seed run, even at the same moment, waits on that row lock and
+  then does nothing. A crash rolls everything back.
+     - Every date is an offset of 0 or more seconds before a reference time
+  truncated to the second, so nothing is in the future.
+     - New signups take their events from `[0, signedUpAgo]`. Other profiles
+  sign up 365 days or more ago, and their events fall within the last 360 days,
+  so nothing is dated before signup.
+     - Tests cover reruns with a later `now`, determinism across two databases,
+  no future dates, and no events before signup.
+  2. **Auth:**
+     - Session token comes from `crypto/rand.Text()` (128 bits). Only its
+  SHA-256 hash is stored.
+     - Cookie is HttpOnly and SameSite=Lax.
+     - Expiry is checked in SQL against the database's own clock. Logout deletes
+  the session row.
+     - Unknown email and wrong password give the same message, and an unknown
+  email still runs a bcrypt compare at the same cost.
+     - Login body is capped at 4 KB. Server errors are logged, and the client
+  only sees "internal error".
+     - Every `/api/*` path except login is guarded structurally, and a test
+  covers a path that doesn't exist yet.
+  3. **Secrets:**
+     - `.env` is excluded in both `.gitignore` and `.dockerignore`.
+     - `.env.example` holds only the demo defaults.
+     - I scanned `ai-sessions/` (unchanged on this branch) for Anthropic keys,
+  GitHub tokens, AWS keys, private keys, bearer tokens and email addresses: no
+  hits. The only personal detail is the path `/Users/esra` (one line).
+  4. **Compose and Makefile:**
+     - `docker compose up` needs no `.env`; every value has a default.
+     - `make test` uses a separate tmpfs `test-db` and removes only that
+  service.
+     - `dbtest.Pool` calls `t.Fatal` when there is no database, so tests fail
+  rather than skip.
+  5. **Schema:**
+     - D4: `UNIQUE(campaign_id, user_id, channel)`.
+     - D5: all seven message states.
+     - D3: the `skipped` ⇔ `skip_reason` CHECK.
+     - D31: a partial unique index on `(parent_campaign_id, channels)`, plus a
+  CHECK that a resend has exactly one channel, which makes the array index
+  correct.
+     - D2: `char_length('şğİ') = 3` passes, which also confirms the database
+  uses UTF-8.
+     - Everything else matches the D33 data model.
+  6. **Complexity:** dependencies are minimal (pgx, goose, bcrypt, Prometheus
+  client). There are no speculative abstractions.
+
+  ### Findings
+
+  **Minor 1: two migrate runs at the same time; one fails**
+  - **Where:** `internal/db/migrate.go:25`
+  - **Problem:** `goose.NewProvider` is built without a session locker, and
+  goose does not lock unless you ask it to.
+  - **Scenario:** run `docker compose run migrate` while `docker compose up` is
+  still migrating a fresh volume. Both processes try `CREATE TABLE
+  goose_db_version` (or `categories`). One exits 1 with "already exists". The
+  data stays safe because each migration runs in its own transaction, but the
+  run fails noisily.
+  - **Fix:** pass `goose.WithSessionLocker(lock.NewPostgresSessionLocker())`
+  (from `github.com/pressly/goose/v3/lock`) to `NewProvider`.
+
+  **Minor 2: the first unknown-email login is slower**
+  - **Where:** `internal/auth/auth.go:173`
+  - **Problem:** `dummyHash` is created lazily with `sync.OnceValue`, at full
+  bcrypt cost.
+  - **Scenario:** the first login attempt with an unknown email after the API
+  starts pays one bcrypt hash plus one compare, about twice as long as a wrong
+  password. That one request reveals that the email doesn't exist. It only
+  happens once and there is a single account, so the impact is negligible.
+  - **Fix:** build the dummy hash once at startup (a package-level `var` or
+  `init`), or call `dummyHash()` inside `Routes`.
+
+  **Minor 3: the plan still lists session TTL as open**
+  - **Where:** `docs/plans/2026-10-21-implementation-plan.md:265`
+  - **Problem:** the line "Still open, confirm before T10/T12: … session TTL
+  12h" is stale. D10 now records 12 h as approved, and it was removed from Open
+  Questions in DECISIONS.md.
+  - **Scenario:** a later task reads the plan and asks for the TTL to be
+  approved again.
+  - **Fix:** remove ", session TTL 12h" from that line.
+
+  **Minor 4: no lint step in the Makefile**
+  - **Where:** `Makefile`
+  - **Problem:** CLAUDE.md requires "build, and lint checks before completing
+  each task", but nothing runs `go vet`. `go test` only runs a subset of vet's
+  checks.
+  - **Scenario:** a vet-only issue, such as a printf argument mismatch outside
+  test files, gets merged.
+  - **Fix:** add `docker compose --profile test run --rm --no-deps go-test go
+  vet ./...` as a `lint` target, or run it inside `test`. It is clean today.
+
+  ### Executor rulings
+  - All rulings are sound.
+  - The seed_meta claim is better than the plan's `ON CONFLICT` on
+  `users.email`. It works with COPY and fails loudly instead of mixing two
+  datasets.
+  - Ruling #19 ("TTL still an Open Question") is now out of date because the
+  user approved 12 h. Close it in progress.md along with Minor 3.
+
+  ### Declined to judge
+  - **Login CSRF:** login doesn't check Content-Type, so a cross-site
+  `text/plain` form could log the victim into the demo account. With one shared
+  account, the effect is nil.
+  - **No login rate limiting:** a local demo with a documented password; not in
+  the plan.
+  - **Expired sessions are never purged:** one row per login, irrelevant at demo
+  scale.
+  - **No `ReadTimeout`/`IdleTimeout` on the server:** deliberately left out for
+  SSE in later tasks. A slow-body client is a local-only concern.
+  - **`channels` accepts `{sms,sms}`; `rules IS NULL` isn't tied to
+  `parent_campaign_id IS NULL` by a CHECK:** both are T5–T9 validation concerns.
+  It isn't yet clear whether a draft can exist without rules (an "unsupported"
+  brief), so I didn't propose a CHECK.
+  - **`math/rand/v2` output stability across Go versions:** the seed runs once
+  and its rows are stored, so this only matters for regenerating the same data
+  with a newer Go.
+  - **Process note, not code:** Milestone A's work sessions aren't exported to
+  `ai-sessions/` yet. Remind the user before the session ends.
+
+  I did not test concurrent migrate or seed runs live; those conclusions come
+  from reading the code. I did not review CASE.md line by line beyond the parts
+  T1–T3 touch.
+
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Agent "Review Milestone A branch" finished · 5m 1s
+
+⏺ The review of pull request #1 found no blocking issues: the reviewer says the
+  branch is ready to merge. It found four minor issues; I haven't changed
+  anything, and the PR is still open and unmerged.
+
+  The reviewer ran make test and go vet and both passed. It didn't change any
+  files.
+
+  What it confirmed
+  - Seed: it runs all at once or not at all. A second run does nothing, even if
+    two start at the same moment. No date is in the future or before the user
+    signed up.
+  - Login:
+    - The session token is random and only its hash is stored. The cookie flags
+      are right, and expired sessions are rejected.
+    - An unknown email and a wrong password get the same reply.
+    - Login requests are capped at 4 KB, and every /api/* path needs a session,
+      including ones added later.
+  - Secrets: .env is kept out of both git and the Docker build. The session
+    exports in ai-sessions/ contain no API keys, GitHub tokens or email
+    addresses; the only personal detail is the folder path /Users/esra.
+  - Compose and tests: docker compose up works without a .env. make test never
+    touches your app data. Tests fail rather than skip when there's no database.
+  - Schema: matches the plan's data model and the decisions on duplicate
+    messages, message states, skip reasons and resends.
+  - My choices along the way: all judged sound.
+
+  Minor findings (number them back to me to have them fixed)
+  1. Two migrate runs at the same moment: one fails. If you run docker compose 
+     run migrate while the first setup is still migrating, one run exits with an
+     "already exists" error. No data is harmed. The fix is one option in
+     internal/db/migrate.go so the second run waits for the first.
+  2. The first login with an unknown email is slower, once. The dummy hash used
+     for unknown emails is built on first use. That one request takes about
+     twice as long and so reveals that the email doesn't exist. The impact is
+     negligible with one demo account. The fix is to build the hash when the api
+     starts.
+  3. The plan still lists the session lifetime as open. Line 265 of the plan
+     says "Still open … session TTL 12h", but D10 now records it as approved.
+     The fix is to delete those words, so a later task doesn't ask you to
+     approve it again.
+  4. No lint step. CLAUDE.md asks for lint checks, but the Makefile never runs
+     go vet; I've been running it by hand. The fix is a make lint target, or
+     adding go vet to make test.
+
+  Things the reviewer chose not to rule on (no action proposed):
+  - Login doesn't check the request's content type. That lets another site log a
+    browser into the demo account, which changes nothing with one shared
+    account.
+  - There's no limit on login attempts.
+  - Expired sessions are never cleaned up.
+  - The server has no read timeouts, left out on purpose for the live-update
+    streams coming in later tasks.
+  - Two checks on campaign channels and rules belong to later campaign tasks.
+  - The seed's random sequence could change with a newer Go version; it only
+    matters if the data is regenerated.
+
+  My recommendation: fix 3 and 4 before merging. Both are small, and 3 is a gap
+  I left when recording your approval. 1 and 2 are also small; I'd include them
+  so the PR goes in clean, but it's fine to merge without them.
+
+  Should I fix some or all of them on the branch, push, and then ask you to
+  merge? T4 still waits for your approval, and this session still needs
+  exporting to ai-sessions/.
+
+✻ Sautéed for 6m 22s · done 2:35 PM
+
+❯ fix all four findings, push, then show me the PR                              
+
+⏺ I'll fix all four, using test-first for #1, the only one with logic you can
+  test. #2 is a one-line move, #3 a doc edit, #4 build config. First, the RED
+  test for #1: two Migrate calls at the same moment on a fresh database should
+  both succeed.
+
+⏺ Update(internal/db/seed_test.go)
+  ⎿  Added 14 lines
+      102    }
+      103  }
+      104  
+      105 +func TestMigrate_ConcurrentRunsBothSucceed(t *testing.T) {    
+      106 +  pool := dbtest.FreshDB(t)                                   
+      107 +                                                              
+      108 +  errs := make(chan error, 2)                                 
+      109 +  for range 2 {                                               
+      110 +    go func() { errs <- db.Migrate(context.Background(), pool)
+          + }()                                                          
+      111 +  }                                                           
+      112 +  for range 2 {                                               
+      113 +    if err := <-errs; err != nil {                            
+      114 +      t.Fatalf("concurrent migrate: %v", err)                 
+      115 +    }                                                         
+      116 +  }                                                           
+      117 +}                                                             
+      118 +                                                              
+      119  func TestSeed_Idempotent(t *testing.T) {
+      120    pool := seeded(t, refTime)
+      121    counts := func() [4]int {
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The test passes even with the bug in place, so it hasn't reproduced the race
+  yet. A test that never failed proves nothing, so I'll raise the pressure: more
+  runs at once, many repetitions.
+
+⏺ Bash(export PATH=$HOME/.docker/bin:$PATH; cd
+      /Users/esra/smart-campaign-composer && sed -i '' 's/errs := make(chan
+      error, 2)/errs := make(chan error, 4)/; s/       for ran…)
+  ⎿     1 ok         smart-campaign-composer/internal/db     33.321s
+  ⎿  Updated internal/db/seed_test.go (+3 -3)
+      105  func TestMigrate_ConcurrentRunsBothSucceed(t *testing.T) {
+      106          pool := dbtest.FreshDB(t)
+      107  
+      108 -        errs := make(chan error, 2)                           
+      109 -        for range 2 {                                         
+      108 +        errs := make(chan error, 4)                           
+      109 +        for range 4 {                                         
+      110                  go func() { errs <- db.Migrate(context.Backgro
+           und(), pool) }()
+      111          }
+      112 -        for range 2 {                                         
+      112 +        for range 4 {                                         
+      113                  if err := <-errs; err != nil {
+      114                          t.Fatalf("concurrent migrate: %v", err
+           )
+      115                  }
+  ⎿  (timeout 10m)
+
+⏺ 120 concurrent runs and not one failure, so the reviewer's scenario may not
+  happen at all. Before adding a locker for a bug I can't reproduce, I'll check
+  what goose actually does:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+⏺ I'll add Goose's Postgres session locker (advisory lock) as suggested to close
+  the remaining race window, and I'm checking its API now.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Applying the four fixes:
+
+⏺ Bash(python3 - <<'EOF'
+      import re…)
+  ⎿   Makefile                                     |  7 ++++++-
+      README.md                                    |  1 +
+      docs/plans/2026-10-21-implementation-plan.md |  2 +-
+     … +9 lines (ctrl+o to expand)
+  ⎿  Updated Makefile (+6 -1)
+      1 -.PHONY: test test-local                                         
+      1 +.PHONY: test test-local lint                                    
+      2  
+      3  # Runs all tests in Docker; only Docker and make are needed (D27
+         ).
+      4  # The test database is removed afterwards; the app's pgdata volu
+         me is never touched.
+     ...
+      10  # Development: needs Go and a Postgres reachable via DATABASE_U
+          RL.
+      11  test-local:
+      12          go test -count=1 ./...
+      13 +                                                               
+      14 +# Format and vet checks in Docker; fails if any file needs gofm
+         +t.                                                             
+      15 +lint:                                                          
+      16 +        docker compose --profile test run --rm --no-deps go-tes
+         +t \                                                            
+      17 +                sh -c 'files=$$(gofmt -l .); if [ -n "$$files" 
+         +]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi; go ve
+         +t ./...'                                                       
+  ⎿  Updated README.md (+1 -0)
+      53  ```sh
+      54  make test         # in Docker: throwaway Postgres + Go tests
+      55  make test-local   # needs local Go and DATABASE_URL pointing to
+           a Postgres
+      56 +make lint         # in Docker: gofmt check + go vet            
+      57  ```
+      58  
+      59  Integration tests fail, never skip, when no database is availab
+          le.
+  ⎿  Updated docs/plans/2026-10-21-implementation-plan.md (+1 -1)
+      262  
+      263  Git details (D35): branches named `milestone-a-foundation`, …;
+            commit prefixes `feat:`, `test:`, `docs:`; at the end of each
+            milestone I show the summary and diff before asking to merge.
+            No worktrees.
+      264  
+      265 -**Still open, confirm before T10/T12:** default values for moc
+          -k-provider failure rates (5% 5xx, 3% 429 with Retry-After 1s, 
+          -1% timeout, 20–200 ms delay), lease 30s, provider timeout 5s, 
+          -20 workers per channel, request text ≤ 1,000 chars, session TT
+          -L 12h.                                                        
+      265 +**Still open, confirm before T10/T12:** default values for moc
+          +k-provider failure rates (5% 5xx, 3% 429 with Retry-After 1s, 
+          +1% timeout, 20–200 ms delay), lease 30s, provider timeout 5s, 
+          +20 workers per channel, request text ≤ 1,000 chars. (Session T
+          +TL 12h approved 2026-10-22, D10.)                             
+      266  
+      267  ## Verification (end-to-end)
+      268  
+  ⎿  Updated internal/auth/auth.go (+3 -6)
+      10          "log/slog"
+      11          "net/http"
+      12          "strings"
+      13 -        "sync"                                                 
+      13          "time"
+      14  
+      15          "github.com/jackc/pgx/v5"
+     ...
+      88                          strings.TrimSpace(in.Email)).Scan(&m.ID
+          , &m.Email, &m.Name, &hash)
+      89                  if errors.Is(err, pgx.ErrNoRows) {
+      90                          // Compare anyway so an unknown email t
+          akes as long as a wrong password.
+      92 -                        bcrypt.CompareHashAndPassword(dummyHash
+         -(), []byte(in.Password))                                       
+      91 +                        bcrypt.CompareHashAndPassword(dummyHash
+         +, []byte(in.Password))                                         
+      92                          writeError(w, http.StatusUnauthorized, 
+          errInvalidLogin)
+      93                          return
+      94                  }
+     ...
+      167  }
+      168  
+      169  // dummyHash has the same cost as real password hashes (bcrypt
+           .DefaultCost).
+      171 -var dummyHash = sync.OnceValue(func() []byte {                
+      172 -        h, _ := bcrypt.GenerateFromPassword([]byte("no-such-us
+          -er"), bcrypt.DefaultCost)                                     
+      173 -        return h                                              
+      174 -})                                                            
+      170 +// Built at startup, so even the first unknown-email login tak
+          +es normal time.                                               
+      171 +var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("no-such
+          +-user"), bcrypt.DefaultCost)                                  
+      172  
+      173  func writeJSON(w http.ResponseWriter, status int, v any) {
+      174          w.Header().Set("Content-Type", "application/json")
+  ⎿  Updated internal/db/migrate.go (+7 -1)
+       9          "github.com/jackc/pgx/v5/pgxpool"
+      10          "github.com/jackc/pgx/v5/stdlib"
+      11          "github.com/pressly/goose/v3"
+      12 +        "github.com/pressly/goose/v3/lock"                     
+      13  )
+      14  
+      15  //go:embed migrations/*.sql
+     ...
+      24          if err != nil {
+      25                  return err
+      26          }
+      26 -        provider, err := goose.NewProvider(goose.DialectPostgre
+         -s, sqlDB, dir)                                                 
+      27 +        // An advisory lock makes concurrent migrate runs wait 
+         +for each other.                                                
+      28 +        locker, err := lock.NewPostgresSessionLocker()         
+      29 +        if err != nil {                                        
+      30 +                return err                                     
+      31 +        }                                                      
+      32 +        provider, err := goose.NewProvider(goose.DialectPostgre
+         +s, sqlDB, dir, goose.WithSessionLocker(locker))                
+      33          if err != nil {
+      34                  return err
+      35          }
+  ⎿  … 1 more file changed
+
+⏺ Now the checks. First I prove make lint actually fails: a temporary scratch Go
+  file with bad formatting. Then the real lint, the full suite, and repeated
+  concurrent-migrate runs with the locker:
+
+  Ran 1 shell command (ctrl+o to expand)
+⏺ Everything is green. One live check: does migrate still work in the real stack
+  with the lock, against the already-seeded volume?
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ The seeded data is unchanged: same reference time, 3,000 users. Committing
+  each fix separately, since they're unrelated, then pushing:
+
+  Pushed to milestone-a-foundation (ctrl+o to expand)
+
+⏺ Pushed. Here is the PR as it stands now:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ All four review findings are fixed, committed separately and pushed. Pull
+  request #1 is still open and not merged.
+
+  PR #1: Milestone A: foundation (skeleton, schema + seed, login)
+  https://github.com/esraahaytaa-eng/smart-campaign-composer/pull/1
+  - Merges milestone-a-foundation into main; the latest commit is 0091983.
+  - 12 commits, 28 files, +2,128 / −6 lines.
+  - GitHub shows "mergeable: unknown" because it's still recalculating after the
+    push; before the push it said mergeable. There are no automated checks on
+    the repo, since CI is an optional feature we haven't added.
+
+  The four fixes
+
+  #: 1
+  Finding: Two migrate runs at once: one could fail
+  Commit: 1df57b4
+  How I checked it: migrate now takes a database lock, so a second run waits for
+
+  the first. See the caveat below.
+  ────────────────────────────────────────
+  #: 2
+  Finding: First unknown-email login was slower
+  Commit: 335e23b
+  How I checked it: The dummy hash is now built when the api starts. No test,
+  since it's a timing change.
+  ────────────────────────────────────────
+  #: 3
+  Finding: Plan still listed session lifetime as open
+  Commit: 0091983
+  How I checked it: The plan line now says it was approved on 2026-10-22 (D10).
+  ────────────────────────────────────────
+  #: 4
+  Finding: No lint step
+  Commit: e3bb6fc
+  How I checked it: New make lint checks formatting and runs go vet in Docker.
+  It
+  failed on a deliberately badly formatted test file and passes on the real
+  code. The README lists it.
+
+  Caveat on #1: I couldn't reproduce the reviewer's failure. 120 simultaneous
+  migrate runs all succeeded even before the fix, because goose already retries
+  part of its setup. A narrower gap remains, where two runs both start applying
+  the first migration, so I still added the lock goose recommends. The new test
+  (TestMigrate_ConcurrentRunsBothSucceed) passes with or without the lock, so it
+  doesn't prove the fix. It only guards against the lock hanging, and a comment
+  in the code says so.
+
+  After the fixes
+  - make test: all 5 packages pass.
+  - make lint, go mod tidy and the build are clean.
+  - The simultaneous-migrate test passed 30 times in a row with the lock.
+  - In the running stack, migrate exits 0 and the seeded data is unchanged:
+    still 3,000 users, same seed time.
+
+  Next decisions for you: approve merging PR #1 into main, then start T4 when
+  you're ready; I won't do either without your go-ahead. This session also still
+  needs exporting to ai-sessions/.
+
+✻ Baked for 10m 40s · done 2:47 PM
+
+❯ i approve merging pr into main. merge it and verify the branch state. dont    
+  start T4 yet                                                                  
+
+⏺ Merging with a merge commit so each task's small commits stay in main's
+  history (D35). The branch won't be deleted, since you didn't ask for that.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ Merged. Next I update local main and check that local and GitHub agree:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+⏺ I merged PR #1 into main, and your local main and GitHub's main are now
+  identical.
+
+  - Merge: the PR is closed as merged, with merge commit b05fd56. I used a merge
+    commit rather than a squash, so all 12 task commits stay in main's history.
+  - main: local and GitHub are both at b05fd56, and you're now on main, in sync,
+    with no uncommitted changes.
+  - milestone-a-foundation: still exists locally and on GitHub at 0091983. Every
+    one of its commits is in main, and its files match main exactly, so the
+    tested code is exactly what was merged. I didn't re-run the tests on main
+    for that reason.
+  - Branch kept: you didn't ask me to delete it. It's now redundant; say if you
+    want it removed.
+
+  Milestone A (T1–T3) is finished. I haven't started T4; it waits for your
+  go-ahead, and per D35 it would go on a new branch, milestone-b-audience,
+  created from main.
+
+  Please export this session to ai-sessions/04-project-initialization.txt now.
+  Before committing it, search it for gho_ and sk-ant, since the masked GitHub
+  token from gh auth status appears earlier in this session.
+
+✻ Worked for 26s · done 2:51 PM

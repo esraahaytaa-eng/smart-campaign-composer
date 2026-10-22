@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -13,6 +14,7 @@ type Config struct {
 	LLMMode         string // "mock" or "real" (D24)
 	AnthropicAPIKey string
 	AnthropicModel  string
+	LLMTimeout      time.Duration // per AI call (D15)
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
 }
@@ -38,6 +40,11 @@ func Load(process string) (Config, error) {
 	if process != "api" {
 		return cfg, nil
 	}
+	timeout, err := time.ParseDuration(getenv("LLM_TIMEOUT", "60s"))
+	if err != nil || timeout <= 0 {
+		return Config{}, fmt.Errorf("LLM_TIMEOUT must be a positive duration such as 60s, got %q", os.Getenv("LLM_TIMEOUT"))
+	}
+	cfg.LLMTimeout = timeout
 	switch cfg.LLMMode {
 	case "mock":
 	case "real":
