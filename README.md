@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9). Not yet built: worker, mock providers, frontend.
+> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9), mock SMS/email provider (T10). Not yet built: the sending worker, worker, mock providers, frontend.
 
 ## Requirements
 
@@ -84,6 +84,12 @@ A brief may end with a tone sentence ("Keep the message short and friendly." / "
 
 The real AI (`LLM_MODE=real`) follows the same rule: if part of an audience cannot be expressed with the rule catalog, it answers "unsupported" instead of guessing.
 
+## Mock provider
+
+The `mock-provider` service plays the SMS and email provider; nothing is really sent. `POST /sms/send` `{"to", "body"}` and `POST /email/send` `{"to", "subject", "body"}` require an `Idempotency-Key` header (the message ID). Per channel it adds a delay and fails a share of requests, with the defaults from D20: 20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% requests that hang past the worker's 5 s timeout and are then accepted (a lost response). Change them with the `SMS_*` / `EMAIL_*` settings in `.env.example`; `PROVIDER_SEED` makes runs repeatable.
+
+The key is stored before anything is simulated. A repeated key gets the stored result for a finished request, or a retryable 503 with `Retry-After` while it is still in progress; a 5xx or 429 releases the key so a retry is processed. Keys live in the `provider` schema, which the provider reaches through its own database role (`scc_provider`, password `PROVIDER_DB_PASSWORD`) that cannot read the app's tables (D6).
+
 ## Seed data
 
 The `migrate` service applies the schema and, on the first run, creates 3,000 fictional users with order and cart histories, generated from a fixed random seed. Every date is relative to that first run. Later runs do nothing, so restarting never creates duplicates or changes data.
@@ -108,4 +114,4 @@ The first run compiles all dependencies and takes a few minutes; compiled packag
 
 ## Architecture (current)
 
-One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
+One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
