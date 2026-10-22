@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"smart-campaign-composer/internal/auth"
 	"smart-campaign-composer/internal/config"
 	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/obs"
@@ -76,6 +77,7 @@ func migrate(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
+	auth.Routes(mux, pool, cfg.LLMMode)
 	// No WriteTimeout: SSE responses (T8, T14) stay open.
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
