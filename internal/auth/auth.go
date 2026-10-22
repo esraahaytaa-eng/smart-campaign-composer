@@ -20,7 +20,7 @@ import (
 
 const (
 	CookieName = "scc_session"
-	// Proposed default (DECISIONS.md Open Questions), not yet confirmed.
+	// Fixed lifetime from login, no sliding renewal (D10).
 	sessionTTL   = 12 * time.Hour
 	maxLoginBody = 4 << 10
 )

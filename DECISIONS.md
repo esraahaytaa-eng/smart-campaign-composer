@@ -76,11 +76,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D10 — Multiple marketers with a single role
 - **Status:** Accepted · 2026-10-21
-- **Decision:** Seeded demo marketer accounts, all with the same role. Every marketer can create, edit, approve, send and cancel campaigns, and sees all campaigns. `created_by` and `approved_by` are recorded with timestamps. Passwords are hashed, and the demo login details are for local use only. Approval checks the campaign's version, so a campaign changed since it was last viewed cannot be approved. Health and metrics endpoints are open. No RBAC, registration or user-management UI.
+- **Decision:** Seeded demo marketer accounts, all with the same role. Every marketer can create, edit, approve, send and cancel campaigns, and sees all campaigns. `created_by` and `approved_by` are recorded with timestamps. Passwords are hashed, and the demo login details are for local use only. Approval checks the campaign's version, so a campaign changed since it was last viewed cannot be approved. Sessions expire 12 hours after login, with no sliding renewal. Health and metrics endpoints are open. No RBAC, registration or user-management UI.
 - **Why:** Prevents unauthenticated sends and wasted API credits, and records who approved what, at minimal cost.
 - **Rejected:** *No authentication:* anyone could trigger sends. *Roles such as editor and approver:* beyond the case.
 - **Trade-offs:** No four-eyes approval. The demo login details are not suitable for production.
-- **History:** 2026-10-22. The seed creates a single demo login, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWORD`, default documented in the README), at the engineer's request. The schema still supports several marketers.
+- **History:** 2026-10-22. The seed creates a single demo login, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWORD`, default documented in the README), at the engineer's request. The schema still supports several marketers. 2026-10-22: session lifetime of 12 hours approved (was an open question): covers a working day without frequent logins, and a stolen cookie stays useful for at most half a day.
 
 ### D11 — Campaign lifecycle with cancel only
 - **Status:** Accepted · 2026-10-21
@@ -279,7 +279,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ## Open Questions
 
-- **Operational defaults (confirm before T10/T12):** mock-provider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 workers per channel, request text ≤ 1,000 characters, session TTL 12 h. All proposed, not yet approved.
+- **Operational defaults (confirm before T10/T12):** mock-provider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 workers per channel, request text ≤ 1,000 characters. All proposed, not yet approved.
 
 ## Deferred
 
