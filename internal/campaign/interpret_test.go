@@ -21,6 +21,7 @@ var (
 type scripted struct {
 	outputs []string
 	err     error
+	errs    []error // per call, when set
 	block   bool // wait for the context to end (simulates a hung API)
 	calls   []llm.InterpretInput
 }
@@ -33,6 +34,9 @@ func (s *scripted) InterpretRequest(ctx context.Context, in llm.InterpretInput) 
 	}
 	if s.err != nil {
 		return nil, s.err
+	}
+	if i := len(s.calls) - 1; i < len(s.errs) && s.errs[i] != nil {
+		return nil, s.errs[i]
 	}
 	return json.RawMessage(s.outputs[len(s.calls)-1]), nil
 }
@@ -216,5 +220,18 @@ func TestInterpret_InvalidTimeZone_NoAICall(t *testing.T) {
 
 	if err == nil || errors.Is(err, ErrAIInvalid) || len(s.calls) != 0 {
 		t.Fatalf("want a time zone error without calling the AI, got %v after %d calls", err, len(s.calls))
+	}
+}
+
+// A cut-off answer is an invalid answer (D15): retried once, not "unavailable".
+func TestInterpret_TruncatedAnswerIsRetried(t *testing.T) {
+	s := &scripted{errs: []error{llm.ErrTruncated}, outputs: []string{"", output(goodRules, "null", "null")}}
+	if got, err := interpret(t, s, "brief"); err != nil || len(s.calls) != 2 || len(got.Rules) != 2 {
+		t.Fatalf("truncated then valid: want success after 2 calls, got %v after %d", err, len(s.calls))
+	}
+
+	s = &scripted{errs: []error{llm.ErrTruncated, llm.ErrTruncated}, outputs: []string{"", ""}}
+	if _, err := interpret(t, s, "brief"); !errors.Is(err, ErrAIInvalid) || len(s.calls) != 2 {
+		t.Fatalf("truncated twice: want ErrAIInvalid after 2 calls, got %v after %d", err, len(s.calls))
 	}
 }

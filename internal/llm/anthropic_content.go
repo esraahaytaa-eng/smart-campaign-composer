@@ -51,7 +51,7 @@ func (a *Anthropic) StreamContent(ctx context.Context, in ContentInput, onText f
 	case anthropic.StopReasonRefusal:
 		return nil, ErrRefused
 	case anthropic.StopReasonMaxTokens:
-		return nil, errors.New("claude: answer exceeded the token limit")
+		return nil, ErrTruncated
 	}
 	return json.RawMessage(text.String()), nil
 }

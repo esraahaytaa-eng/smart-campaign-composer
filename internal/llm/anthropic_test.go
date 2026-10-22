@@ -136,8 +136,8 @@ func TestAnthropic_RefusalBecomesUnsupported(t *testing.T) {
 
 func TestAnthropic_TruncatedOrFailedCallsError(t *testing.T) {
 	_, url := fakeAPI(t, http.StatusOK, "max_tokens", `{"unsupported":`)
-	if _, err := interpretVia(t, url, "claude-opus-5-5", testInput()); err == nil {
-		t.Error("max_tokens: want error")
+	if _, err := interpretVia(t, url, "claude-opus-5-5", testInput()); !errors.Is(err, ErrTruncated) {
+		t.Errorf("max_tokens: want ErrTruncated, got %v", err)
 	}
 
 	_, url = fakeAPI(t, http.StatusBadRequest, "", "")
@@ -261,8 +261,8 @@ func TestAnthropicContent_RefusalAndTruncationAreErrors(t *testing.T) {
 		t.Errorf("refusal: want ErrRefused, got %v", err)
 	}
 	_, url = fakeStream(t, []string{`{"sms":{"body":"cut`}, "max_tokens")
-	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); err == nil {
-		t.Error("max_tokens: want error")
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); !errors.Is(err, ErrTruncated) {
+		t.Errorf("max_tokens: want ErrTruncated, got %v", err)
 	}
 	got, url := fakeAPI(t, http.StatusInternalServerError, "", "")
 	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); err == nil || got.calls != 1 {

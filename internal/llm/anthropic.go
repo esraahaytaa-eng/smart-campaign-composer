@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -47,7 +46,7 @@ func (a *Anthropic) InterpretRequest(ctx context.Context, in InterpretInput) (js
 	case anthropic.StopReasonRefusal: // no fallback model (D15): the marketer sees "unsupported"
 		return unsupported(refusalReason), nil
 	case anthropic.StopReasonMaxTokens:
-		return nil, errors.New("claude: answer exceeded the token limit")
+		return nil, ErrTruncated
 	}
 	var text strings.Builder
 	for _, block := range msg.Content {

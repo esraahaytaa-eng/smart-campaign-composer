@@ -19,6 +19,7 @@ type contentLLM struct {
 	*llm.Mock
 	outputs []string
 	err     error
+	errs    []error // per call, when set
 	between func()
 	calls   []llm.ContentInput
 }
@@ -27,6 +28,9 @@ func (c *contentLLM) StreamContent(ctx context.Context, in llm.ContentInput, onT
 	c.calls = append(c.calls, in)
 	if c.err != nil {
 		return nil, c.err
+	}
+	if i := len(c.calls) - 1; i < len(c.errs) && c.errs[i] != nil {
+		return nil, c.errs[i]
 	}
 	out := c.outputs[len(c.calls)-1]
 	onText(out[:len(out)/2])
@@ -240,5 +244,17 @@ func TestUpdateContent(t *testing.T) {
 	json.Unmarshal([]byte(validContent), &c)
 	if body := a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1 AND body = $2`, d.ID, c.SMS.Body); body != 1 {
 		t.Fatal("content not stored as sent")
+	}
+}
+
+func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
+	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", validContent}}
+	a := newApp(t, model)
+	d := a.newDraft()
+
+	evs := a.generate(d.ID, 1)
+
+	if got := names(evs); got != "retry,delta,done" || len(model.calls) != 2 {
+		t.Fatalf("want retry,delta,done after 2 calls, got %s after %d", got, len(model.calls))
 	}
 }

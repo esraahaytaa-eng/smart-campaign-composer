@@ -68,11 +68,17 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return // the client left: nothing is saved
 		}
-		if err != nil {
+		var c content.Content
+		var problems []string
+		switch {
+		case errors.Is(err, llm.ErrTruncated):
+			problems = []string{"the answer was cut off; keep the messages short"}
+		case err != nil:
 			send("error", map[string]string{"message": aiErrorMessage(err)})
 			return
+		default:
+			c, problems = parseContent(raw, channels)
 		}
-		c, problems := parseContent(raw, channels)
 		if len(problems) > 0 {
 			if attempt == 0 {
 				send("retry", map[string]any{"errors": problems})

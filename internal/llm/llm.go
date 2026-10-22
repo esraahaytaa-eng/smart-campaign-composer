@@ -7,6 +7,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"smart-campaign-composer/internal/audience"
@@ -47,6 +48,10 @@ type interpretOutput struct {
 	SuggestedSendAt *string         `json:"suggested_send_at"`
 	ScheduleNote    *string         `json:"schedule_note"`
 }
+
+// ErrTruncated means the answer hit the token limit and was cut off; callers
+// treat it like an invalid answer (one retry, D15), not as an outage.
+var ErrTruncated = errors.New("the AI answer was cut off at the token limit")
 
 func unsupported(reason string) json.RawMessage {
 	b, _ := json.Marshal(interpretOutput{Unsupported: true, Reason: reason, Rules: []audience.Rule{}})
