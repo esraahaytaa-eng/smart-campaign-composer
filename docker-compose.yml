@@ -1,0 +1,79 @@
+x-db-url: &db-url postgres://scc:${POSTGRES_PASSWORD:-scc}@postgres:5432/scc?sslmode=disable
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scc}
+      POSTGRES_DB: scc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scc -d scc"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build: .
+    command: ["migrate"]
+    environment:
+      DATABASE_URL: *db-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: ["api"]
+    environment:
+      DATABASE_URL: *db-url
+      LLM_MODE: ${LLM_MODE:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Test profile (make test): throwaway database on tmpfs + Go tests on the mounted source.
+  test-db:
+    profiles: ["test"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scc
+      POSTGRES_PASSWORD: scc
+      POSTGRES_DB: scc_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scc -d scc_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  go-test:
+    profiles: ["test"]
+    image: golang:1.26-alpine
+    working_dir: /src
+    command: ["go", "test", "-count=1", "./..."]
+    environment:
+      CGO_ENABLED: "0"
+      DATABASE_URL: postgres://scc:scc@test-db:5432/scc_test?sslmode=disable
+    volumes:
+      - .:/src
+      - gomodcache:/go/pkg/mod
+    depends_on:
+      test-db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  gomodcache:
