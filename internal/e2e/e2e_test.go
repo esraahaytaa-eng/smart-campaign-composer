@@ -35,13 +35,15 @@ type providerLog struct {
 func (l *providerLog) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, at := r.Header.Get("Idempotency-Key"), time.Now()
-		rec := httptest.NewRecorder()
-		next.ServeHTTP(rec, r)
-		l.mu.Lock()
+		l.mu.Lock() // count the request on arrival: a hung one is still a request
 		l.requests[key]++
 		if _, ok := l.first[key]; !ok {
 			l.first[key] = at
 		}
+		l.mu.Unlock()
+		rec := httptest.NewRecorder()
+		next.ServeHTTP(rec, r)
+		l.mu.Lock()
 		if rec.Code == 200 && rec.Header().Get("Idempotent-Replayed") == "" {
 			l.processed[key]++
 		}
@@ -62,8 +64,8 @@ type stack struct {
 	log    *providerLog
 }
 
-// Approval sees a clock 59 s behind the real one, so a send 2 real seconds
-// ahead (61 s on the API's clock, minus the request's own time) passes the
+// Approval sees a clock 59 s behind the real one, so a send 3 real seconds
+// ahead (62 s on the API's clock: 2 s of margin for a slow machine) passes the
 // 1-minute minimum (D29), while the worker uses real time.
 const apiClockLag = 59 * time.Second
 
@@ -190,8 +192,10 @@ func (s *stack) messageKeys(campaignID int64) []string {
 	return s.ids(`SELECT id FROM messages WHERE campaign_id = $1`, campaignID)
 }
 
-// checkDelivery: every message is final, no key was really sent twice, and
-// every message marked sent was accepted by the provider.
+// checkDelivery: every message is final, no key was really sent twice, every
+// message marked sent was really sent, and every message the provider really
+// sent is recorded as sent, unless its delivery is honestly marked uncertain
+// (e.g. the last attempt timed out although the provider accepted later).
 func (s *stack) checkDelivery(campaignID int64) {
 	s.t.Helper()
 	if open := s.count(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status IN ('pending','sending','retry_scheduled')`, campaignID); open != 0 {
@@ -207,6 +211,11 @@ func (s *stack) checkDelivery(campaignID int64) {
 	for _, key := range s.ids(`SELECT id FROM messages WHERE campaign_id = $1 AND status = 'sent'`, campaignID) {
 		if s.log.processed[key] != 1 {
 			s.t.Fatalf("message %s is sent but the provider never accepted it", key)
+		}
+	}
+	for _, key := range s.ids(`SELECT id FROM messages WHERE campaign_id = $1 AND status <> 'sent' AND NOT delivery_uncertain`, campaignID) {
+		if s.log.processed[key] != 0 {
+			s.t.Fatalf("message %s was really sent but is recorded as not sent, without being marked uncertain", key)
 		}
 	}
 }
@@ -252,10 +261,10 @@ func TestEndToEnd(t *testing.T) {
 		cid := id(c)
 		path := "/api/campaigns/" + strconv.FormatInt(cid, 10)
 		s.json(http.MethodPut, path+"/content", `{"version":1,"content":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}`, 200)
-		sendAt := time.Now().Add(2 * time.Second)
+		sendAt := time.Now().Add(3 * time.Second)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":{"at":"`+sendAt.Format(time.RFC3339Nano)+`"}}`, 200)
 
-		time.Sleep(time.Until(sendAt.Add(-500 * time.Millisecond)))
+		time.Sleep(time.Until(sendAt.Add(-time.Second)))
 		if n := s.count(`SELECT count(*) FROM messages WHERE campaign_id = $1`, cid); n != 0 ||
 			s.count(`SELECT count(*) FROM campaigns WHERE id = $1 AND status = 'approved'`, cid) != 1 {
 			t.Fatalf("before send_at: want approved and no messages, got %d messages", n)
