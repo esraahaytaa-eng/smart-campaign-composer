@@ -1,0 +1,5 @@
+.env
+.superpowers/
+.claude/settings.local.json
+/bin/
+cookies.txt

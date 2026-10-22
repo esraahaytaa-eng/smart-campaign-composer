@@ -1,0 +1,8 @@
+# Keep secrets and non-build files out of the image build context.
+.env
+.git
+.claude
+.superpowers
+ai-sessions
+docs
+*.md

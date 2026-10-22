@@ -12,8 +12,10 @@ Be proactive. Identify unclear requirements, edge cases, technical risks, and po
 - Break large tasks into small, testable steps with clear acceptance criteria.
 - Present an implementation plan and wait for approval before starting major work.
 - After approval, implement, test, review, and report the results.
+- Handle routine implementation, refactoring, debugging, and testing autonomously within the approved task.
+- Ask for approval only when significant decisions are needed, unexpected issues arise that require changing the approach, or the approved plan must change.
+- Briefly explain the issue, recommended solution, and trade-offs when approval is needed.
 - Do not move to the next major task without approval.
-- Routine changes within an approved task do not require separate approval.
 
 ## Development Skills
 
@@ -42,10 +44,11 @@ Do not run unrelated skills or claim a skill was used unless it was actually use
 - Validate all external inputs and AI-generated output, including schema validation, content limits, and safe error handling.
 - Do not remove required security, correctness, or reliability controls to reduce complexity.
 - Write automated tests for important business logic, edge cases, and failure scenarios.
-- Run relevant tests, builds, and lint checks before marking a task complete.
 - Never report tests as passed unless they were actually executed successfully.
 - Report failed or skipped checks and remaining risks.
 - Keep code, comments, commit messages, and technical documentation in English.
+- Follow the approved implementation plan and use TDD (Red → Green → Refactor) for implementation tasks.
+- Run focused tests during development and the full test suite, build, and lint checks before completing each task.
 
 ## Git Workflow
 
