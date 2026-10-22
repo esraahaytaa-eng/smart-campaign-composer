@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9), mock SMS/email provider (T10), sending queue (T11), sending worker with retries and the 100/s limit (T12), end-to-end send tests (T13). Not yet built: worker, mock providers, frontend.
+> **Status: work in progress.** Done: backend T1–T14 (login, audience rules, AI interpretation and content with a mock and Claude, drafts, approval, cancel and resend, mock providers, sending worker, metrics and the live status stream) plus the draft endpoints the frontend needs (D37–D40), and the frontend app shell with sign-in (T15). Not yet built: the composer, content and review screens, and the dashboard (T16–T18).
 
 ## Requirements
 
@@ -16,6 +16,7 @@ docker compose up
 
 No `.env` is needed. To change settings, `cp .env.example .env` and edit it.
 
+- `http://localhost:8080`: the app (sign in with the demo login below)
 - `http://localhost:8080/healthz`: liveness
 - `http://localhost:8080/readyz`: database reachable (503 otherwise)
 - `http://localhost:8080/metrics`: Prometheus metrics
@@ -28,7 +29,7 @@ No `.env` is needed. To change settings, `cp .env.example .env` and edit it.
 |---|---|
 | `marketer@marketer.com` | `Demo1234!` |
 
-For local use only. The password can be changed with `DEMO_MARKETER_PASSWORD` in `.env`, but only before the first `docker compose up`: the seed runs once and never changes existing rows. The login page arrives with the frontend (T15); until then, use the API:
+For local use only. The password can be changed with `DEMO_MARKETER_PASSWORD` in `.env`, but only before the first `docker compose up`: the seed runs once and never changes existing rows. Sign in on the app's login page, or use the API directly:
 
 ```sh
 curl -c cookies.txt -X POST localhost:8080/api/login \
@@ -127,11 +128,55 @@ Relative audiences such as "carted in the last 30 days" shrink as real time pass
 docker compose down -v && docker compose up
 ```
 
+## Frontend
+
+Vue 3, Vite, TypeScript and vue-router (D25), with Reka UI for accessible dialogs and menus and our own CSS (D41), in `web/`. The api serves the built app from `WEB_DIR` (`/srv/web` in the image): page URLs get `index.html` so the router can handle them, hashed assets are cached for good, and a missing asset is a 404. `/api/` routes are unaffected.
+
+So far (T15): sign-in with field validation and a show/hide password toggle; every other page requires a session, and a page opened while signed out returns there after sign-in (only paths on this site are accepted as the return address). An API call that finds the session expired sends the marketer to sign in again. The sidebar shows the AI mode from `GET /api/me` and has a user menu with log out. Dashboard and Campaigns are placeholders until T16–T18.
+
+Development with hot reload, against the api from `docker compose up`, without a local Node:
+
+```sh
+docker run --rm -it -p 5173:5173 -v "$PWD/web":/web -v scc-web-node-modules:/web/node_modules -w /web \
+  -e API_URL=http://host.docker.internal:8080 node:22-alpine sh -c "npm ci && npx vite --host 0.0.0.0"
+```
+
+Then open `http://localhost:5173`. The Vite server proxies `/api` to the api, so the session cookie stays same-origin.
+
+## UI/UX design
+
+The reference design is `design/smart-campaign-composer-reference.html`, a Claude Artifact (a self-contained HTML page; open it in a browser). It has ten boards: the journey overview with the status vocabulary, sign in, dashboard, campaigns, the composer's audience, content and review steps, live delivery, recipient details, and resend.
+
+How it was made and is used:
+
+1. **From requirements to a journey.** The flow follows `CASE.md` and the decisions: brief → editable audience rules → streamed content → explicit approval → monitoring. Numbers before sending starts are labelled estimates; numbers after it are actual message outcomes (D30).
+2. **Prototype.** The screens were prototyped as an artifact with mock data. Actions the API might not support were marked "CONFIRM API".
+3. **Review against the backend** (22 Oct 2026). Every screen was checked against the API. The gaps led to draft deletion, channel changes, the rule catalog and brief re-interpretation (D37–D40), and to the changes listed below.
+4. **Implementation.** The colours, spacing, radii and type scale are the CSS tokens in `web/src/styles.css`. Each plan task builds its screens from the matching boards (T15 sign-in and shell; T16 audience; T17 content and review; T18 dashboard, live delivery and resend).
+
+Kept throughout: estimate vs actual always labelled; nothing sends without an explicit choice of *Send now* or *Schedule* and a second confirmation; one status vocabulary; mock mode always visible; labelled fields with errors next to them, visible focus and keyboard-usable menus.
+
+Changes from the design so far:
+
+- **Sign in:** no demo email and password on the page and no "fill" button. The design's own notes say not to hard-code them, and the backend never exposes a password; the page points to this README instead. The badge mentions only the mock providers, because the AI mode is known only after sign-in.
+- **User menu:** the email under the name instead of a role, since all marketers share one role (D10).
+- **"+ New campaign"** in the sidebar arrives with the composer (T16), so it never leads to an empty page.
+
+Differences to settle when the later screens are built (not decided yet):
+
+- **Saving drafts:** every edit is saved through the API with its version, so a "Saved" indicator may replace the design's *Save draft* button and unsaved-changes dialog (T16).
+- **Campaign names:** the design names campaigns, but the backend has no name field, only the brief (T16).
+- **"Uncertain":** in the backend it is a flag on a message (D5), not a status; a message ends as sent, failed, skipped or cancelled, so the dashboard shows uncertain deliveries as a separate count (T18).
+- **Recipient details:** no API lists recipients or their attempt history yet (T18).
+- **429 counts:** the status stream has totals per channel, not "in the last 5 minutes" (T18).
+- **Resend:** the design approves a shorter SMS in one dialog; in the backend a resend is a draft that goes through content and approval (D31), so it can reuse the T17 screens (T18).
+- **Archive:** not built (deferred; see Future improvements).
+
 ## Test
 
 ```sh
-make test         # in Docker: throwaway Postgres + Go tests
-make test-local   # needs local Go and DATABASE_URL pointing to a Postgres
+make test         # in Docker: throwaway Postgres + Go tests, then Vitest and the frontend type check
+make test-local   # needs local Go and DATABASE_URL pointing to a Postgres (Go tests only)
 make lint         # in Docker: gofmt check + go vet
 ```
 
@@ -141,7 +186,7 @@ The first run compiles all dependencies and takes a few minutes; compiled packag
 
 ## Architecture (current)
 
-One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `worker`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics and counts HTTP requests, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue (the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease, D5, D18) and the dispatcher. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
+One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `worker`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics and counts HTTP requests, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue (the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease, D5, D18) and the dispatcher. `internal/spa` serves the built frontend. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
 
 ## Future improvements
 
@@ -152,4 +197,5 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 - Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
+- The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.
 - AI calls are not rate-limited. Every create or brief edit can cost up to two AI calls (one retry), parallel edits of the same draft each make their own call before the version check at save rejects all but one, and an unsupported answer can be asked again at once. Mock mode costs nothing; in real mode every call uses API credits.
