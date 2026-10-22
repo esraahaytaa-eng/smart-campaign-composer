@@ -122,17 +122,29 @@ func TestSend_KeyIsInsertedBeforeSimulating(t *testing.T) {
 // D6: two requests with the same key never both send.
 func TestSend_ConcurrentSameKey(t *testing.T) {
 	_, prov := providerDB(t)
-	slow := config.ProviderChannel{DelayMin: 300 * time.Millisecond, DelayMax: 300 * time.Millisecond}
+	const delay = 2 * time.Second // how long the first request stays in progress
+	slow := config.ProviderChannel{DelayMin: delay, DelayMax: delay}
 	url := start(t, prov, slow, nil)
 
 	replies := make([]reply, 2)
 	var wg sync.WaitGroup
-	for i := range replies {
-		wg.Add(1)
-		go func() { defer wg.Done(); replies[i] = send(t, url, "sms", "msg-1", smsBody, nil) }()
-		time.Sleep(50 * time.Millisecond) // the second arrives while the first is in progress
+	wg.Add(2)
+	go func() { defer wg.Done(); replies[0] = send(t, url, "sms", "msg-1", smsBody, nil) }()
+	// The second is sent once the first has stored its key, not after a guessed delay.
+	var stored time.Time
+	for give := time.Now().Add(10 * time.Second); stored.IsZero(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(give) {
+			t.Fatal("the first request never stored its key")
+		}
+		prov.QueryRow(context.Background(), `SELECT created_at FROM provider.idempotency_keys
+			WHERE key = 'msg-1' AND state = 'in_progress'`).Scan(&stored)
 	}
+	second := time.Now()
+	go func() { defer wg.Done(); replies[1] = send(t, url, "sms", "msg-1", smsBody, nil) }()
 	wg.Wait()
+	if second.Sub(stored) >= delay {
+		t.Fatal("the second request was sent after the first could finish; the machine is too slow for this test")
+	}
 
 	ok, busy := replies[0], replies[1]
 	if ok.status != 200 || busy.status != http.StatusServiceUnavailable || busy.header.Get("Retry-After") == "" {
