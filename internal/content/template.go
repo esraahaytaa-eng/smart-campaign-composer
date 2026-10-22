@@ -140,6 +140,9 @@ func checkTemplate(tpl string, limit int) error {
 	if strings.TrimSpace(tpl) == "" {
 		return errors.New("must not be empty")
 	}
+	if strings.ContainsFunc(tpl, isControl) {
+		return errors.New("contains a control character; only line breaks and tabs are allowed")
+	}
 	// Variables make text longer when rendered, never this much: the cap only
 	// bounds untrusted input.
 	if utf8.RuneCountInString(tpl) > 2*limit {
@@ -157,6 +160,12 @@ func checkTemplate(tpl string, limit int) error {
 		return fmt.Errorf("the fixed text alone is %d characters; the limit is %d, so no recipient could receive it", n, limit)
 	}
 	return nil
+}
+
+// isControl reports characters a message must not contain: NUL (which
+// Postgres rejects) and other control codes, except tab and line breaks.
+func isControl(r rune) bool {
+	return (r < 0x20 && r != '\t' && r != '\n' && r != '\r') || r == 0x7f
 }
 
 func appendIf(errs []FieldError, field string, err error) []FieldError {

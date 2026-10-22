@@ -156,3 +156,16 @@ func TestValidateDraft_RequiresFixedText(t *testing.T) {
 		t.Errorf("one character of fixed text is enough: got %s", fieldErrs(errs))
 	}
 }
+
+// Postgres rejects NUL, and control characters have no place in a message.
+func TestValidateDraft_RejectsControlCharacters(t *testing.T) {
+	for _, body := range []string{"Hi\x00 there", "Hi\x07 there", "Hi\x1b[31m there", "Hi\x7f"} {
+		if errs := ValidateDraft(sms(body), []string{"sms"}); len(errs) != 1 || errs[0].Field != "sms.body" {
+			t.Errorf("%q: want one sms.body error, got %s", body, fieldErrs(errs))
+		}
+	}
+	ok := Content{Email: &Message{Subject: "Hi\tthere", Body: "Line 1\r\nLine 2\n\tIndented"}}
+	if errs := ValidateDraft(ok, []string{"email"}); len(errs) != 0 {
+		t.Errorf("tabs and line breaks are allowed: got %s", fieldErrs(errs))
+	}
+}

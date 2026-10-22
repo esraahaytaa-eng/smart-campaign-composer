@@ -229,6 +229,10 @@ func TestUpdateContent(t *testing.T) {
 	if rec := a.do(http.MethodPut, path, `{"version":2,"content":{"sms":{"body":"Hi"}}}`); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("missing email content: want 422, got %d", rec.Code)
 	}
+	// A NUL byte must be a validation error, not a database failure (500).
+	if rec := a.do(http.MethodPut, path, `{"version":2,"content":{"sms":{"body":"Hi\u0000"},"email":{"subject":"S","body":"B"}}}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("NUL in content: want 422, got %d %s", rec.Code, rec.Body)
+	}
 	if rec := a.do(http.MethodPut, path, `{"version":1,"content":`+validContent+`}`); rec.Code != http.StatusConflict {
 		t.Fatalf("stale version: want 409, got %d", rec.Code)
 	}
