@@ -106,11 +106,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D14 — Audience rule language: flat AND over a fixed catalog
 - **Status:** Accepted · 2026-10-21
-- **Decision:** A flat list of conditions that must all match. Catalog: city IN [...], cart item added within N days, no order within N days, order count (>=, <=), total spend (>=, <=), last order before or after N days, category ordered or carted within N days, cart value (>=), signed up within N days, and language (reserved for later). Time conditions use either the last N days, counted when sending starts (D30), or fixed dates. Consent is applied automatically from the chosen channels. No OR or nesting. Validated rules become parameterized queries, and SQL produced by AI is never run. The seed data covers every catalog field.
+- **Decision:** A flat list of conditions that must all match. Catalog: city IN [...], cart item added within N days, no order within N days, order count (>=, <=), total spend (>=, <=), last order before or after N days, category ordered or carted within N days, cart value (>=), signed up within N days, and language (reserved for later). Time conditions use either the last N days, counted when sending starts (D30), or fixed dates. Consent is applied automatically from the chosen channels. At least one rule is required: an empty list is a validation error, never "everyone". No OR or nesting. Validated rules become parameterized queries, and SQL produced by AI is never run. The seed data covers every catalog field.
 - **Why:** Covers the case example and typical campaigns, and is easy to validate, display, test and keep safe.
 - **Rejected:** *Nested AND/OR groups:* harder UI and validation, and harder for marketers to read. *Only the fields in the case example:* too narrow for the variety of campaigns the case asks for.
 - **Trade-offs:** Some audiences, such as "(A and B) or C", cannot be expressed.
-- **History:** 2026-10-21 (planning). Category, cart value and signup conditions added with the event tables (D33). Fixed dates added so a cutoff named in a brief does not drift when sending starts later (D30).
+- **History:** 2026-10-21 (planning). Category, cart value and signup conditions added with the event tables (D33). Fixed dates added so a cutoff named in a brief does not drift when sending starts later (D30). 2026-10-22: empty rule lists rejected, so a missing AI result or deleted chips cannot target the whole user base (D15).
 
 ### D15 — Handling invalid or failed AI output
 - **Status:** Accepted · 2026-10-21
