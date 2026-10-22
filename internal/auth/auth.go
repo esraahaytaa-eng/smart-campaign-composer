@@ -66,7 +66,9 @@ func Require(pool *pgxpool.Pool, next http.Handler) http.Handler {
 			serverError(w, "session lookup", err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
+		inner := r.WithContext(context.WithValue(r.Context(), ctxKey{}, id))
+		next.ServeHTTP(w, inner)
+		r.Pattern = inner.Pattern // the guarded route, for the metrics middleware outside (obs.Instrument)
 	})
 }
 

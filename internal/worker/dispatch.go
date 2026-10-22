@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"golang.org/x/time/rate"
 
 	"smart-campaign-composer/internal/content"
@@ -32,6 +34,19 @@ const (
 	capWindow        = time.Second + 50*time.Millisecond
 	maxBackoff       = 30 * time.Second
 	maxProviderReply = 64 << 10
+)
+
+// Provider metrics (D26). HTTP 429s are the outcome="rate_limited" series.
+var (
+	sendAttempts = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "scc_send_attempts_total", Help: "Provider attempts by channel and outcome.",
+	}, []string{"channel", "outcome"})
+	sendRetries = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "scc_send_retries_total", Help: "Messages scheduled for another attempt after a failed one.",
+	}, []string{"channel"})
+	providerLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "scc_provider_request_duration_seconds", Help: "Provider request duration by channel.",
+	}, []string{"channel"})
 )
 
 // NewLimiters gives each channel 100 requests per second with a burst of 1,
@@ -250,7 +265,10 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 		result.NextAttemptAt = w.Now().Add(Backoff(counted, attempt.retryAfter, w.Rand))
 		w.mu.Unlock()
 		result.Status = "retry_scheduled"
+		sendRetries.WithLabelValues(j.Channel).Inc()
 	}
+	sendAttempts.WithLabelValues(j.Channel, attempt.Outcome).Inc()
+	providerLatency.WithLabelValues(j.Channel).Observe(attempt.FinishedAt.Sub(attempt.StartedAt).Seconds())
 	return done(result)
 }
 

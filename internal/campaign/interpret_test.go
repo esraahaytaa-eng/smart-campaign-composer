@@ -10,6 +10,7 @@ import (
 
 	"smart-campaign-composer/internal/audience"
 	"smart-campaign-composer/internal/llm"
+	"smart-campaign-composer/internal/obstest"
 )
 
 var (
@@ -233,5 +234,27 @@ func TestInterpret_TruncatedAnswerIsRetried(t *testing.T) {
 	s = &scripted{errs: []error{llm.ErrTruncated, llm.ErrTruncated}, outputs: []string{"", ""}}
 	if _, err := interpret(t, s, "brief"); !errors.Is(err, ErrAIInvalid) || len(s.calls) != 2 {
 		t.Fatalf("truncated twice: want ErrAIInvalid after 2 calls, got %v after %d", err, len(s.calls))
+	}
+}
+
+func TestInterpret_RecordsCallMetrics(t *testing.T) {
+	value := func(result string) float64 {
+		return obstest.Value(t, "scc_llm_calls_total", "operation", "interpret", "result", result)
+	}
+	ok, invalid, failed := value("ok"), value("invalid"), value("error")
+
+	interpret(t, &scripted{outputs: []string{output(badRules, "null", "null"), output(goodRules, "null", "null")}}, "brief")
+	interpret(t, &scripted{err: errors.New("503 overloaded")}, "brief")
+
+	if value("ok")-ok != 1 || value("invalid")-invalid != 1 || value("error")-failed != 1 {
+		t.Fatalf("want +1 ok, +1 invalid, +1 error; got +%v, +%v, +%v", value("ok")-ok, value("invalid")-invalid, value("error")-failed)
+	}
+
+	cancelled := value("cancelled")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the client left
+	Interpret(ctx, &scripted{block: true}, llm.InterpretInput{Text: "brief", Now: now, TimeZone: "Europe/Istanbul", Catalog: catalog}, time.Second)
+	if value("cancelled")-cancelled != 1 || value("error")-failed != 1 {
+		t.Fatalf("want a client that left counted as cancelled, not error")
 	}
 }

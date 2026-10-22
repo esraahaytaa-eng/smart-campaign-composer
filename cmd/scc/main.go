@@ -96,7 +96,7 @@ func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error 
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
 	api := auth.Routes(mux, pool, cfg.LLMMode)
-	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now}).Routes(api)
+	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}).Routes(api)
 	slog.Info("api starting", "addr", cfg.HTTPAddr, "llm_mode", cfg.LLMMode)
 	return serve(ctx, cfg.HTTPAddr, mux)
 }
@@ -136,7 +136,7 @@ func runWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error
 // serve runs an HTTP server until ctx ends, then shuts it down gracefully.
 func serve(ctx context.Context, addr string, handler http.Handler) error {
 	// No WriteTimeout: SSE responses (T8, T14) and slow provider replies stay open.
-	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: addr, Handler: obs.Instrument(handler), ReadHeaderTimeout: 10 * time.Second}
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()

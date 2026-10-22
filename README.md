@@ -53,6 +53,7 @@ All endpoints need a login session (see above).
 | `GET /api/campaigns/{id}/estimate` | Current audience and over-limit counts per channel, labelled as estimates (draft or approved). |
 | `POST /api/campaigns/{id}/approve` `{"version", "send"}` | `send` is required: `"now"` or `{"at": "<RFC 3339>"}` (1 minute to 30 days ahead); a proposed time is never used implicitly. Checks content and a non-empty audience, freezes rules and content, and stores the current counts as `approval_estimate`. No messages are created yet: the audience is evaluated again when sending starts (D30). |
 | `POST /api/campaigns/{id}/cancel` | Stops an approved or sending campaign; messages still waiting are cancelled. |
+| `GET /api/campaigns/{id}/events` | Live status as a `text/event-stream` (D16, D36): a `status` snapshot at once and then whenever it changes (checked every second), with the campaign's status and times, `approval_estimate`, and per channel the actual audience, counts by message status, retries, 429s, skip reasons, the 10 most frequent failure reasons, uncertain deliveries, how many a resend would reach now and any active resend. `retries` counts attempts after a message's first. Once the campaign is completed or cancelled and no message is in flight, the final snapshot is followed by `end` and the stream closes; close the `EventSource` then, or the browser reconnects. On a server shutdown or a database error the stream closes without an event, and the browser's reconnect picks it up again. A resend created after `end` is not streamed; fetch the campaign again. |
 | `POST /api/campaigns/{id}/resend` `{"channel"}` | After a campaign completes or is cancelled: a draft follow-up for the recipients skipped for the character limit on that channel, minus anyone who may already have it (sent, still sending, or with an uncertain delivery). One active resend per campaign and channel. |
 
 Messages may use only `{{first_name}}`, `{{last_name}}` and `{{city}}` and need some fixed text; text that is over the limit even with every variable empty, and control characters other than tabs and line breaks, are rejected. Values are inserted as they are stored: a value that itself contains a variable token (e.g. a name saved as `{{city}}`) is expanded too, in the same way when sending and in the over-limit estimate. `channels` is `["sms"]`, `["email"]` or both; `time_zone` is the browser's IANA zone (e.g. `Europe/Istanbul`). Edits send the `version` they were based on; a stale version or a non-draft campaign returns 409. Invalid input returns 422 (with `field_errors` for rules); an "unsupported" brief returns 422 with `"unsupported": true` and the AI's reason, and nothing is saved. For `POST /api/campaigns`, if the AI answers invalidly twice, times out or is unavailable, the API returns 502/504 and nothing is saved; content generation reports the same failures as an `error` event in its stream.
@@ -98,6 +99,20 @@ A request without a clear answer (a timeout or a network error) may still have b
 
 Per channel at most 100 provider requests leave in any second, retries included: a rate limiter spaces them 10 ms apart and a hard cap counts actual departures (D19). The cap is exact on the worker's side; at the provider, a request delayed by more than 50 ms between leaving the queue and arriving could in theory still bunch with later ones.
 
+## Metrics
+
+Every process serves Prometheus metrics at `/metrics` (D26), alongside the standard Go and process metrics:
+
+| Metric | Process | Labels |
+|---|---|---|
+| `scc_http_requests_total`, `scc_http_request_duration_seconds` | all | `route` (the matched pattern, e.g. `GET /api/campaigns/{id}`, or `unmatched`), `code` |
+| `scc_send_attempts_total` | worker | `channel`, `outcome` (`accepted`, `rate_limited` = HTTP 429, `server_error`, `timeout`, `network_error`, `rejected`, `interrupted`) |
+| `scc_send_retries_total` | worker | `channel`: messages scheduled for another attempt after a failed one (an interrupted attempt is not counted, unlike the stream's `retries`) |
+| `scc_provider_request_duration_seconds` | worker | `channel` |
+| `scc_llm_calls_total` | api | `operation` (`interpret`, `content`), `result` (`ok`, `invalid` = failed validation and retried once, `error`, `cancelled` = the client left) |
+
+Only the api's port is published. The worker and mock provider serve the same endpoints on port 8080 inside their containers, e.g. `docker compose exec worker wget -qO- localhost:8080/metrics`. Counts are per process since it started; the dashboard's numbers come from the database instead.
+
 ## Seed data
 
 The `migrate` service applies the schema and, on the first run, creates 3,000 fictional users with order and cart histories, generated from a fixed random seed. Every date is relative to that first run. Later runs do nothing, so restarting never creates duplicates or changes data.
@@ -122,4 +137,10 @@ The first run compiles all dependencies and takes a few minutes; compiled packag
 
 ## Architecture (current)
 
-One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `worker`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue (the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease, D5, D18) and the dispatcher. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
+One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `worker`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics and counts HTTP requests, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue (the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease, D5, D18) and the dispatcher. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
+
+## Known limitations
+
+- Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
+- If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
+- Metrics count per process since it started.
