@@ -43,6 +43,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** A crash or timeout after the provider has accepted a message is unavoidable, and exactly-once delivery to an external system is not achievable.
 - **Rejected:** *At-most-once:* messages would be lost. *Claiming exactly-once:* inaccurate.
 - **Trade-offs:** Leases must be implemented and expired ones recovered. Depends on the provider's idempotency (D6).
+- **History:** 2026-10-22 (Milestone D review). Each message records when its delivery is uncertain (an attempt without a clear answer, or a worker that died mid-attempt). An attempt interrupted by a worker shutdown is recorded as `interrupted`, does not count toward the attempt limit, and the message is retried at once with the same key.
 
 ### D6 — Mock provider stores idempotency records in the existing database
 - **Status:** Accepted · 2026-10-21
@@ -154,6 +155,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Recovers missed recipients without ever resending to anyone else.
 - **Rejected:** *An alternative template at approval:* more content to write and review up front. *Reusing the original messages:* approved content would change (D11).
 - **Trade-offs:** Skipped recipients get their message later.
+- **History:** 2026-10-22 (Milestone D review). A resend also excludes anyone whose delivery on that channel is uncertain (a message still sending, or an attempt that timed out, failed on the network or was interrupted), so a cancelled resend followed by a new one never sends twice. Cost: a recipient whose message really was lost is not resent. Engineer's choice (option A).
 
 ### D32 — AI replies in the request's language
 - **Status:** Accepted · 2026-10-21
@@ -180,10 +182,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D19 — One worker with an in-process rate limiter per channel
 - **Status:** Accepted · 2026-10-21
-- **Decision:** Exactly one worker replica. Each channel has a `golang.org/x/time/rate` limiter with a limit of 100/s and a burst of 1, so attempts start at least 10 ms apart and no 1-second window holds more than 100 provider requests, bursts included. Every attempt takes a token right before the HTTP call: first sends, retries (D7) and resends after an expired lease (D5). A bounded goroutine pool per channel handles provider delays; the limiter, not the pool, sets the rate. A test checks that no 1-second window of recorded attempt times exceeds 100. The API runs as a separate process (D20) and can scale on its own.
+- **Decision:** Exactly one worker replica. Each channel has a `golang.org/x/time/rate` limiter with a limit of 100/s and a burst of 1, so attempts start at least 10 ms apart and no 1-second window holds more than 100 provider requests, bursts included. Every attempt takes a token right before the HTTP call: first sends, retries (D7) and resends after an expired lease (D5). A bounded pool of 20 concurrent requests per channel handles provider delays; the limiter, not the pool, sets the rate. A claimed message is leased for 30 s and each provider request times out after 5 s. A test checks that no 1-second window of recorded attempt times exceeds 100. The API runs as a separate process (D20) and can scale on its own.
 - **Why:** The simplest way to enforce the limit exactly and test it.
 - **Rejected:** *Shared token bucket in Postgres:* a database round-trip per message and more code. *Static split (100/N per replica):* the config must match the replica count, and capacity is wasted when a replica is idle.
 - **Trade-offs:** The worker cannot scale out without a shared limiter.
+- **History:** 2026-10-22. Pool size (20 per channel), lease (30 s) and provider timeout (5 s) approved; they were open questions. 2026-10-22 (T12): the limiter alone allowed up to 110 requests in some 1 s windows, because goroutines woke late after their reservation; a hard cap now allows at most 100 departures in any window of just over 1 s, counted when each request leaves, and the provider client reuses connections. Approved by the engineer.
 
 ### D20 — Component boundaries
 - **Status:** Accepted · 2026-10-21
@@ -192,11 +195,12 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - `migrate`: one-shot migrations and the deterministic, idempotent seed. The other services wait for it to finish successfully.
   - `api`: campaigns, approval, Claude calls, SSE, auth. It also serves the built Vue app, so the frontend and API share an origin.
   - `worker`: sending only (D18, D19).
-  - `mock-provider`: one service with `/sms/send` and `/email/send`. Delays, 5xx, 429 with `Retry-After` and timeouts are configured per channel through environment variables. Its idempotency table lives in a `provider` schema with its own database role (D6).
+  - `mock-provider`: one service with `/sms/send` and `/email/send`. Delays, 5xx, 429 with `Retry-After` and timeouts are configured per channel through environment variables; defaults: 20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% requests that hang past the client timeout. Its idempotency table lives in a `provider` schema with its own database role (D6).
   - The API and the worker communicate only through the database.
 - **Why:** AI generation and campaign management stay independent of sending, a worker crash does not affect the UI, and the setup has the fewest services. Same origin means no CORS.
 - **Rejected:** *Frontend in an nginx container:* one more service, plus proxy settings so SSE isn't buffered. *Separate SMS and email provider services:* two services that do the same thing. *API and worker in one process:* sending would share failures with the UI and AI calls.
 - **Trade-offs:** Multi-stage Docker build (Node, then Go). During development, the Vite dev server proxies to the API.
+- **History:** 2026-10-22. Mock provider default behaviour approved (was an open question).
 
 ### D21 — Live updates with SSE
 - **Status:** Accepted · 2026-10-21
@@ -279,7 +283,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ## Open Questions
 
-- **Operational defaults (confirm before T10/T12):** mock-provider behaviour (20–200 ms delay, 5% 5xx, 3% 429 with `Retry-After: 1`, 1% timeout), lease 30 s, provider timeout 5 s, 20 workers per channel. All proposed, not yet approved.
+None currently.
 
 ## Deferred
 

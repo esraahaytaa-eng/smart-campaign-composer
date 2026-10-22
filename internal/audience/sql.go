@@ -230,12 +230,21 @@ func FixedWindowStarts(rules []Rule, loc *time.Location) ([]time.Time, error) {
 	return starts, nil
 }
 
-// ConsentColumn is the channel's opt-in column on users "u", for callers that
-// select recipients without rules (a resend's fixed list).
-func ConsentColumn(channel string) (string, error) {
+// BuildResend selects a resend's recipients on its channel (D31): users the
+// parent campaign skipped for the character limit, minus anyone who may
+// already have it on that channel from the parent or any earlier resend:
+// sent, still sending, or with an uncertain delivery (D31 history, option A).
+// Consent applies.
+func BuildResend(parentID int64, channel string) (string, []any, error) {
 	col, ok := consent[channel]
 	if !ok {
-		return "", fmt.Errorf("unknown channel %q", channel)
+		return "", nil, fmt.Errorf("unknown channel %q", channel)
 	}
-	return col, nil
+	where := `u.id IN (SELECT m.user_id FROM messages m WHERE m.campaign_id = $1 AND m.channel = $2
+			AND m.skip_reason = 'character_limit_exceeded')
+		AND NOT EXISTS (SELECT 1 FROM messages s JOIN campaigns c ON c.id = s.campaign_id
+			WHERE (c.id = $1 OR c.parent_campaign_id = $1) AND s.channel = $2 AND s.user_id = u.id
+				AND (s.status IN ('sent', 'sending') OR s.delivery_uncertain))
+		AND ` + col
+	return where, []any{parentID, channel}, nil
 }

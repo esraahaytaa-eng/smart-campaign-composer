@@ -22,6 +22,7 @@ services:
       DATABASE_URL: *db-url
       # Demo login marketer@marketer.com, local use only (D10); override in .env.
       DEMO_MARKETER_PASSWORD: "${DEMO_MARKETER_PASSWORD:-Demo1234!}"
+      PROVIDER_DB_PASSWORD: ${PROVIDER_DB_PASSWORD:-provider-demo}
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,6 +38,53 @@ services:
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60s}
     ports:
       - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Sends approved campaigns through the provider (D18, D19). Exactly one
+  # replica: the 100/s per-channel limit lives in this process.
+  worker:
+    build: .
+    command: ["worker"]
+    environment:
+      DATABASE_URL: *db-url
+      PROVIDER_URL: http://mock-provider:8080
+      MAX_ATTEMPTS: ${MAX_ATTEMPTS:-5}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mock-provider:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Mock SMS and email provider (D20). Logs in as its own role, which can only
+  # use the provider schema (D6). Behaviour per channel: SMS_* / EMAIL_* in .env.example.
+  mock-provider:
+    build: .
+    command: ["mock-provider"]
+    environment:
+      DATABASE_URL: postgres://scc_provider:${PROVIDER_DB_PASSWORD:-provider-demo}@postgres:5432/scc?sslmode=disable
+      PROVIDER_SEED: ${PROVIDER_SEED:-1}
+      SMS_DELAY_MS_MIN: ${SMS_DELAY_MS_MIN:-20}
+      SMS_DELAY_MS_MAX: ${SMS_DELAY_MS_MAX:-200}
+      SMS_ERROR_RATE: ${SMS_ERROR_RATE:-0.05}
+      SMS_RATE_LIMIT_RATE: ${SMS_RATE_LIMIT_RATE:-0.03}
+      SMS_TIMEOUT_RATE: ${SMS_TIMEOUT_RATE:-0.01}
+      EMAIL_DELAY_MS_MIN: ${EMAIL_DELAY_MS_MIN:-20}
+      EMAIL_DELAY_MS_MAX: ${EMAIL_DELAY_MS_MAX:-200}
+      EMAIL_ERROR_RATE: ${EMAIL_ERROR_RATE:-0.05}
+      EMAIL_RATE_LIMIT_RATE: ${EMAIL_RATE_LIMIT_RATE:-0.03}
+      EMAIL_TIMEOUT_RATE: ${EMAIL_TIMEOUT_RATE:-0.01}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -36,3 +36,18 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	_, err = provider.Up(ctx)
 	return err
 }
+
+// ProviderRole is the mock provider's database login (D6, D20).
+const ProviderRole = "scc_provider"
+
+// SetProviderPassword sets the provider role's password; migrate runs it on
+// every start, so changing PROVIDER_DB_PASSWORD takes effect.
+func SetProviderPassword(ctx context.Context, pool *pgxpool.Pool, password string) error {
+	var stmt string // ALTER ROLE takes no parameters, so quote the values with format()
+	if err := pool.QueryRow(ctx, `SELECT format('ALTER ROLE %I PASSWORD %L', $1::text, $2::text)`,
+		ProviderRole, password).Scan(&stmt); err != nil {
+		return err
+	}
+	_, err := pool.Exec(ctx, stmt)
+	return err
+}
