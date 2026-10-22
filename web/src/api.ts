@@ -34,8 +34,14 @@ export async function api<T = unknown>(path: string, { method = 'GET', body }: O
     throw new ApiError("Can't reach the server. Check that it is running.", 0) // i18n-ignore: the UI shows errorText()
   }
   if (res.status === 204) return undefined as T
+  if (!res.ok) throw await responseError(res, path)
+  return (await res.json().catch(() => undefined)) as T
+}
+
+// responseError reads a failed response's {"error"} body into an ApiError,
+// and reports an expired session (also used by the content stream).
+export async function responseError(res: Response, path: string): Promise<ApiError> {
   const data: unknown = await res.json().catch(() => undefined)
-  if (res.ok) return data as T
   // A 401 from login is a wrong password, from /api/me "signed out" (the login
   // guard handles it), and from logout harmless; elsewhere the session expired.
   if (res.status === 401 && !sessionPaths.includes(path)) onUnauthorized()
@@ -43,5 +49,5 @@ export async function api<T = unknown>(path: string, { method = 'GET', body }: O
     typeof data === 'object' && data !== null && typeof (data as { error?: unknown }).error === 'string'
       ? (data as { error: string }).error
       : `The server answered with an error (${res.status}).` // i18n-ignore: the UI shows errorText()
-  throw new ApiError(message, res.status, data)
+  return new ApiError(message, res.status, data)
 }

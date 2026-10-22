@@ -1,5 +1,8 @@
-import { api } from '../api'
-import type { Campaign, Catalog, Channel, Rule } from './types'
+import { api, ApiError, responseError } from '../api'
+import { createSSEParser, type SSEEvent } from '../content/sse'
+import type { Campaign, Catalog, Channel, Content, Rule } from './types'
+
+export type Estimate = { audience: { total: number; sms: number; email: number }; over_limit: { sms: number; email: number } | null; calculated_at: string }
 
 const path = (id: number, rest = '') => `/api/campaigns/${id}${rest}`
 
@@ -13,6 +16,12 @@ export const campaigns = {
   setRequest: (id: number, version: number, request: string) =>
     api<Campaign>(path(id, '/request'), { method: 'PUT', body: { version, request } }),
   remove: (id: number, version: number) => api<void>(path(id), { method: 'DELETE', body: { version } }),
+  setContent: (id: number, version: number, content: Content) =>
+    api<Campaign>(path(id, '/content'), { method: 'PUT', body: { version, content } }),
+  estimate: (id: number) => api<Estimate>(path(id, '/estimate')),
+  // send is required: "now" or { at } (D29). Nothing is sent without it.
+  approve: (id: number, version: number, send: 'now' | { at: string }) =>
+    api<Campaign>(path(id, '/approve'), { method: 'POST', body: { version, send } }),
 }
 
 let catalog: Promise<Catalog> | undefined
@@ -29,4 +38,35 @@ export function loadCatalog(): Promise<Catalog> {
 // The browser's IANA zone, which the backend needs for dates in briefs and rules.
 export function browserTimeZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+// streamContent asks the AI for the messages and delivers the stream's events
+// (delta, retry, done, error) as they arrive (D34). It is a POST, so it uses
+// fetch, not EventSource; abort the signal to stop (nothing is saved then).
+export async function streamContent(id: number, version: number, onEvent: (e: SSEEvent) => void, signal: AbortSignal): Promise<void> {
+  const url = path(id, '/content')
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify({ version }),
+      credentials: 'same-origin',
+      signal,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    throw new ApiError("Can't reach the server.", 0) // i18n-ignore: the UI shows errorText()
+  }
+  if (!res.ok || !res.body) throw await responseError(res, url)
+  const parser = createSSEParser(onEvent)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder() // stream: true keeps characters split across chunks
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    parser.push(decoder.decode(value, { stream: true }))
+  }
+  parser.push(decoder.decode())
+  parser.end()
 }
