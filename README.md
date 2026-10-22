@@ -44,6 +44,7 @@ All endpoints need a login session (see above).
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /api/catalog` | The rule language for building rules by hand (D39): every field with its operators and value type (`cities`, `window` = `{"last_days"}` or `{"from", "to"?}`, `categories_window`, `count`, `amount`), the current cities and categories, and the rule limits. |
 | `POST /api/campaigns` `{"request", "channels", "time_zone"}` | The AI reads the brief and a **draft** is saved with its audience rules, current per-channel counts, and a proposed send time if the brief named one (only a proposal; nothing is scheduled). Add `"rules": [...]` to build the audience by hand without the AI. |
 | `DELETE /api/campaigns/{id}` `{"version"}` | Delete a draft and its content for good (204). Deleting an abandoned resend draft lets that channel be resent again. Approved, sending, completed and cancelled campaigns are never deleted (409); stop a send with cancel (D37). |
 | `PUT /api/campaigns/{id}/rules` `{"rules", "version"}` | Replace the draft's rules; they are validated and recounted. |

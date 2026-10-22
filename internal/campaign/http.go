@@ -38,6 +38,7 @@ type Handler struct {
 }
 
 func (h *Handler) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/catalog", h.catalog)
 	mux.HandleFunc("GET /api/campaigns", h.list)
 	mux.HandleFunc("POST /api/campaigns", h.create)
 	mux.HandleFunc("GET /api/campaigns/{id}", h.get)
@@ -158,6 +159,19 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.respond(w, r.Context(), http.StatusCreated, id)
+}
+
+// catalog serves the rule language for the chip editor (D39): fields with
+// operators and value types, and the cities and categories rules may name.
+func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
+	cat, err := audience.LoadCatalog(r.Context(), h.Pool)
+	if err != nil {
+		serverError(w, "load catalog", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits,
+	})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,8 @@ package campaign_test
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 	"testing"
 
 	"smart-campaign-composer/internal/llm"
@@ -89,5 +91,39 @@ func TestChannels_Rejects(t *testing.T) {
 	}
 	if a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1`, approved.ID) != 2 {
 		t.Fatal("the approved campaign's content changed")
+	}
+}
+
+func TestCatalog(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+
+	rec := a.do(http.MethodGet, "/api/catalog", "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d %s", rec.Code, rec.Body)
+	}
+	got := decode[struct {
+		Fields []struct {
+			Field string   `json:"field"`
+			Ops   []string `json:"ops"`
+			Value string   `json:"value"`
+		} `json:"fields"`
+		Cities     []string       `json:"cities"`
+		Categories []string       `json:"categories"`
+		Limits     map[string]any `json:"limits"`
+	}](t, rec)
+	if len(got.Fields) != 10 || got.Fields[0].Field != "cart_added" || got.Fields[0].Value != "window" {
+		t.Fatalf("want the 10 fields sorted by name, got %+v", got.Fields)
+	}
+	if strings.Join(got.Cities, ",") != "Ankara,İstanbul" || !slices.Contains(got.Categories, "books") {
+		t.Fatalf("want cities and categories from the database, got %v %v", got.Cities, got.Categories)
+	}
+	if got.Limits["max_rules"] != float64(20) || got.Limits["max_days"] != float64(365) || got.Limits["min_date"] != "2000-01-01" {
+		t.Fatalf("limits: %v", got.Limits)
+	}
+
+	a.cookie = nil
+	if rec := a.do(http.MethodGet, "/api/catalog", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("without login: want 401, got %d", rec.Code)
 	}
 }
