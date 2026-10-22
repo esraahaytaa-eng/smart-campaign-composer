@@ -327,3 +327,110 @@ func waitForLockWait(t *testing.T, a *app) {
 		}
 	}
 }
+
+func (a *app) putName(id int64, body string) (int, map[string]any) {
+	a.t.Helper()
+	rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(id)+"/name", body)
+	return rec.Code, decode[map[string]any](a.t, rec)
+}
+
+func TestName_DefaultsFromTheBrief(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	rec, d := a.create(map[string]any{"request": ankaraBrief, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	got := decode[map[string]any](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	if got["name"] != "Send a weekend sale announcement to all users in Ankara." {
+		t.Fatalf("want the first sentence as the name, got %v", got["name"])
+	}
+	list := decode[[]map[string]any](t, a.do(http.MethodGet, "/api/campaigns", ""))
+	if len(list) != 1 || list[0]["name"] != got["name"] {
+		t.Fatalf("the list must carry the name, got %v", list)
+	}
+}
+
+// Rows stored without a name (before names existed) show the default.
+func TestName_EmptyStoredNameShowsTheDefault(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	d := a.newDraft()
+	a.exec(`UPDATE campaigns SET name = '' WHERE id = $1`, d.ID)
+
+	got := decode[map[string]any](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	if got["name"] != "Send a 30% discount reminder to users in Istanbul who added…" {
+		t.Fatalf("got %v", got["name"])
+	}
+}
+
+func TestName_Rename(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	d := a.newDraft()
+
+	code, got := a.putName(d.ID, `{"version":1,"name":"  İstanbul cart recovery  "}`)
+
+	if code != http.StatusOK || got["name"] != "İstanbul cart recovery" || got["version"] != float64(2) || got["counts"] == nil {
+		t.Fatalf("want the trimmed name at version 2 with counts, got %d %v", code, got)
+	}
+}
+
+func TestName_Rejects(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	d := a.newDraft()
+	approved := a.readyDraft()
+	a.approve(approved.ID, `{"version":2,"send":"now"}`)
+
+	for _, tc := range []struct {
+		name string
+		id   int64
+		body string
+		want int
+	}{
+		{"empty", d.ID, `{"version":1,"name":"   "}`, http.StatusUnprocessableEntity},
+		{"too long", d.ID, `{"version":1,"name":"` + strings.Repeat("ş", 101) + `"}`, http.StatusUnprocessableEntity},
+		{"control character", d.ID, `{"version":1,"name":"a\u0007b"}`, http.StatusUnprocessableEntity},
+		{"line break", d.ID, `{"version":1,"name":"a\nb"}`, http.StatusUnprocessableEntity},
+		{"no version", d.ID, `{"name":"x"}`, http.StatusUnprocessableEntity},
+		{"stale version", d.ID, `{"version":7,"name":"x"}`, http.StatusConflict},
+		{"approved", approved.ID, `{"version":3,"name":"x"}`, http.StatusConflict},
+		{"unknown", 999, `{"version":1,"name":"x"}`, http.StatusNotFound},
+	} {
+		if code, _ := a.putName(tc.id, tc.body); code != tc.want {
+			t.Errorf("%s: want %d, got %d", tc.name, tc.want, code)
+		}
+	}
+	if a.count(`SELECT count(*) FROM campaigns WHERE id = $1 AND version = 1`, d.ID) != 1 {
+		t.Fatal("a rejected rename changed the draft")
+	}
+	if rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(d.ID)+"/name", `{"version":1,"name":"`+strings.Repeat("ş", 100)+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("100 characters must be accepted, got %d", rec.Code)
+	}
+}
+
+func TestName_ResendDefaultsFromItsParent(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	parent := a.parentWithSkips()
+	a.exec(`UPDATE campaigns SET name = 'Ankara launch' WHERE id = $1`, parent)
+
+	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(parent)+"/resend", `{"channel":"sms"}`)
+
+	if got := decode[map[string]any](t, rec); rec.Code != http.StatusCreated || got["name"] != "Ankara launch · resend (SMS)" {
+		t.Fatalf("got %d %v", rec.Code, got["name"])
+	}
+}
+
+// Re-interpreting keeps a name the marketer chose and refreshes a default one.
+func TestName_FollowsTheBriefUntilRenamed(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	d := a.newDraft()
+
+	_, got := a.putRequest(d.ID, requestBody(ankaraBrief, 1))
+	if got["name"] != "Send a weekend sale announcement to all users in Ankara." {
+		t.Fatalf("a default name must follow the new brief, got %v", got["name"])
+	}
+
+	a.putName(d.ID, `{"version":2,"name":"My campaign"}`)
+	_, got = a.putRequest(d.ID, requestBody(caseExample, 3))
+	if got["name"] != "My campaign" {
+		t.Fatalf("a chosen name must be kept, got %v", got["name"])
+	}
+}

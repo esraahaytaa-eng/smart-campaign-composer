@@ -359,8 +359,9 @@ func (h *Handler) resend(w http.ResponseWriter, r *http.Request) {
 	}
 	marketer, _ := auth.MarketerID(ctx)
 	var newID int64
-	err = h.Pool.QueryRow(ctx, `INSERT INTO campaigns (request_text, channels, time_zone, created_by, parent_campaign_id)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`, parent.RequestText, []string{in.Channel}, parent.TimeZone, marketer, id).Scan(&newID)
+	err = h.Pool.QueryRow(ctx, `INSERT INTO campaigns (request_text, channels, time_zone, created_by, parent_campaign_id, name)
+		VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`, parent.RequestText, []string{in.Channel}, parent.TimeZone, marketer, id,
+		resendName(parent.Name, in.Channel)).Scan(&newID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // campaigns_one_active_resend_idx
 		writeError(w, http.StatusConflict, "this campaign already has an active resend on this channel")
