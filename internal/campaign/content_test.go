@@ -11,6 +11,7 @@ import (
 
 	"smart-campaign-composer/internal/content"
 	"smart-campaign-composer/internal/llm"
+	"smart-campaign-composer/internal/obstest"
 )
 
 // contentLLM interprets briefs with the mock but answers content requests
@@ -256,5 +257,21 @@ func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
 
 	if got := names(evs); got != "retry,delta,done" || len(model.calls) != 2 {
 		t.Fatalf("want retry,delta,done after 2 calls, got %s after %d", got, len(model.calls))
+	}
+}
+
+func TestGenerate_RecordsCallMetrics(t *testing.T) {
+	value := func(result string) float64 {
+		return obstest.Value(t, "scc_llm_calls_total", "operation", "content", "result", result)
+	}
+	ok, invalid, failed := value("ok"), value("invalid"), value("error")
+
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}})
+	a.generate(a.newDraft().ID, 1)
+	b := newApp(t, &contentLLM{Mock: llm.NewMock(), err: errors.New("503 overloaded")})
+	b.generate(b.newDraft().ID, 1)
+
+	if value("ok")-ok != 1 || value("invalid")-invalid != 1 || value("error")-failed != 1 {
+		t.Fatalf("want +1 ok, +1 invalid, +1 error; got +%v, +%v, +%v", value("ok")-ok, value("invalid")-invalid, value("error")-failed)
 	}
 }

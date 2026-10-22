@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"smart-campaign-composer/internal/obstest"
 	"smart-campaign-composer/internal/worker"
 )
 
@@ -182,6 +183,9 @@ func TestProcess_Classification(t *testing.T) {
 			w := f.newWorker(url)
 			f.sendingWithContent("Merhaba {{first_name}}!")
 			job := f.claimOne("sms", 1)
+			attempts := obstest.Value(t, "scc_send_attempts_total", "channel", "sms", "outcome", tc.outcome)
+			retries := obstest.Value(t, "scc_send_retries_total", "channel", "sms")
+			latency := obstest.Value(t, "scc_provider_request_duration_seconds", "channel", "sms")
 
 			if err := w.Process(context.Background(), job); err != nil {
 				t.Fatal(err)
@@ -190,6 +194,15 @@ func TestProcess_Classification(t *testing.T) {
 			m := f.message(job.MessageID)
 			if m.Status != tc.status || m.Outcome != tc.outcome || m.HTTPStatus != tc.httpStatus || m.Attempts != 1 {
 				t.Fatalf("got %+v", m)
+			}
+			wantRetries := 0.0
+			if tc.status == "retry_scheduled" {
+				wantRetries = 1
+			}
+			if a, r, l := obstest.Value(t, "scc_send_attempts_total", "channel", "sms", "outcome", tc.outcome)-attempts,
+				obstest.Value(t, "scc_send_retries_total", "channel", "sms")-retries,
+				obstest.Value(t, "scc_provider_request_duration_seconds", "channel", "sms")-latency; a != 1 || r != wantRetries || l != 1 {
+				t.Fatalf("metrics: attempts +%v, retries +%v (want +%v), latency samples +%v", a, r, wantRetries, l)
 			}
 			if tc.status == "retry_scheduled" {
 				if d := m.NextAttemptAt.Sub(now); d < tc.minNext || d > tc.maxNext {

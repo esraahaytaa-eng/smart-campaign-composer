@@ -67,6 +67,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		raw, err := h.LLM.StreamContent(ctx, input, streamer.Write)
 		cancel()
 		if r.Context().Err() != nil {
+			llmCalls.WithLabelValues("content", "cancelled").Inc()
 			return // the client left: nothing is saved
 		}
 		var c content.Content
@@ -75,12 +76,14 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, llm.ErrTruncated):
 			problems = []string{"the answer was cut off; keep the messages short"}
 		case err != nil:
+			llmCalls.WithLabelValues("content", "error").Inc()
 			send("error", map[string]string{"message": aiErrorMessage(err)})
 			return
 		default:
 			c, problems = parseContent(raw, channels)
 		}
 		if len(problems) > 0 {
+			llmCalls.WithLabelValues("content", "invalid").Inc()
 			if attempt == 0 {
 				send("retry", map[string]any{"errors": problems})
 				input.Errors = problems
@@ -90,6 +93,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			send("error", map[string]string{"message": "The AI wrote invalid content twice. Edit the messages by hand or try again."})
 			return
 		}
+		llmCalls.WithLabelValues("content", "ok").Inc()
 		newVersion, err := h.saveContent(r.Context(), id, *in.Version, c)
 		switch {
 		case r.Context().Err() != nil:

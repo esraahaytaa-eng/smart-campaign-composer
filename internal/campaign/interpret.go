@@ -13,6 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"smart-campaign-composer/internal/audience"
 	"smart-campaign-composer/internal/llm"
 )
@@ -40,6 +43,12 @@ type Interpretation struct {
 	ScheduleNote    string
 }
 
+// llmCalls counts AI calls (D26). Result is ok, invalid (failed validation,
+// retried once), error (API error or timeout), or cancelled (the client left).
+var llmCalls = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "scc_llm_calls_total", Help: "AI calls by operation (interpret, content) and result.",
+}, []string{"operation", "result"})
+
 // Interpret asks the model to read the brief and validates the answer (D15):
 // an invalid answer is retried once with the validation errors; API errors
 // and timeouts are not retried. Each call gets its own timeout.
@@ -64,13 +73,16 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		case errors.Is(err, llm.ErrTruncated):
 			problems = []string{"the answer was cut off; keep it short"}
 		case err != nil:
+			llmCalls.WithLabelValues("interpret", "error").Inc()
 			return Interpretation{}, fmt.Errorf("AI request failed: %w", err)
 		default:
 			got, problems = parseInterpretation(raw, in, loc)
 		}
 		if len(problems) == 0 {
+			llmCalls.WithLabelValues("interpret", "ok").Inc()
 			return got, nil
 		}
+		llmCalls.WithLabelValues("interpret", "invalid").Inc()
 		in.Errors = problems
 	}
 	return Interpretation{}, fmt.Errorf("%w: %s", ErrAIInvalid, strings.Join(in.Errors, "; "))

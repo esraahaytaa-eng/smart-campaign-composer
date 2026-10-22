@@ -16,6 +16,7 @@ import (
 	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/obs"
+	"smart-campaign-composer/internal/obstest"
 )
 
 const (
@@ -249,5 +250,21 @@ func TestMarketerID_InContext(t *testing.T) {
 	want := int64(s.count(`SELECT id FROM marketers WHERE email = $1`, email))
 	if got != want {
 		t.Fatalf("want marketer %d in context, got %d", want, got)
+	}
+}
+
+// The metrics middleware wraps the outer mux, so the guarded route's pattern
+// must reach it, not the catch-all "/api/".
+func TestRequire_GuardedRouteLabelsMetrics(t *testing.T) {
+	s := newServer(t)
+	cookie := s.sessionCookie()
+	before := obstest.Value(t, "scc_http_requests_total", "route", "GET /api/me", "code", "200")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(cookie)
+	obs.Instrument(s.mux).ServeHTTP(httptest.NewRecorder(), req)
+
+	if got := obstest.Value(t, "scc_http_requests_total", "route", "GET /api/me", "code", "200") - before; got != 1 {
+		t.Fatalf("want 1 request labelled GET /api/me, got %v", got)
 	}
 }
