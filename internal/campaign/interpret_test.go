@@ -22,7 +22,7 @@ type scripted struct {
 	outputs []string
 	err     error
 	errs    []error // per call, when set
-	block   bool // wait for the context to end (simulates a hung API)
+	block   bool    // wait for the context to end (simulates a hung API)
 	calls   []llm.InterpretInput
 }
 
