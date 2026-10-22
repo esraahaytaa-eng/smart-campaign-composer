@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../api'
 import { safeRedirect } from '../guard'
-import { login } from '../session'
+import { focusTarget } from '../login'
+import { login, sessionProblem } from '../session'
 import BrandMark from '../components/BrandMark.vue'
 
 const router = useRouter()
@@ -14,7 +15,10 @@ const password = ref('')
 const showPassword = ref(false)
 const tried = ref(false)
 const busy = ref(false)
-const failure = ref('') // from the server: wrong login, or a server problem
+// From the server: wrong login, or a problem reaching it (also on first load).
+const failure = ref(sessionProblem.value)
+const emailInput = ref<HTMLInputElement>()
+const passwordInput = ref<HTMLInputElement>()
 
 const emailError = computed(() => {
   const v = email.value.trim()
@@ -23,10 +27,17 @@ const emailError = computed(() => {
 })
 const passwordError = computed(() => (password.value ? '' : 'Enter your password.'))
 
+async function focusProblem() {
+  await nextTick()
+  const field = focusTarget({ email: emailError.value, password: passwordError.value }, !!failure.value)
+  if (field) (field === 'email' ? emailInput : passwordInput).value?.focus()
+}
+
 async function submit() {
+  if (busy.value) return
   tried.value = true
   failure.value = ''
-  if (emailError.value || passwordError.value || busy.value) return
+  if (emailError.value || passwordError.value) return focusProblem()
   busy.value = true
   try {
     await login(email.value.trim(), password.value)
@@ -38,6 +49,8 @@ async function submit() {
         : err instanceof ApiError
           ? err.message
           : 'Something went wrong. Try again.'
+    busy.value = false
+    await focusProblem()
   } finally {
     busy.value = false
   }
@@ -80,12 +93,13 @@ function clearFailure() {
           <label for="email">Work email</label>
           <input
             id="email"
+            ref="emailInput"
             v-model="email"
             class="input"
             type="email"
             autocomplete="username"
             placeholder="you@company.com"
-            :disabled="busy"
+            :readonly="busy"
             :aria-invalid="tried && !!emailError"
             :aria-describedby="tried && emailError ? 'email-error' : undefined"
             @input="clearFailure"
@@ -98,28 +112,24 @@ function clearFailure() {
           <div class="password" :class="{ invalid: tried && !!passwordError }">
             <input
               id="password"
+              ref="passwordInput"
               v-model="password"
               :type="showPassword ? 'text' : 'password'"
               autocomplete="current-password"
-              :disabled="busy"
+              :readonly="busy"
               :aria-invalid="tried && !!passwordError"
               :aria-describedby="tried && passwordError ? 'password-error' : undefined"
               @input="clearFailure"
             />
-            <button
-              type="button"
-              class="reveal"
-              :aria-pressed="showPassword"
-              :aria-label="showPassword ? 'Hide password' : 'Show password'"
-              @click="showPassword = !showPassword"
-            >
-              {{ showPassword ? 'Hide' : 'Show' }}
+            <button type="button" class="reveal" @click="showPassword = !showPassword">
+              {{ showPassword ? 'Hide' : 'Show' }}<span class="sr-only"> password</span>
             </button>
           </div>
           <span v-if="tried && passwordError" id="password-error" class="field-error">{{ passwordError }}</span>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-lg" :disabled="busy">
+        <!-- aria-disabled, not disabled: a disabled button would drop keyboard focus. -->
+        <button type="submit" class="btn btn-primary btn-lg" :aria-disabled="busy" :class="{ busy }">
           <span v-if="busy" class="spinner" aria-hidden="true" />
           {{ busy ? 'Signing in…' : 'Sign in' }}
         </button>
@@ -254,7 +264,8 @@ form {
   border: 1.5px solid var(--danger-line);
 }
 .password:focus-within {
-  box-shadow: var(--focus);
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 .password input {
   flex: 1;

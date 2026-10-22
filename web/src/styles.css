@@ -30,7 +30,7 @@
   --radius-lg: 14px;
   --shadow-primary: 0 6px 16px rgba(75, 68, 214, 0.25);
   --shadow-pop: 0 12px 28px rgba(18, 26, 51, 0.14);
-  --focus: 0 0 0 3px rgba(75, 68, 214, 0.35);
+  --focus-ring: 2px solid var(--primary); /* 6.8:1 on white, 6.2:1 on --bg; WCAG asks 3:1 */
   --font: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
 }
@@ -54,8 +54,8 @@ a {
 }
 
 :focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
+  outline: var(--focus-ring);
+  outline-offset: 2px;
 }
 
 h1 {
@@ -99,8 +99,10 @@ h1 {
   color: #fff;
   box-shadow: var(--shadow-primary);
 }
-.btn-primary:disabled {
+.btn-primary:disabled,
+.btn-primary.busy {
   background: var(--primary-busy);
+  cursor: default;
 }
 .btn-lg {
   height: 48px;
@@ -117,6 +119,11 @@ h1 {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none; /* the button text still says what is happening */
   }
 }
 

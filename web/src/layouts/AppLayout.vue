@@ -41,9 +41,9 @@ async function signOut() {
         <RouterLink :to="{ name: 'campaigns' }" class="link" active-class="active">Campaigns</RouterLink>
       </div>
       <div class="foot">
-        <span class="mode-badge" :title="modeTitle">{{ modeLabel }}</span>
+        <span class="mode-badge" :title="modeTitle">{{ modeLabel }}<span class="sr-only">. {{ modeTitle }}</span></span>
         <DropdownMenuRoot>
-          <DropdownMenuTrigger class="account" aria-label="Account menu">
+          <DropdownMenuTrigger class="account">
             <span class="avatar" aria-hidden="true">{{ initials }}</span>
             <span class="who">
               <span class="name">{{ session?.name }}</span>
