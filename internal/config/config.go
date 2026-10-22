@@ -57,8 +57,9 @@ func Load(process string) (Config, error) {
 	if process == "migrate" && len(cfg.DemoMarketerPassword) < 8 {
 		return Config{}, errors.New("DEMO_MARKETER_PASSWORD must be at least 8 characters")
 	}
-	if process == "migrate" && len(cfg.ProviderDBPassword) < 8 {
-		return Config{}, errors.New("PROVIDER_DB_PASSWORD must be at least 8 characters")
+	if process == "migrate" && (len(cfg.ProviderDBPassword) < 8 || strings.Trim(cfg.ProviderDBPassword, urlSafe) != "") {
+		// It also goes into the provider's DATABASE_URL, so only URL-safe characters.
+		return Config{}, errors.New("PROVIDER_DB_PASSWORD must be at least 8 characters of A-Z, a-z, 0-9, '.', '_', '~' or '-'")
 	}
 	if process == "mock-provider" {
 		return loadProvider(cfg)
@@ -93,6 +94,11 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
+const (
+	maxProviderDelayMS = 30_000
+	urlSafe            = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-"
+)
+
 // loadProvider reads SMS_* and EMAIL_* behaviour with the D20 defaults.
 func loadProvider(cfg Config) (Config, error) {
 	seed, err := strconv.ParseInt(getenv("PROVIDER_SEED", "1"), 10, 64)
@@ -107,8 +113,10 @@ func loadProvider(cfg Config) (Config, error) {
 		var errs []error
 		ms := func(key, def string) time.Duration {
 			n, err := strconv.Atoi(getenv(p+key, def))
-			if err != nil || n < 0 {
-				errs = append(errs, fmt.Errorf("%s%s must be a whole number of milliseconds, 0 or more", p, key))
+			// Below the provider's 1-minute stale-key takeover, or a slow request
+			// and its retry could both be processed under one key.
+			if err != nil || n < 0 || n > maxProviderDelayMS {
+				errs = append(errs, fmt.Errorf("%s%s must be a whole number of milliseconds from 0 to %d", p, key, maxProviderDelayMS))
 			}
 			return time.Duration(n) * time.Millisecond
 		}

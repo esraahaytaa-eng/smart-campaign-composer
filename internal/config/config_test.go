@@ -74,6 +74,8 @@ func TestLoadConfig_Errors(t *testing.T) {
 		{"worker attempts zero", "worker", map[string]string{"DATABASE_URL": "postgres://db", "MAX_ATTEMPTS": "0"}, "MAX_ATTEMPTS"},
 		{"worker attempts too many", "worker", map[string]string{"DATABASE_URL": "postgres://db", "MAX_ATTEMPTS": "11"}, "MAX_ATTEMPTS"},
 		{"worker bad provider url", "worker", map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_URL": "mock-provider:8080"}, "PROVIDER_URL"},
+		{"provider delay over 30 s", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "SMS_DELAY_MS_MIN": "0", "SMS_DELAY_MS_MAX": "30001"}, "SMS_DELAY_MS_MAX"},
+		{"provider password with URL characters", "migrate", map[string]string{"DATABASE_URL": "postgres://db", "DEMO_MARKETER_PASSWORD": "demo-password", "PROVIDER_DB_PASSWORD": "p@ss/word1"}, "PROVIDER_DB_PASSWORD"},
 		{"provider seed", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_SEED": "x"}, "PROVIDER_SEED"},
 		{"bad llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "soon"}, "LLM_TIMEOUT"},
 		{"zero llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "0s"}, "LLM_TIMEOUT"},
