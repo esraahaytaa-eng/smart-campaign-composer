@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9), mock SMS/email provider (T10), sending queue: audience build at send time, claim with lease, results (T11, no worker process yet). Not yet built: the sending worker (dispatch, retries, rate limit), worker, mock providers, frontend.
+> **Status: work in progress.** Done: project skeleton (T1), database schema with fictional seed data (T2), login API (T3), audience rules (T4), AI brief interpretation with a mock and Claude (T5), campaign draft API (T6), message templates and over-limit estimate (T7), streamed content generation (T8), approval, cancel and resend (T9), mock SMS/email provider (T10), sending queue (T11), sending worker with retries and the 100/s limit (T12). Not yet built: worker, mock providers, frontend.
 
 ## Requirements
 
@@ -90,6 +90,12 @@ The `mock-provider` service plays the SMS and email provider; nothing is really 
 
 The key is stored before anything is simulated. A repeated key gets the stored result for a finished request, or a retryable 503 with `Retry-After` while it is still in progress; a 5xx or 429 releases the key so a retry is processed. Keys live in the `provider` schema, which the provider reaches through its own database role (`scc_provider`, password `PROVIDER_DB_PASSWORD`) that cannot read the app's tables (D6).
 
+## Sending
+
+The `worker` service starts approved campaigns when their send time comes, evaluating the audience at that moment (D30), and sends each message through the provider with its message ID as `Idempotency-Key`. Before every request it re-checks that the campaign is still sending and the recipient still allows the channel, and it personalizes and length-checks the text: over-limit messages are skipped (`character_limit_exceeded`) and can be resent later (D31). 200 → `sent`; 429, 5xx, timeouts and network errors are retried with exponential backoff and jitter (honouring `Retry-After`) up to `MAX_ATTEMPTS` (5); other 4xx → `failed`. Every attempt is recorded in `delivery_attempts`.
+
+Per channel at most 100 provider requests leave in any second, retries included: a rate limiter spaces them 10 ms apart and a hard cap counts actual departures (D19). The cap is exact on the worker's side; at the provider, a request delayed by more than 50 ms between leaving the queue and arriving could in theory still bunch with later ones.
+
 ## Seed data
 
 The `migrate` service applies the schema and, on the first run, creates 3,000 fictional users with order and cart histories, generated from a fixed random seed. Every date is relative to that first run. Later runs do nothing, so restarting never creates duplicates or changes data.
@@ -114,4 +120,4 @@ The first run compiles all dependencies and takes a few minutes; compiled packag
 
 ## Architecture (current)
 
-One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue: the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease (D5, D18). `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
+One Go module (`cmd/scc`) built into one image and run as separate Compose services (D20): `postgres`, `migrate` (one-shot: migrations + seed), `api`, `worker`, `mock-provider`. `internal/config` reads environment variables, `internal/obs` serves health and metrics, `internal/db` holds the embedded migrations and the seed, `internal/auth` the login, logout and session check. `internal/audience` validates audience rules against a fixed catalog (D14) and turns them into parameterized SQL; rule values only ever reach Postgres as query arguments. `internal/provider` is the mock provider. `internal/worker` holds the queue (the messages table, claimed with `FOR UPDATE SKIP LOCKED` and a 30 s lease, D5, D18) and the dispatcher. `internal/content` validates message templates (only `{{first_name}}`, `{{last_name}}`, `{{city}}`; SMS ≤ 160, subject ≤ 80, email body ≤ 2,000 characters after personalization) and estimates over-limit messages per channel in SQL.
