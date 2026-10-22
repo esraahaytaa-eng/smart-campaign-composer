@@ -129,7 +129,7 @@ services:
       test-db:
         condition: service_healthy
 
-  # Frontend checks (make test / make lint): Vitest and the type check.
+  # Frontend checks (make test): the type check and Vitest.
   web-test:
     profiles: ["test"]
     image: node:22-alpine

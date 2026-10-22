@@ -141,7 +141,7 @@ docker run --rm -it -p 5173:5173 -v "$PWD/web":/web -v scc-web-node-modules:/web
   -e API_URL=http://host.docker.internal:8080 node:22-alpine sh -c "npm ci && npx vite --host 0.0.0.0"
 ```
 
-Then open `http://localhost:5173`. The Vite server proxies `/api` to the api, so the session cookie stays same-origin.
+Then open `http://localhost:5173`. The Vite server proxies `/api` to the api, so the session cookie stays same-origin. On Linux, add `--add-host=host.docker.internal:host-gateway` to the `docker run` command (Docker Desktop provides that name itself; checked on macOS).
 
 ## UI/UX design
 
