@@ -49,6 +49,14 @@ var llmCalls = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "scc_llm_calls_total", Help: "AI calls by operation (interpret, content) and result.",
 }, []string{"operation", "result"})
 
+// resultOf labels a failed AI call: cancelled if the client left, else error.
+func resultOf(ctx context.Context) string {
+	if ctx.Err() != nil {
+		return "cancelled"
+	}
+	return "error"
+}
+
 // Interpret asks the model to read the brief and validates the answer (D15):
 // an invalid answer is retried once with the validation errors; API errors
 // and timeouts are not retried. Each call gets its own timeout.
@@ -73,7 +81,7 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		case errors.Is(err, llm.ErrTruncated):
 			problems = []string{"the answer was cut off; keep it short"}
 		case err != nil:
-			llmCalls.WithLabelValues("interpret", "error").Inc()
+			llmCalls.WithLabelValues("interpret", resultOf(ctx)).Inc()
 			return Interpretation{}, fmt.Errorf("AI request failed: %w", err)
 		default:
 			got, problems = parseInterpretation(raw, in, loc)

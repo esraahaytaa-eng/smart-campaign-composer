@@ -249,4 +249,12 @@ func TestInterpret_RecordsCallMetrics(t *testing.T) {
 	if value("ok")-ok != 1 || value("invalid")-invalid != 1 || value("error")-failed != 1 {
 		t.Fatalf("want +1 ok, +1 invalid, +1 error; got +%v, +%v, +%v", value("ok")-ok, value("invalid")-invalid, value("error")-failed)
 	}
+
+	cancelled := value("cancelled")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the client left
+	Interpret(ctx, &scripted{block: true}, llm.InterpretInput{Text: "brief", Now: now, TimeZone: "Europe/Istanbul", Catalog: catalog}, time.Second)
+	if value("cancelled")-cancelled != 1 || value("error")-failed != 1 {
+		t.Fatalf("want a client that left counted as cancelled, not error")
+	}
 }
