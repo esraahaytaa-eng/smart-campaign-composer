@@ -43,6 +43,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/campaigns/{id}", h.get)
 	mux.HandleFunc("DELETE /api/campaigns/{id}", h.deleteDraft)
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
+	mux.HandleFunc("PUT /api/campaigns/{id}/channels", h.updateChannels)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
@@ -188,13 +189,7 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
 		return
 	}
-	var isResend bool
-	if err := h.Pool.QueryRow(r.Context(), `SELECT parent_campaign_id IS NOT NULL FROM campaigns WHERE id = $1`, id).Scan(&isResend); err != nil {
-		serverError(w, "load campaign", err)
-		return
-	}
-	if isResend {
-		writeError(w, http.StatusConflict, "a resend's audience is fixed: the skipped recipients of the original campaign")
+	if h.isResend(w, r.Context(), id, "a resend's audience is fixed: the skipped recipients of the original campaign") {
 		return
 	}
 	cat, err := audience.LoadCatalog(r.Context(), h.Pool)
@@ -209,6 +204,67 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 	}
 	rulesJSON, _ := json.Marshal(rules)
 	h.update(w, r.Context(), id, *in.Version, `rules = $4`, rulesJSON)
+}
+
+// updateChannels changes a draft's channels and deletes the content of any
+// channel removed, so approval is not blocked by text that won't be sent (D38).
+func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version  *int     `json:"version"`
+		Channels []string `json:"channels"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) ||
+		h.isResend(w, ctx, id, "a resend's channel is fixed: the channel of the skipped recipients") {
+		return
+	}
+	if err := checkChannels(in.Channels); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $3, version = version + 1, updated_at = now()
+		WHERE id = $1 AND version = $2 AND status = 'draft'`, id, *in.Version, in.Channels)
+	if err != nil {
+		serverError(w, "update channels", err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1 AND NOT channel = ANY($2)`, id, in.Channels); err != nil {
+		serverError(w, "delete content", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
+		return
+	}
+	h.respond(w, ctx, http.StatusOK, id)
+}
+
+// isResend answers 409 with msg if the campaign is a resend, whose audience
+// and channel come from its parent (D31).
+func (h *Handler) isResend(w http.ResponseWriter, ctx context.Context, id int64, msg string) bool {
+	var resend bool
+	if err := h.Pool.QueryRow(ctx, `SELECT parent_campaign_id IS NOT NULL FROM campaigns WHERE id = $1`, id).Scan(&resend); err != nil {
+		serverError(w, "load campaign", err)
+		return true
+	}
+	if resend {
+		writeError(w, http.StatusConflict, msg)
+	}
+	return resend
 }
 
 func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
