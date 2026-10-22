@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -89,7 +88,7 @@ func login(pool *pgxpool.Pool) http.HandlerFunc {
 			strings.TrimSpace(in.Email)).Scan(&m.ID, &m.Email, &m.Name, &hash)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Compare anyway so an unknown email takes as long as a wrong password.
-			bcrypt.CompareHashAndPassword(dummyHash(), []byte(in.Password))
+			bcrypt.CompareHashAndPassword(dummyHash, []byte(in.Password))
 			writeError(w, http.StatusUnauthorized, errInvalidLogin)
 			return
 		}
@@ -168,10 +167,8 @@ func hashToken(token string) []byte {
 }
 
 // dummyHash has the same cost as real password hashes (bcrypt.DefaultCost).
-var dummyHash = sync.OnceValue(func() []byte {
-	h, _ := bcrypt.GenerateFromPassword([]byte("no-such-user"), bcrypt.DefaultCost)
-	return h
-})
+// Built at startup, so even the first unknown-email login takes normal time.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("no-such-user"), bcrypt.DefaultCost)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
