@@ -34,6 +34,7 @@ services:
       LLM_MODE: ${LLM_MODE:-mock}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-60s}
     ports:
       - "8080:8080"
     depends_on:

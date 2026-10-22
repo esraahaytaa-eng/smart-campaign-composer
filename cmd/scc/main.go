@@ -11,12 +11,15 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // the alpine runtime image has no zoneinfo; campaign time zones need it
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smart-campaign-composer/internal/auth"
+	"smart-campaign-composer/internal/campaign"
 	"smart-campaign-composer/internal/config"
 	"smart-campaign-composer/internal/db"
+	"smart-campaign-composer/internal/llm"
 	"smart-campaign-composer/internal/obs"
 )
 
@@ -75,9 +78,14 @@ func migrate(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
 }
 
 func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error {
+	model := llm.LLM(llm.NewMock())
+	if cfg.LLMMode == "real" {
+		model = llm.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
+	}
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
-	auth.Routes(mux, pool, cfg.LLMMode)
+	api := auth.Routes(mux, pool, cfg.LLMMode)
+	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now}).Routes(api)
 	// No WriteTimeout: SSE responses (T8, T14) stay open.
 	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 

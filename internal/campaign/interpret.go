@@ -46,10 +46,11 @@ type Interpretation struct {
 // an invalid answer is retried once with the validation errors; API errors
 // and timeouts are not retried. Each call gets its own timeout.
 func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeout time.Duration) (Interpretation, error) {
-	in.Text = strings.TrimSpace(in.Text)
-	if n := utf8.RuneCountInString(in.Text); n == 0 || n > maxRequestChars {
-		return Interpretation{}, ErrRequestText
+	text, err := checkRequestText(in.Text)
+	if err != nil {
+		return Interpretation{}, err
 	}
+	in.Text = text
 	in.Errors = nil
 	for range 2 {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -65,6 +66,16 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		in.Errors = problems
 	}
 	return Interpretation{}, fmt.Errorf("%w: %s", ErrAIInvalid, strings.Join(in.Errors, "; "))
+}
+
+// checkRequestText trims the brief and enforces its length (D15), counted
+// in characters (code points) like every limit in the app (D2).
+func checkRequestText(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if n := utf8.RuneCountInString(text); n == 0 || n > maxRequestChars {
+		return "", ErrRequestText
+	}
+	return text, nil
 }
 
 // aiAnswer is the JSON contract with the model (see llm.interpretSchema).
