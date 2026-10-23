@@ -221,6 +221,17 @@ make e2e          # browser tests (Playwright) on their own throwaway stack
 
 What it covers: sign-in and the login guard, the audience step, autosave races (slowed and failing saves, switching campaigns, changes made elsewhere), English and Turkish, the content and review steps (streaming and Stop, no lost edits when leaving, conflicts during generation, explicit approval), the dashboard and campaign list (status counts, filters and search in the address, delete and cancel with a confirmation), the campaign page after approval (a scheduled campaign and its cancel; live delivery to completion, with counts checked against the API), recipient details (tabs, search, paging, attempt history, masked contacts, Back, Escape and focus, Turkish), resend (the dialog's numbers, the draft through content and review, an audience of exactly the eligible skipped recipients, links both ways, a resend created elsewhere), a send watched mid-way (counts moving, pause and resume) and cancelled while sending (sent messages stay sent, the rest are cancelled, nothing is sent afterwards), and the fixes from the PR #6 review. Several checks really send campaigns through the mock SMS provider of that stack. A full run takes under two minutes. Set `SHOTS=/e2e/shots` to keep screenshots.
 
+### Continuous integration (D52)
+
+GitHub Actions (`.github/workflows/`) runs on every push:
+
+| Workflow | When | What |
+|---|---|---|
+| **CI** (`ci.yml`) | every push, and on request | `make test`, `make lint`, and the scan: `make scan-selftest`, the files in the repository, and the branch's commits not on `main` yet |
+| **Browser checks** (`e2e.yml`) | nightly at 02:30 UTC, and on request (Actions → Browser checks → Run workflow) | `make e2e` on its own stack; screenshots of failing files are kept for 14 days |
+
+The jobs run the same make targets as a developer's machine, in Docker. In CI the Go and npm caches live in the workspace (`.github/ci/compose.cache.yml`), so later runs reuse them. Actions are pinned to commits. The repository is private, so the runs use the account's Actions minutes.
+
 ### Scanning for secrets and personal data (D51)
 
 ```sh
