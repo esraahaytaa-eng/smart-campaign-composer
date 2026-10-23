@@ -228,7 +228,7 @@ GitHub Actions (`.github/workflows/`) runs on every push:
 | Workflow | When | What |
 |---|---|---|
 | **CI** (`ci.yml`) | every push, and on request | `make test`, `make lint`, and the scan: `make scan-selftest`, the files in the repository, and the branch's commits not on `main` yet |
-| **Browser checks** (`e2e.yml`) | nightly at 02:30 UTC, and on request (Actions → Browser checks → Run workflow) | `make e2e` on its own stack; screenshots of failing files are kept for 14 days |
+| **Browser checks** (`e2e.yml`) | nightly at 02:30 UTC, on request (Actions → Browser checks → Run workflow), and when a push changes `e2e/`, `docker-compose.e2e.yml` or the workflow | `make e2e` on its own stack; screenshots of failing files are kept for 14 days |
 
 The jobs run the same make targets as a developer's machine, in Docker. In CI the Go and npm caches live in the workspace (`.github/ci/compose.cache.yml`), so later runs reuse them. Actions are pinned to commits. The repository is private, so the runs use the account's Actions minutes.
 

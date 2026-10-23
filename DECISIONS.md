@@ -423,6 +423,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Guards every change from T19 on, especially T20's changes to the send path.
 - **Rejected:** *The browser suite on every PR:* about 10 more minutes per run.
 - **Trade-offs:** A browser regression is found nightly rather than on the PR, unless the workflow is started by hand.
+- **History:** 2026-10-23 (T19 step 3). The browser checks also run when a push changes the suite, its stack or the workflow (GitHub can start a workflow by hand or on a schedule only once it is on `main`). `make lint` checks only the module's own packages, so CI's restored module cache is not linted.
 
 ### D53 — A separate, faster stack for the browser suite
 - **Status:** Accepted · 2026-10-23
