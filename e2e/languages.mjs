@@ -22,7 +22,7 @@ export default () =>
     await page.getByLabel('Şifre', { exact: true }).fill(process.env.DEMO_PASSWORD ?? 'Demo1234!')
     await page.getByRole('button', { name: 'Giriş yap' }).click()
     await page.getByRole('heading', { name: 'Panel' }).waitFor()
-    check(await page.getByText('Simüle yapay zekâ · Simüle sağlayıcılar').isVisible(), 'the mode badge in Turkish')
+    check(await page.getByText('Simüle YZ ve sağlayıcılar').isVisible(), 'the mode badge in Turkish')
 
     await page.getByRole('navigation', { name: 'Ana menü' }).getByRole('link', { name: '+ Yeni kampanya' }).click()
     const odd = 'Send a birthday note to users older than 40.'

@@ -16,7 +16,7 @@ export const tr: Record<Key, Message> = {
 
   'nav.primary': 'Ana menü',
   'nav.newCampaign': '+ Yeni kampanya',
-  'mode.mock': 'Simüle yapay zekâ · Simüle sağlayıcılar',
+  'mode.mock': 'Simüle YZ ve sağlayıcılar',
   'mode.real': 'Claude yapay zekâ · Simüle sağlayıcılar',
   'mode.mockHelp': 'Yapay zekâ ile SMS ve e-posta sağlayıcıları simüle edilir. Gerçek mesaj gönderilmez.',
   'mode.realHelp': 'Yapay zekâ Claude’dur. SMS ve e-posta sağlayıcıları simüle edilir: gerçek mesaj gönderilmez.',

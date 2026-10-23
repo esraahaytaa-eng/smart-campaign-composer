@@ -150,10 +150,10 @@ async function cancel(c: Campaign) {
               {{ t('list.resendOf', { title: parentTitle(c) }) }}
             </RouterLink>
           </span>
-          <span role="cell">{{ channelNames(c.channels) }}</span>
-          <span role="cell"><StatusBadge :status="c.status" /></span>
-          <span role="cell" class="muted">{{ formatDay(c.created_at) }}</span>
-          <span role="cell" class="muted">{{ c.status !== 'draft' && c.send_at ? formatDateTime(c.send_at) : '—' }}</span>
+          <span role="cell" :data-label="t('campaigns.col.channels')">{{ channelNames(c.channels) }}</span>
+          <span role="cell" :data-label="t('campaigns.col.status')"><StatusBadge :status="c.status" /></span>
+          <span role="cell" class="muted" :data-label="t('campaigns.col.created')">{{ formatDay(c.created_at) }}</span>
+          <span role="cell" class="muted" :data-label="t('campaigns.col.scheduled')">{{ c.status !== 'draft' && c.send_at ? formatDateTime(c.send_at) : '—' }}</span>
           <span role="cell" class="actions">
             <template v-for="a in campaignActions(c)" :key="a">
               <RouterLink
@@ -314,10 +314,9 @@ async function cancel(c: Campaign) {
 }
 .table-wrap {
   padding: 0;
-  overflow-x: auto;
+  container-type: inline-size;
 }
 .table {
-  min-width: 900px;
   font-size: 13px;
 }
 .row {
@@ -388,5 +387,47 @@ async function cancel(c: Campaign) {
   font: 600 13px var(--font);
   text-decoration: none;
   cursor: pointer;
+}
+/* A narrow list (tablet, phone): each campaign is a card, labelled values below its title. */
+@container (max-width: 860px) {
+  .row {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px 16px;
+    padding: 14px 16px;
+  }
+  .header {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .header + .row {
+    border-top: 0;
+  }
+  .name,
+  .actions {
+    grid-column: 1 / -1;
+  }
+  .title {
+    white-space: normal;
+  }
+  .actions {
+    justify-content: flex-start;
+  }
+  [data-label] {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    white-space: normal;
+  }
+  [data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+  }
 }
 </style>

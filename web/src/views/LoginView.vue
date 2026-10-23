@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../api'
 import { safeRedirect } from '../guard'
@@ -26,6 +26,9 @@ const failureText = computed(() =>
 )
 const emailInput = ref<HTMLInputElement>()
 const passwordInput = ref<HTMLInputElement>()
+// The page has one job: start in the first field (also after signing out,
+// when the focused menu item has just disappeared).
+onMounted(() => emailInput.value?.focus())
 
 const emailError = computed(() => {
   const v = email.value.trim()
