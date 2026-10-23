@@ -20,6 +20,12 @@ export type Campaign = {
   parent_campaign_id: number | null
   counts?: Counts // drafts only
   content: Content | null
+  created_at: string
+  updated_at: string
+  approved_at?: string | null
+  audience_built_at?: string | null // when sending started
+  cancelled_at?: string | null
+  completed_at?: string | null
 }
 
 export type ValueType = 'cities' | 'window' | 'categories_window' | 'count' | 'amount'
