@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +78,12 @@ func Load(process string) (Config, error) {
 		return Config{}, fmt.Errorf("LLM_TIMEOUT must be a positive duration such as 60s, got %q", os.Getenv("LLM_TIMEOUT"))
 	}
 	cfg.LLMTimeout = timeout
+	// Without the build every page would be a 404 after a normal-looking start.
+	if cfg.WebDir != "" {
+		if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err != nil {
+			return Config{}, fmt.Errorf("WEB_DIR %q has no index.html: build the frontend or leave WEB_DIR empty", cfg.WebDir)
+		}
+	}
 	switch cfg.LLMMode {
 	case "mock":
 	case "real":
