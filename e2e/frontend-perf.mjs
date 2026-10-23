@@ -44,7 +44,7 @@ async function open(browser, profile, storageState) {
   if (cpu) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpu })
   if (network) await cdp.send('Network.emulateNetworkConditions', network)
   const scripts = new Map() // requestId → { url, bytes }
-  cdp.on('Network.responseReceived', (e) => e.type === 'Script' && scripts.set(e.requestId, { url: e.response.url, encoding: e.response.headers['content-encoding'] ?? 'none' }))
+  cdp.on('Network.responseReceived', (e) => e.type === 'Script' && scripts.set(e.requestId, { url: e.response.url, encoding: Object.entries(e.response.headers).find(([k]) => k.toLowerCase() === 'content-encoding')?.[1] ?? 'none' }))
   cdp.on('Network.loadingFinished', (e) => scripts.has(e.requestId) && (scripts.get(e.requestId).bytes = e.encodedDataLength))
   return { context, page, cdp, scripts }
 }
