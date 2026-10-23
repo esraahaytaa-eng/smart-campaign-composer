@@ -104,18 +104,22 @@ func TestSend_SuccessIsStoredAndReplayed(t *testing.T) {
 
 func TestSend_KeyIsInsertedBeforeSimulating(t *testing.T) {
 	admin, prov := providerDB(t)
-	slow := config.ProviderChannel{DelayMin: 400 * time.Millisecond, DelayMax: 400 * time.Millisecond}
+	const delay = 400 * time.Millisecond // the simulated send
+	slow := config.ProviderChannel{DelayMin: delay, DelayMax: delay}
 	url := start(t, prov, slow, nil)
 
-	done := make(chan reply)
-	go func() { done <- send(t, url, "sms", "msg-1", smsBody, nil) }()
-	time.Sleep(150 * time.Millisecond)
-
-	if got := keyState(t, admin, "msg-1"); got != "in_progress" {
-		t.Fatalf("during the simulated delay the key must already be stored, got %s", got)
-	}
-	if r := <-done; r.status != 200 || keyState(t, admin, "msg-1") != "completed" {
+	if r := send(t, url, "sms", "msg-1", smsBody, nil); r.status != 200 || keyState(t, admin, "msg-1") != "completed" {
 		t.Fatalf("want 200 and completed, got %d", r.status)
+	}
+	// The provider's own timestamps show the order, however slow the machine:
+	// stored before the simulated send means at least the delay between the
+	// key's insert and its completion.
+	var held time.Duration
+	if err := admin.QueryRow(context.Background(), `SELECT completed_at - created_at FROM provider.idempotency_keys WHERE key = 'msg-1'`).Scan(&held); err != nil {
+		t.Fatal(err)
+	}
+	if held < delay {
+		t.Fatalf("the key was stored %v before completing, less than the %v simulated send: it was stored after simulating", held, delay)
 	}
 }
 
