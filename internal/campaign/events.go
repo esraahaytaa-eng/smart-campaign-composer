@@ -36,19 +36,20 @@ const groupSQL = `CASE
 // lastAttemptsSQL joins the message's latest attempt (la) and its latest
 // attempt without a clear answer (lu), for reasonSQL.
 const lastAttemptsSQL = `
-	LEFT JOIN LATERAL (SELECT outcome FROM delivery_attempts WHERE message_id = m.id ORDER BY id DESC LIMIT 1) la ON true
+	LEFT JOIN LATERAL (SELECT outcome, attempt_no FROM delivery_attempts WHERE message_id = m.id ORDER BY id DESC LIMIT 1) la ON true
 	LEFT JOIN LATERAL (SELECT outcome FROM delivery_attempts WHERE message_id = m.id
 		AND outcome IN ('timeout', 'network_error', 'interrupted') ORDER BY id DESC LIMIT 1) lu ON true`
 
 // reasonSQL is the reason code within the group (D46), or NULL for groups
 // without reasons. Codes, never provider text, so the UI can translate them.
 // An uncertain delivery without such an attempt was held by a worker that
-// stopped mid-attempt; a retry without an attempt was handed back unsent.
+// stopped mid-attempt. A retry whose latest claim (attempt_count) has no
+// attempt was handed back unsent.
 const reasonSQL = `CASE ` + groupSQL + `
 	WHEN 'failed' THEN CASE WHEN la.outcome = 'rejected' THEN 'provider_rejected' ELSE 'retries_exhausted' END
 	WHEN 'skipped' THEN m.skip_reason
 	WHEN 'uncertain' THEN coalesce(lu.outcome, 'no_response_recorded')
-	WHEN 'retrying' THEN coalesce(la.outcome, 'requeued')
+	WHEN 'retrying' THEN CASE WHEN la.attempt_no = m.attempt_count THEN la.outcome ELSE 'requeued' END
 	END`
 
 // recentWindow is how far back rate_limited_recent counts 429s.

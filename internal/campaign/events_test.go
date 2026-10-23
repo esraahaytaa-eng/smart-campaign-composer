@@ -85,6 +85,12 @@ func (s *liveStream) quiet(t *testing.T, d time.Duration) {
 	}
 }
 
+// claimCounts sets attempt_count as the worker would: one claim per attempt.
+func (a *app) claimCounts(id int64) {
+	a.t.Helper()
+	a.exec(`UPDATE messages m SET attempt_count = (SELECT count(*) FROM delivery_attempts WHERE message_id = m.id) WHERE campaign_id = $1`, id)
+}
+
 // sendingCampaign approves the case-example draft and gives it messages and
 // attempts as the worker would. Users 3–7 are added for the SMS channel.
 func (a *app) sendingCampaign() int64 {
@@ -112,6 +118,7 @@ func (a *app) sendingCampaign() int64 {
 			(3, 1, 'rejected', 400), (7, 1, 'server_error', 500)) a(user_id, no, outcome, code)
 			ON a.user_id = m.user_id
 		WHERE m.campaign_id = $1 AND m.channel = 'sms'`, d.ID, fixedNow)
+	a.claimCounts(d.ID)
 	return d.ID
 }
 
@@ -179,6 +186,7 @@ func TestEvents_GroupsAndReasons(t *testing.T) {
 			(7, 1, 'server_error', 503, 12), (7, 2, 'rate_limited', 429, 10), (7, 3, 'server_error', 503, 1)
 		) a(user_id, no, outcome, code, ago) ON a.user_id = m.user_id
 		WHERE m.campaign_id = $1 AND m.channel = 'email'`, id, fixedNow)
+	a.claimCounts(id)
 
 	e, _ := a.stream(id).next(t)
 
@@ -322,5 +330,31 @@ func TestEvents_UnknownCampaign404(t *testing.T) {
 
 	if rec := a.do(http.MethodGet, "/api/campaigns/999/events", ""); rec.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", rec.Code)
+	}
+}
+
+// attempt_count counts claims, so the retry and 429 query may skip sent
+// messages claimed once (one accepted attempt) but must count the rest.
+func TestEvents_RetryCountsWithRealClaimCounts(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	id := a.sendingCampaign()
+	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, attempt_count) VALUES
+		($1, 2, 'email', 'sent', 1), ($1, 3, 'email', 'sent', 2), ($1, 4, 'email', 'retry_scheduled', 2)`, id)
+	a.exec(`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, outcome, http_status)
+		SELECT m.id, a.no, $2, a.outcome, a.code FROM messages m
+		JOIN (VALUES (2, 1, 'accepted', 200), (3, 1, 'rate_limited', 429), (3, 2, 'accepted', 200), (4, 1, 'rate_limited', 429)) a(user_id, no, outcome, code)
+			ON a.user_id = m.user_id
+		WHERE m.campaign_id = $1 AND m.channel = 'email'`, id, fixedNow)
+
+	e, _ := a.stream(id).next(t)
+
+	email := e.Data["channels"].(map[string]any)["email"].(map[string]any)
+	if email["retries"] != float64(1) || email["rate_limited"] != float64(2) {
+		t.Fatalf("want 1 retry and 2 rate-limited attempts, got %v and %v", email["retries"], email["rate_limited"])
+	}
+	// The second claim of user 4 was handed back unsent (a worker stop):
+	// its reason is that, not the earlier 429.
+	if r := email["reasons"].(map[string]any)["retrying"]; !reflect.DeepEqual(r, map[string]any{"requeued": float64(1)}) {
+		t.Fatalf("a claim handed back unsent is requeued, got %v", r)
 	}
 }
