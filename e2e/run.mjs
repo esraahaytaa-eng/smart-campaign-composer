@@ -15,7 +15,7 @@ if (me?.llm_mode !== 'mock') {
 }
 await fetch(`${BASE}/api/logout`, { method: 'POST', headers: { cookie } })
 
-const files = ['sign-in.mjs', 'composer.mjs', 'saving.mjs', 'languages.mjs', 'content-review.mjs']
+const files = ['sign-in.mjs', 'composer.mjs', 'saving.mjs', 'languages.mjs', 'content-review.mjs', 'campaigns.mjs']
 let ok = true
 for (const f of files) {
   console.log(`\n=== ${f}`)

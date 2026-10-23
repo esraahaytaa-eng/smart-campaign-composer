@@ -24,7 +24,7 @@ export default () =>
     await page.getByRole('heading', { name: 'Panel' }).waitFor()
     check(await page.getByText('Simüle yapay zekâ · Simüle sağlayıcılar').isVisible(), 'the mode badge in Turkish')
 
-    await page.getByRole('link', { name: '+ Yeni kampanya' }).click()
+    await page.getByRole('navigation', { name: 'Ana menü' }).getByRole('link', { name: '+ Yeni kampanya' }).click()
     const odd = 'Send a birthday note to users older than 40.'
     await page.getByLabel('Kampanya açıklaması').fill(odd)
     await page.getByRole('button', { name: 'Yapay zekâ ile yorumla' }).click()
