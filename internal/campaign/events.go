@@ -91,7 +91,13 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	snap, err := h.snapshot(ctx, id)
+	interval := h.EventsInterval
+	if interval == 0 {
+		interval = time.Second
+	}
+	// Every stream of the campaign shares its snapshot (D59).
+	snapshot := func() (statusSnapshot, error) { return h.snapshots.get(ctx, id, interval/2, h.snapshot) }
+	snap, err := snapshot()
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "campaign not found")
 		return
@@ -104,10 +110,6 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	last, _ := json.Marshal(snap)
 	send("status", json.RawMessage(last))
 
-	interval := h.EventsInterval
-	if interval == 0 {
-		interval = time.Second
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -122,7 +124,7 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 		}
-		if snap, err = h.snapshot(ctx, id); err != nil {
+		if snap, err = snapshot(); err != nil {
 			if ctx.Err() == nil {
 				slog.Error("status snapshot", "campaign", id, "err", err)
 			}

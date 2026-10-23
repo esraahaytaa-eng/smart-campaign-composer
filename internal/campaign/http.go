@@ -36,6 +36,8 @@ type Handler struct {
 	// Stopping is closed when the server shuts down; open status streams then
 	// end, since http.Server.Shutdown waits for every handler to return.
 	Stopping <-chan struct{}
+
+	snapshots snapshotCache // shared by the status streams (D59)
 }
 
 func (h *Handler) Routes(mux *http.ServeMux) {
