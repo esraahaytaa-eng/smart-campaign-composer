@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { channelRows, deliveryPhase, deliverySummary, resendOffer, type ChannelStatus, type Snapshot } from './status'
+import { channelRows, deliveryPhase, deliverySummary, resendFunnel, resendOffer, type ChannelStatus, type Snapshot } from './status'
 
 type ChannelSummary = ReturnType<typeof deliverySummary>['channels'][number]
 
@@ -152,5 +152,28 @@ describe('channelRows', () => {
   it('lists the most frequent reason first', () => {
     const c = channel({ failed: 5 }, { reasons: { failed: { provider_rejected: 1, retries_exhausted: 4 } } })
     expect(channelRows(c).find((r) => r.group === 'failed')?.reasons.map((r) => r.code)).toEqual(['retries_exhausted', 'provider_rejected'])
+  })
+})
+
+describe('resendFunnel', () => {
+  it('splits the length skips into who a resend reaches and who it leaves out (board 6)', () => {
+    const s = snapshot({ status: 'completed' })
+    s.channels.sms!.resendable = 3
+    s.channels.sms!.groups.failed = 2
+    s.channels.sms!.groups.uncertain = 1
+    expect(resendFunnel(s, 'sms')).toEqual({
+      skipped: 4, // character_limit_exceeded
+      noLonger: 1, // consent revoked since, or reached meanwhile
+      eligible: 3,
+      noConsent: 1, // skipped for consent when sending
+      uncertain: 1,
+      failed: 2,
+    })
+  })
+
+  it('is empty for a channel the campaign does not use', () => {
+    const s = snapshot()
+    delete s.channels.email
+    expect(resendFunnel(s, 'email')).toBeNull()
   })
 })

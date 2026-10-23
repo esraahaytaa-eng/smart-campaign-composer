@@ -16,13 +16,14 @@ import {
   type RecipientsPage,
   type RecipientsQuery,
 } from '../delivery/recipients'
-import type { Group } from '../delivery/status'
+import type { Group, ResendOffer } from '../delivery/status'
 import { formatDateTime, formatNumber, formatTime, isKey, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 
 // Recipient details (board 5, D47): a side dialog whose filters live in the
 // URL query. It shows a snapshot taken when it opens or a filter changes.
-const props = defineProps<{ campaign: Campaign }>()
+const props = defineProps<{ campaign: Campaign; offers: Partial<Record<Channel, ResendOffer>> }>()
+const emit = defineEmits<{ resend: [Channel] }>()
 
 const route = useRoute()
 const router = useRouter()
@@ -117,6 +118,18 @@ function detailText(d: ReturnType<typeof rowDetail>) {
   return t(d.key)
 }
 const last = (r: RecipientsPage['recipients'][number]) => r.attempts.at(-1)?.started_at
+
+// On the Skipped tab, the way to a resend for the channel shown (D48).
+const resendChannel = computed<Channel | null>(() => {
+  const q = query.value
+  if (q?.group !== 'skipped') return null
+  const chs = q.channel === 'all' ? props.campaign.channels : [q.channel]
+  return chs.find((ch) => props.offers[ch]?.state === 'available') ?? null
+})
+function resend(ch: Channel) {
+  close()
+  emit('resend', ch)
+}
 </script>
 
 <template>
@@ -235,6 +248,9 @@ const last = (r: RecipientsPage['recipients'][number]) => r.attempts.at(-1)?.sta
               <span class="muted">
                 {{ info && info.to ? t('recipients.showing', { from: formatNumber(info.from), to: formatNumber(info.to), total: formatNumber(info.total) }) : t('recipients.showingNone', { total: formatNumber(data.total) }) }}
               </span>
+              <button v-if="resendChannel" type="button" class="btn btn-sm btn-primary" @click="resend(resendChannel)">
+                {{ t('resend.drawerLink', { channel: t(`channel.inline.${resendChannel}`) }) }}
+              </button>
               <span class="pager">
                 <button type="button" class="btn btn-sm" :disabled="!info?.hasPrev" @click="set({ page: query.page - 1 })">{{ t('recipients.prev') }}</button>
                 <button type="button" class="btn btn-sm" :disabled="!info?.hasNext" @click="set({ page: query.page + 1 })">{{ t('recipients.next') }}</button>

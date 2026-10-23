@@ -23,6 +23,7 @@ const route = useRoute()
 const id = Number(route.params.id) // each campaign gets its own page instance
 
 const campaign = ref<Campaign | null>(null)
+const parent = ref<Campaign | null>(null)
 const estimate = ref<Estimate | null>(null)
 const loadError = ref<unknown>(null)
 const saveError = ref<unknown>(null)
@@ -54,6 +55,8 @@ async function load() {
     const c = await campaigns.get(id)
     campaign.value = c
     fromCampaign(c)
+    // A resend shows its original message for reference (D48).
+    if (c.parent_campaign_id) campaigns.get(c.parent_campaign_id).then((p) => (parent.value = p), () => {})
     await refreshEstimate()
   } catch (err) {
     loadError.value = err
@@ -301,6 +304,17 @@ const statusText = computed(() => {
 
         <div class="columns">
           <div class="main">
+            <section v-if="parent" class="card section original">
+              <p>{{ t('resend.contentLead', { title: briefTitle(parent.request_text), channel: t(`channel.inline.${campaign.channels[0]!}`) }) }}</p>
+              <details v-for="ch in campaign.channels" :key="ch">
+                <summary>{{ t('resend.showOriginal', { channel: t(`channel.inline.${ch}`) }) }}</summary>
+                <p v-if="ch === 'sms' && parent.content?.sms" class="original-text">{{ parent.content.sms.body }}</p>
+                <template v-else-if="ch === 'email' && parent.content?.email">
+                  <p class="original-text"><strong>{{ parent.content.email.subject }}</strong></p>
+                  <p class="original-text">{{ parent.content.email.body }}</p>
+                </template>
+              </details>
+            </section>
             <section v-if="uses('sms')" class="card section" aria-labelledby="sms-title">
               <h2 id="sms-title" class="section-title">{{ t('channel.sms') }}</h2>
               <MessageField
@@ -505,5 +519,20 @@ const statusText = computed(() => {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+.original p {
+  margin: 0;
+}
+.original summary {
+  cursor: pointer;
+  color: var(--link);
+  font-weight: 600;
+  font-size: 14px;
+}
+.original-text {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  color: var(--ink-2);
 }
 </style>

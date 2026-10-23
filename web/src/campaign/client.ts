@@ -13,6 +13,8 @@ export const campaigns = {
   list: () => api<Campaign[]>('/api/campaigns'), // the newest 200 (D49)
   get: (id: number) => api<Campaign>(path(id)),
   cancel: (id: number) => api<Campaign>(path(id, '/cancel'), { method: 'POST' }),
+  // A draft follow-up for the recipients skipped for length on one channel (D31).
+  resend: (id: number, channel: Channel) => api<Campaign>(path(id, '/resend'), { method: 'POST', body: { channel } }),
   setRules: (id: number, version: number, rules: Rule[]) => api<Campaign>(path(id, '/rules'), { method: 'PUT', body: { version, rules } }),
   setChannels: (id: number, version: number, channels: Channel[]) =>
     api<Campaign>(path(id, '/channels'), { method: 'PUT', body: { version, channels } }),

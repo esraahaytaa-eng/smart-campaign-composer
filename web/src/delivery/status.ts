@@ -121,3 +121,19 @@ export function channelRows(c: ChannelStatus) {
       .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code)),
   }))
 }
+
+// resendFunnel: the numbers behind a resend offer (board 6). Eligible is the
+// backend's current count (D31); the rest explain who is left out and why.
+export function resendFunnel(s: Snapshot, channel: Channel) {
+  const c = s.channels[channel]
+  if (!c) return null
+  const skipped = c.skip_reasons.character_limit_exceeded ?? 0
+  return {
+    skipped,
+    noLonger: Math.max(0, skipped - c.resendable),
+    eligible: c.resendable,
+    noConsent: c.skip_reasons.no_consent ?? 0,
+    uncertain: c.groups.uncertain,
+    failed: c.groups.failed,
+  }
+}

@@ -4,13 +4,14 @@ import { campaigns } from '../campaign/client'
 import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Channel } from '../campaign/types'
-import { channelRows, deliveryPhase, deliverySummary, type Group, type Snapshot } from '../delivery/status'
+import { channelRows, deliveryPhase, deliverySummary, resendOffer, type Group, type Snapshot } from '../delivery/status'
 import { writeQuery } from '../delivery/recipients'
 import { watchStatus } from '../delivery/stream'
 import { formatDateTime, formatNumber, formatPercent, formatTime, isKey, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 import CancelDialog from './CancelDialog.vue'
 import RecipientsDrawer from './RecipientsDrawer.vue'
+import ResendDialog from './ResendDialog.vue'
 
 // A campaign after approval (boards 4 and B): scheduled, live delivery, or
 // read-only results. Everything comes from the status stream (D36).
@@ -24,6 +25,7 @@ const paused = ref(false)
 const reconnecting = ref(false)
 const cancelling = ref<Campaign | null>(null)
 const actionError = ref<unknown>(null)
+const resending = ref<Channel | null>(null)
 
 let stream: { close: () => void } | null = null
 function connect() {
@@ -89,6 +91,15 @@ const delta = computed(() => {
   return d === 0 ? '' : `(${d > 0 ? '+' : '−'}${formatNumber(Math.abs(d))})`
 })
 const rules = computed(() => (props.campaign.rules ?? []).map(ruleLabel))
+// After the stream's end, a resend made elsewhere changes no snapshot (D36),
+// so a failed resend asks for a fresh one.
+const offers = computed(() =>
+  Object.fromEntries(props.campaign.channels.map((ch) => [ch, snap.value ? resendOffer(snap.value, ch) : { state: 'none' as const }])),
+)
+function refresh() {
+  if (!paused.value) connect()
+}
+
 // Each count opens recipient details for its group (board 5).
 const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, q: '', page: 1 }) })
 </script>
@@ -236,10 +247,21 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
               {{ t(`delivery.rate.${c.channel}`, { count: c.status.rate_limited_recent }) }}
               {{ t('delivery.rateTotal', { retries: formatNumber(c.status.retries), limited: formatNumber(c.status.rate_limited) }) }}
             </p>
-            <p v-if="c.status.active_resend_id" class="link-line">
-              {{ t('delivery.activeResend', { channel: channelName(c.channel) }) }}
-              <RouterLink :to="{ name: 'campaign', params: { id: c.status.active_resend_id } }">{{ t('delivery.openResend') }}</RouterLink>
-            </p>
+            <div v-if="offers[c.channel]!.state !== 'none'" class="resend-box">
+              <strong>{{ t('resend.title', { channel: t(`channel.inline.${c.channel}`) }) }}</strong>
+              <template v-for="o in [offers[c.channel]!]" :key="o.state">
+                <span v-if="o.state === 'waiting'" class="muted">{{ t('resend.waiting') }}</span>
+                <template v-else-if="o.state === 'available'">
+                  <span class="muted">{{ t('resend.available', { skipped: formatNumber(o.skipped), count: formatNumber(o.count) }) }}</span>
+                  <button type="button" class="btn btn-sm btn-primary" @click="resending = c.channel">{{ t('resend.button', { count: formatNumber(o.count) }) }}</button>
+                </template>
+                <span v-else-if="o.state === 'active'" class="link-line">
+                  {{ t('delivery.activeResend', { channel: channelName(c.channel) }) }}
+                  <RouterLink :to="{ name: 'campaign', params: { id: o.resendId } }">{{ t('delivery.openResend') }}</RouterLink>
+                </span>
+                <span v-else-if="o.state === 'nobodyLeft'" class="muted">{{ t('resend.nobodyLeft', { skipped: formatNumber(o.skipped) }) }}</span>
+              </template>
+            </div>
           </section>
         </div>
         <p class="muted small">{{ t('delivery.footnote') }}</p>
@@ -247,7 +269,8 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
     </template>
 
     <CancelDialog :campaign="cancelling" @confirm="cancel" @close="cancelling = null" />
-    <RecipientsDrawer v-if="snap && phase !== 'scheduled'" :campaign="campaign" />
+    <RecipientsDrawer v-if="snap && phase !== 'scheduled'" :campaign="campaign" :offers="offers" @resend="(ch) => (resending = ch)" />
+    <ResendDialog v-if="snap" :campaign="campaign" :snapshot="snap" :channel="resending" @close="resending = null" @failed="refresh" />
   </div>
 </template>
 
@@ -475,6 +498,20 @@ h2 {
 .rows {
   display: flex;
   flex-direction: column;
+}
+.resend-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--notice-faint);
+  border: 1px solid var(--notice-line);
+  font-size: 14px;
+}
+.resend-box strong {
+  flex-basis: 100%;
 }
 .channel-row,
 a.stat,
