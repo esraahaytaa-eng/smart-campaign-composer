@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, type Router } from 'vue-router'
 
 // The router module keeps the session in module state, so every test loads
@@ -10,6 +10,11 @@ let session: typeof import('./session')
 type Route = Record<string, (init?: RequestInit) => Response>
 let routes: Route
 const calls: string[] = []
+
+// The first import compiles the app shell's components, which can take
+// longer than a hook's 10 s on a loaded machine. Pay it once here; every test
+// below still imports fresh copies of the modules, reusing the compiled code.
+beforeAll(() => import('./router'), 60_000)
 
 beforeEach(async () => {
   vi.resetModules()
