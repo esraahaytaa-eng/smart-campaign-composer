@@ -1,0 +1,56 @@
+# Secret and personal-data scanning (D51). gitleaks' built-in rules plus the
+# project's own: Anthropic keys (not in gitleaks v8.24.3), email addresses,
+# phone numbers and committed .env files. Allowed: only the project's
+# fictional seed and test data, placeholders, the documented demo login and
+# masked contacts. scripts/scan-selftest.sh proves each rule and allowance.
+
+title = "smart-campaign-composer"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''sk-ant-(?:api|admin)\d{2}-[A-Za-z0-9_\-]{80,}'''
+keywords = ["sk-ant-"]
+
+[[rules]]
+id = "email-address"
+description = "Email address (possible personal data)"
+regex = '''\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}\b'''
+keywords = ["@"]
+
+  [[rules.allowlists]]
+  description = "Fictional, placeholder, demo and tooling addresses (any letter case)"
+  regexTarget = "match"
+  regexes = [
+    '''(?i)@example\.(?:com|org|net)$''',
+    '''(?i)^marketer@marketer\.com$''',
+    '''(?i)@(?:company|sirket)\.com$''',
+    '''(?i)^noreply@anthropic\.com$''',
+    '''(?i)@users\.noreply\.github\.com$''',
+  ]
+
+[[rules]]
+id = "phone-number"
+description = "Phone number (possible personal data)"
+regex = '''\+\d{1,3}[ .\-]?\(?\d{3}\)?[ .\-]?\d{3}[ .\-]?\d{2}[ .\-]?\d{2}\b|\b0?5\d{2}[ .\-]?\d{3}[ .\-]?\d{2}[ .\-]?\d{2}\b|\+\d{11,15}\b'''
+
+  [[rules.allowlists]]
+  description = "Fictional numbers: the seed's and tests' +90 500/555 ranges, and the UK range Ofcom reserves for fiction (+44 7700 900)"
+  regexTarget = "match"
+  regexes = ['''^\+90[ .\-]?5(?:00|55)''', '''^\+44[ .\-]?7700[ .\-]?900''']
+
+[[rules]]
+id = "dotenv-file"
+description = "A .env file must never be committed"
+path = '''(?:^|/)\.env(?:\.[A-Za-z0-9]+)?$'''
+
+  [[rules.allowlists]]
+  paths = ['''(?:^|/)\.env\.example$''']
+
+[allowlist]
+description = "Go module checksums (go.sum lines quoted in docs and session exports, sometimes cut off)"
+regexTarget = "line"
+regexes = ['''\sh1:[A-Za-z0-9+/]{8,}''']
