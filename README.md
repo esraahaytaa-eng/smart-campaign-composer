@@ -52,7 +52,9 @@ All endpoints need a login session (see above).
 | `PUT /api/campaigns/{id}/rules` `{"rules", "version"}` | Replace the draft's rules; they are validated and recounted. |
 | `PUT /api/campaigns/{id}/channels` `{"channels", "version"}` | Change a draft's channels, validated as on create; counts are refreshed. A removed channel's content is deleted; an added channel has no content until it is written or generated, and approval waits for it (D38). A resend's channel is fixed (409). |
 | `PUT /api/campaigns/{id}/schedule` `{"send_at", "version"}` | Change or clear (`null`) the proposed send time: RFC 3339 with offset, between now and 30 days ahead. |
-| `GET /api/campaigns`, `GET /api/campaigns/{id}` | List (newest 200) / one campaign; drafts include current counts, a single campaign its content. |
+| `GET /api/campaigns?status=&q=&page=` | The campaign list (D54): 25 per page, newest first, optionally one `status` and a search `q` in the brief (≤ 50 characters, ignoring case and Turkish letters; `%` and `_` are literal). Returns `campaigns` (a resend also carries its original's brief, `parent_request_text`), the `total` for the filter, and `counts` per status over all campaigns. |
+| `GET /api/dashboard` | The status `counts` and the six campaigns that need attention first: sending, drafts, scheduled by send time, then the rest, most recently changed first (D54). |
+| `GET /api/campaigns/{id}` | One campaign with its content; a draft also has its current counts. |
 | `POST /api/campaigns/{id}/content` `{"version"}` | The AI writes the messages for the chosen channels, in the brief's language. The response is a `text/event-stream`: `delta` `{field, text}` events while it writes (fields `sms.body`, `email.subject`, `email.body`), `retry` `{errors}` if the first answer was invalid, then `done` `{content, version}` or `error` `{message}`. Content is saved only when valid and only if the client is still connected. |
 | `PUT /api/campaigns/{id}/content` `{"content", "version"}` | Save messages edited by hand: `{"sms": {"body"}, "email": {"subject", "body"}}`. |
 | `GET /api/campaigns/{id}/estimate` | Current audience and over-limit counts per channel, labelled as estimates (draft or approved). |
@@ -139,7 +141,7 @@ The composer (T16): **+ New campaign** takes a brief and the channels, and the A
 
 The review step (T17): rules, the estimated audience, the messages and the over-limit estimate in one place, and the send choice. **Sending always needs an explicit decision:** *Send now* or *Schedule* (a date and time in the browser's zone, sent as UTC; between 1 minute and 30 days ahead), a tick that the audience and messages were checked, and a second confirmation that repeats the estimates. A time suggested from the brief is preselected only if it is still usable, labelled as a suggestion with the brief's own words; otherwise nothing is selected. Until everything is in place, the approve button lists what is missing.
 
-The dashboard and the campaign list (T18): the dashboard counts campaigns by status (each card opens the list filtered by it) and lists six campaigns, live and waiting ones first, each with its next step. The campaign list filters by status and searches the brief (ignoring case and Turkish letters); both are kept in the address, so a reload or Back keeps them. Each row shows the channels, status, creation day and send time, links a resend to its original campaign, and offers what the status allows: delete a draft or cancel an approved or sending campaign (each asks first), or open it. Search and filters work on the newest 200 campaigns the API returns (D49).
+The dashboard and the campaign list (T18): the dashboard counts campaigns by status (each card opens the list filtered by it) and lists six campaigns, live and waiting ones first, each with its next step. The campaign list filters by status and searches the brief (ignoring case and Turkish letters); both are kept in the address, so a reload or Back keeps them. Each row shows the channels, status, creation day and send time, links a resend to its original campaign, and offers what the status allows: delete a draft or cancel an approved or sending campaign (each asks first), or open it. The server filters, searches and pages the list (25 per page) and counts the statuses over all campaigns (D54).
 
 After approval, the campaign's page shows its delivery (T18), all from the live status stream (D36):
 
@@ -203,7 +205,7 @@ Changes from the design so far:
 - **429 counts:** shown for the last 5 minutes, as designed, and in total.
 - **Recipient details** (D47): contacts are masked by the server, and the search covers names only, never phone numbers or emails. The panel is a snapshot with its time, as designed.
 - **Resend** (D48): the design edits and approves the shorter SMS in one dialog. Here the dialog shows who gets the resend and who doesn't, then creates a draft that goes through the content and review steps like any campaign (D31), with the original message viewable. Offered on any channel with length skips once the campaign has finished.
-- **Dashboard rows** (D49) don't mention resend opportunities; the campaign's page does. The campaign list searches the brief (there are no names, D43) over the newest 200 campaigns.
+- **Dashboard rows** don't mention resend opportunities; the campaign's page does. The campaign list searches the brief, since there are no names (D43); search, filters and paging run on the server (D54).
 - **Archive:** not built (deferred; see Future improvements).
 
 ## Test
@@ -266,7 +268,6 @@ The security review (T19) with its evidence is in `docs/security-review.md`. In 
 - Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown; about 20 ms of database time for a 6,000-message campaign, see `docs/performance.md`), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
-- The campaign list and dashboard work on the newest 200 campaigns (D49); older ones are not listed.
 - Recipient details page by offset (D47): while a campaign sends, rows can move between pages, and the panel shows a snapshot with its time. Sorting by last attempt costs about 15 ms for a 5,000-message group; see `docs/performance.md` for the upgrade path.
 - After a campaign's status stream has ended, a resend created in another tab is noticed when the page is opened again or a resend fails (D36).
 - The browser suite (`make e2e`) leaves its cancelled and sent test campaigns in the local list.

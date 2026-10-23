@@ -219,6 +219,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Counts and search were only right for the newest 200 campaigns.
 - **Rejected:** *Keep D49 and add only server-side counts:* search and paging would still miss older campaigns.
 - **Trade-offs:** More API surface and tests; a round trip per filter change.
+- **History:** 2026-10-23 (T19 step 5). Built as `GET /api/campaigns?status=&q=&page=` and `GET /api/dashboard`; at 10,000 campaigns every request takes under 20 ms (`docs/performance.md`).
 
 ### D57 — Performance targets for T19
 - **Status:** Accepted · 2026-10-23

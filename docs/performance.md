@@ -91,3 +91,17 @@ Flaky tests found and fixed on the way (each showed up under load; the first one
 - the scheduled-send check in `TestEndToEnd`, now with a 2 s margin and a database-clock check that it ran before the send time.
 
 Timings on a laptop vary a lot with other load (the same `make test` took 75–112 s in one series); compare runs made back to back.
+
+# Campaign list at 10,000 campaigns (T19 step 5, target P4)
+
+`BenchmarkCampaignList` in `internal/campaign/list_bench_test.go`: 10,000 campaigns across all statuses, the handler called directly, 50 runs each (`go test -run '^$' -bench CampaignList -benchtime 50x -v ./internal/campaign/` also prints the query plans).
+
+| Case | ms per request |
+|---|---:|
+| First page | 5.7 |
+| Status filter | 5.8 |
+| Search and filter (`status=draft&q=istanbul`) | 17.5 |
+| Last page (page 400) | 12.3 |
+| Dashboard (counts and six rows) | 15.0 |
+
+All well under the 100 ms target. The search folds Turkish letters on every row (no index can serve `LIKE '%…%'` on folded text); at this size that costs about 12 ms. A trigram index on the folded brief is the upgrade path if campaigns grow by orders of magnitude.
