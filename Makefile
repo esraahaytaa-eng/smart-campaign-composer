@@ -1,4 +1,4 @@
-.PHONY: test test-local lint e2e scan scan-staged scan-selftest hooks
+.PHONY: test test-local lint e2e perf scan scan-staged scan-selftest hooks
 
 # Runs all tests in Docker, Go and the frontend at the same time (the frontend's
 # output is shown after Go's); only Docker and make are needed (D27).
@@ -32,6 +32,18 @@ e2e:
 	$(E2E) up -d --build --wait api worker mock-provider
 	$(E2E) --profile e2e run --rm e2e; status=$$?; \
 	$(E2E) down --remove-orphans; \
+	exit $$status
+
+# Performance measurements (T19 step 7, D57) on their own stack with the
+# default settings: a full send watched by 20 live screens, 10 marketers using
+# the API for PERF_DURATION (default 2m), then loading and responsiveness in a
+# browser. Prints each target with what was measured; fails if one is missed.
+PERF = docker compose -p scc-perf -f docker-compose.yml -f docker-compose.perf.yml
+perf:
+	$(PERF) up -d --build --wait api worker mock-provider
+	$(PERF) --profile perf run --rm perf; status=$$?; \
+	$(PERF) --profile e2e run --rm e2e || status=1; \
+	$(PERF) down --remove-orphans; \
 	exit $$status
 
 # Secret and personal-data scanning (D51), gitleaks in Docker with the rules

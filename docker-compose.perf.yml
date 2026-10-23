@@ -1,0 +1,62 @@
+# The performance stack (T19 step 7, D57): make perf starts it as the Compose
+# project scc-perf next to docker-compose.yml and removes it afterwards. App
+# settings are the defaults (mock AI, mock providers at their default failure
+# rates, 30 s retry cap); only measuring is added:
+# - pg_stat_statements, to read database time;
+# - the api signs in to Postgres as its own role, scc_api (a member of scc, so
+#   the same rights), so its database time is told apart from the worker's.
+services:
+  postgres:
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "max_connections=200"]
+    volumes: !override
+      - ./scripts/perf-roles.sql:/docker-entrypoint-initdb.d/perf-roles.sql:ro
+    tmpfs:
+      - /var/lib/postgresql/data # a fresh, seeded database every run
+  migrate:
+    environment:
+      DEMO_MARKETER_PASSWORD: "Demo1234!"
+  api:
+    ports: !reset []
+    environment:
+      LLM_MODE: mock
+      DATABASE_URL: postgres://scc_api:scc-api-perf@postgres:5432/scc?sslmode=disable
+  worker:
+    environment:
+      RETRY_BACKOFF_MAX: 30s
+      MAX_ATTEMPTS: 5
+
+  # The Go measurements (internal/perf, build tag perf).
+  perf:
+    profiles: ["perf"]
+    image: golang:1.26-alpine
+    working_dir: /src
+    command: ["go", "test", "-tags", "perf", "-count=1", "-v", "-timeout", "20m", "./internal/perf/"]
+    environment:
+      CGO_ENABLED: "0"
+      BASE: http://api:8080
+      DATABASE_URL: postgres://scc:${POSTGRES_PASSWORD:-scc}@postgres:5432/scc?sslmode=disable
+      DEMO_PASSWORD: "Demo1234!"
+      PERF_DURATION: ${PERF_DURATION:-2m}
+      PERF_THINK: ${PERF_THINK:-0s}
+      PERF_MARKETERS: ${PERF_MARKETERS:-10}
+      PERF_ONLY: ${PERF_ONLY:-}
+    volumes:
+      - .:/src
+      - gomodcache:/go/pkg/mod
+      - gobuildcache:/root/.cache/go-build
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Browser measurements: loading, script time and responsiveness (e2e/frontend-perf.mjs).
+  e2e:
+    command: ["sh", "-c", "sha256sum package-lock.json | cmp -s - node_modules/.lock-sha || { npm ci --no-audit --no-fund && sha256sum package-lock.json > node_modules/.lock-sha; } && node frontend-perf.mjs"]
+    environment:
+      DEMO_PASSWORD: "Demo1234!"
+
+# The Go caches of make test, so the measurements don't download and compile everything again.
+volumes:
+  gomodcache:
+    name: smart-campaign-composer_gomodcache
+  gobuildcache:
+    name: smart-campaign-composer_gobuildcache
