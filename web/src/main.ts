@@ -1,6 +1,6 @@
 import { createApp, watch } from 'vue'
 import App from './App.vue'
-import { locale, t } from './i18n'
+import { locale, localeReady, t } from './i18n'
 import { createAppRouter } from './router'
 import './styles.css'
 
@@ -14,4 +14,5 @@ function setTitle() {
 router.afterEach(setTitle)
 watch(locale, setTitle)
 
-createApp(App).use(router).mount('#app')
+// A remembered Turkish is fetched first, so the first render is already in it (D58).
+localeReady.then(() => createApp(App).use(router).mount('#app'))

@@ -168,13 +168,13 @@ describe('Turkish chip labels', () => {
     [rule('order_count', 'gte', 3), 'En az 3 sipariş'],
     [rule('total_spend', 'gte', 10000), 'Toplam harcaması en az 10.000 TL'],
     [rule('cart_value', 'gte', 499.5), 'Sepet tutarı en az 499,50 TL'],
-  ])('%j reads "%s"', (r, label) => {
-    setLocale('tr')
+  ])('%j reads "%s"', async (r, label) => {
+    await setLocale('tr')
     expect(ruleLabel(r)).toBe(label)
   })
 
-  it('translates editor titles and problems', () => {
-    setLocale('tr')
+  it('translates editor titles and problems', async () => {
+    await setLocale('tr')
     expect(ruleTitle('city', 'in')).toBe('Şehir')
     expect(formProblems(defaultForm('city', 'in', catalog), catalog)).toEqual(['En az bir şehir seçin.'])
     expect(formProblems(Object.assign(defaultForm('total_spend', 'gte', catalog), { amount: -1 }), catalog)).toEqual(['0 ile 1.000.000 TL arasında bir tutar girin.'])

@@ -2,8 +2,7 @@
 // with the choice kept in localStorage. Only interface text is translated;
 // data and AI output reach the page through placeholders, unchanged.
 import { readonly, ref } from 'vue'
-import { en, type Key } from './en'
-import { tr } from './tr'
+import { en, type Key, type Message } from './en'
 
 export type { Key } from './en'
 export type Locale = 'en' | 'tr'
@@ -15,7 +14,8 @@ export const locales: { code: Locale; name: string }[] = [
 ]
 
 const STORAGE_KEY = 'scc.locale'
-const dictionaries = { en, tr }
+// Only English is part of the app; Turkish is fetched when chosen (D58).
+const dictionaries: Partial<Record<Locale, Record<Key, Message>>> = { en }
 const formats: Record<Locale, string> = { en: 'en-GB', tr: 'tr-TR' } // "1 Oct 2026", "1 Eki 2026"
 
 function stored(): Locale {
@@ -27,7 +27,7 @@ function stored(): Locale {
   }
 }
 
-const current = ref<Locale>(stored())
+const current = ref<Locale>('en')
 export const locale = readonly(current)
 
 function markDocument() {
@@ -35,7 +35,21 @@ function markDocument() {
 }
 markDocument()
 
-export function setLocale(next: Locale) {
+let requested: Locale = 'en'
+
+// setLocale switches once the language's dictionary is there. If it can't be
+// fetched, the page stays in the current language; of two quick choices, the
+// last one wins.
+export async function setLocale(next: Locale) {
+  requested = next
+  if (!dictionaries[next]) {
+    try {
+      dictionaries[next] = (await import('./tr')).tr
+    } catch {
+      return
+    }
+  }
+  if (requested !== next) return
   current.value = next
   try {
     localStorage.setItem(STORAGE_KEY, next)
@@ -44,6 +58,9 @@ export function setLocale(next: Locale) {
   }
   markDocument()
 }
+
+// The remembered language, loaded before the app first renders (main.ts).
+export const localeReady = setLocale(stored())
 
 export type Params = Record<string, string | number>
 
@@ -54,7 +71,7 @@ export const isKey = (k: string): k is Key => k in en
 // t returns the text for key in the current language, with {placeholders}
 // filled in once (a value containing "{x}" is left as it is).
 export function t(key: Key, params: Params = {}): string {
-  const message = dictionaries[current.value][key]
+  const message = (dictionaries[current.value] ?? en)[key]
   const text =
     typeof message === 'string'
       ? message

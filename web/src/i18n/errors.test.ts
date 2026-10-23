@@ -21,10 +21,10 @@ describe('errorText', () => {
 
   // Validation the UI can't foresee: a localized heading, the server's own
   // words kept as details so nothing is lost.
-  it('keeps the server details of a rejected change', () => {
+  it('keeps the server details of a rejected change', async () => {
     const err = new ApiError('send_at must be between now and 30 days from now', 422)
     expect(errorText(err)).toBe('The server didn’t accept this change. Details from the server (in English): send_at must be between now and 30 days from now')
-    setLocale('tr')
+    await setLocale('tr')
     expect(errorText(err)).toBe('Sunucu bu değişikliği kabul etmedi. Sunucudan gelen ayrıntı (İngilizce): send_at must be between now and 30 days from now')
   })
 
@@ -41,17 +41,17 @@ describe('errorText', () => {
     expect(errorText(sessionLoadError())).toBe('Signed in, but the session could not be loaded. Try again.')
   })
 
-  it('speaks Turkish when the UI does', () => {
-    setLocale('tr')
+  it('speaks Turkish when the UI does', async () => {
+    await setLocale('tr')
     expect(errorText(new ApiError('', 0))).toBe('Sunucuya ulaşılamıyor. Çalıştığından emin olun.')
   })
 })
 
 // The AI's reason is AI output: shown exactly as written, never translated.
 describe('aiReason', () => {
-  it('returns the reason of an unsupported brief unchanged', () => {
+  it('returns the reason of an unsupported brief unchanged', async () => {
     const reason = 'Yaş bilgisi katalogda yok; "40 yaş üstü" bir kurala çevrilemez.'
-    setLocale('en')
+    await setLocale('en')
     expect(aiReason(new ApiError(reason, 422, { error: reason, unsupported: true }))).toBe(reason)
   })
 
