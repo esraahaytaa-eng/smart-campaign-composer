@@ -105,3 +105,74 @@ Timings on a laptop vary a lot with other load (the same `make test` took 75–1
 | Dashboard (counts and six rows) | 15.0 |
 
 All well under the 100 ms target. The search folds Turkish letters on every row (no index can serve `LIKE '%…%'` on folded text); at this size that costs about 12 ms. A trigram index on the folded brief is the upgrade path if campaigns grow by orders of magnitude.
+
+# Performance targets (T19 step 7, D57)
+
+Measured 2026-10-23 with `make perf` (below) on the same laptop: 4 cores / 8 threads, Docker Desktop given all 8 threads and 8 of 16 GB. **The machine was not quiet**: the host's 1-minute load average was 6–44 during the runs (browser, editor, a spell-check service at ~70% of a core, and the local app stack, whose idle worker and Postgres use ~0.3 CPU). The load generator runs in the same Docker VM as the stack it measures. Numbers are from single runs unless a range is given; they move by ±30% between runs.
+
+## Method
+
+`make perf` starts its own stack (Compose project `scc-perf`, `docker-compose.perf.yml`) with the **default settings**: the 3,000-customer seed, mock AI, mock providers at their default failure rates, 5 attempts, 30 s retry cap. Only measuring is added: `pg_stat_statements`, and the api signs in to Postgres as its own role (`scc_api`, same rights) so its database time is separate from the worker's. Then:
+
+1. **Full send** (`internal/perf`, build tag `perf`): a campaign to every consenting customer on both channels, approved to send now, while 20 live screens follow its status stream and a poller reads the database every 100 ms. P1 from each message's final time, P2 from the recorded attempt times (sliding 1 s window), P6 from the api's database time and from each screen update's delay against the poller.
+2. **Marketers**: 10,000 campaigns and a finished 6,000-message campaign are inserted, then 10 marketers (own sessions, own drafts) repeat a round of 12 requests for 2 minutes: list with search and filter (twice), campaign, recipients (twice), estimate, list page, dashboard, catalog, save messages, save rules. `PERF_MARKETERS`, `PERF_THINK` (pause after each request) and `PERF_DURATION` change the load; `PERF_ONLY=marketers` skips the send.
+3. **Browser** (`e2e/frontend-perf.mjs`): cold loads (new context, empty cache) of sign-in, dashboard and the campaign list, and five interactions, on a desktop and on a phone profile (Lighthouse's mobile defaults: DevTools "Slow 4G" and a 4× slower CPU). Medians of 3.
+
+It prints each target with what was measured and fails if one is missed.
+
+## Results
+
+| # | Target | Measured | Met |
+|---|---|---|---|
+| P1 | Full send (4,191 messages): 95% final ≤ 35 s, all ≤ 75 s | 4 runs: 95% at 25.8–34.6 s, all at 42.6–52.9 s. Every message ended sent. | yes, with little margin under load |
+| P2 | ≤ 100 provider requests per channel in any 1 s window | peaks 98–100 per channel over ~2,320 attempts per channel | yes |
+| P3 | 10 marketers: p95 reads ≤ 200 ms, writes ≤ 300 ms, 0 server errors | with a 1 s pause per request (10 req/s in all): reads 40 ms, writes 18 ms, 0 errors. Back to back (144 req/s): reads 208 ms, writes 118 ms, 0 errors | depends on the reading (below) |
+| P4 | Campaign list, 10,000 campaigns, search and filter: p95 ≤ 100 ms | 44 ms (1 s pause), 58 ms (one marketer back to back), 270 ms (10 back to back) | same |
+| P5 | Recipient details, 6,000 messages: p95 ≤ 50 ms | 45 ms (1 s pause), 62 ms (one marketer back to back), 276 ms (10 back to back) | only with pauses, and barely |
+| P6 | 20 live screens: db time ≤ 400 ms/s, each update ≤ 2 s behind | 4 runs: 1,005–2,178 ms/s; updates behind by p95 0.8–1.4 s, max 1.1–3.9 s; every screen got the end | no |
+| P7 | First load ≤ 100 kB gzipped; largest chunk ≤ 40 kB gzipped | sign-in 93.6 kB, dashboard 98.4 kB; largest chunk 43.9 kB (Vue's runtime alone is ~43 kB). **But nothing is served compressed**: browsers download 263–294 kB | first part only on paper |
+| T1 | `make test` ≤ 50% of 130 s | 5 runs: 69–99 s, median 76 s (58%) | no |
+| T2 | `make e2e` suite ≤ 50% of 147 s | 5 runs: 74–84 s, median 77 s (52%), now with 298 checks instead of 181 | no, narrowly |
+| T3 | No flaky failures in 5 consecutive full runs | `make test` 5/5, `make e2e` 5/5 (298/298 each) | yes |
+
+### Marketers in detail (ms)
+
+| Request | 10 marketers, 1 s pause: p50 / p95 | 1 marketer, back to back: p50 / p95 | 10 marketers, back to back: p50 / p95 |
+|---|---:|---:|---:|
+| list search and filter | 30 / 44 | 30 / 58 | 104 / 270 |
+| recipients | 29 / 45 | 30 / 62 | 96 / 276 |
+| dashboard | 21 / 38 | 19 / 38 | 67 / 195 |
+| list page | 17 / 28 | 15 / 27 | 53 / 156 |
+| estimate | 5 / 11 | 6 / 12 | 23 / 73 |
+| campaign | 3 / 7 | 3 / 6 | 12 / 39 |
+| save messages / rules | 10 / 20, 7 / 16 | 10 / 18, 10 / 17 | 36 / 106, 42 / 126 |
+
+Where the time goes (`pg_stat_statements`, api role): the list's rows and its count (each ~10–12 ms alone: every row's brief is folded for the search), the recipients page (~12 ms: one last-attempt lookup per message in the group), and the status counts over all campaigns (~4 ms, run by both the list and the dashboard). Back to back, the same statements take ~40 ms: ten of them compete for the CPUs, so the latency is queueing, not a slower plan.
+
+### Browser (medians of 3 cold loads, ms)
+
+| Profile, page | First paint | Usable | JS run | Style + layout | All main-thread work | Blocking (TBT) | JS downloaded |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Desktop, sign-in | 184 | 195 | 13 | 21 | 135 | 0 | 263 kB, uncompressed |
+| Desktop, campaign list | 248 | 329 | 15 | 38 | 280 | 10 | 294 kB |
+| Phone, sign-in | 4,636 | 4,841 | 167 | 168 | 2,233 | 613 | 263 kB |
+| Phone, dashboard | 5,244 | 5,905 | 244 | 176 | 2,348 | 1,001 | 276 kB |
+| Phone, campaign list | 5,532 | 6,646 | 140 | 260 | 2,341 | 1,108 | 294 kB |
+
+A trace of the phone sign-in: compiling and running all JavaScript ~350 ms (4× CPU), style and layout ~220 ms, the rest is the throttled renderer's own task overhead. The 43.9 kB chunk is a bit under half of the code, so at most ~150 ms of main-thread time on the phone profile; splitting it would not reduce the bytes or the round trips, which dominate (~4.6 s to first paint on slow 4G).
+
+Interactions (slowest event, as INP measures it; Google rates ≤ 200 ms good, ≤ 500 ms needs improvement):
+
+| Interaction | Desktop | Phone |
+|---|---:|---:|
+| Status filter (list re-renders) | 56 | 400–480 |
+| Typing a search | 56 | 264–296 |
+| Türkçe, first time (downloads 32 kB) | 32–64 | 64–72 (result on screen 1.4 s) |
+| Back to English (whole page re-renders) | 40–64 | 336–432 |
+| Opening a campaign | 24–32 | 88 |
+
+## Test durations: why they vary
+
+- **Each `make test` is as long as its slowest package**, and that package runs its tests one after another: `campaign` (82 tests, 32 s alone, 70–95 s inside the full run) because all 13 packages run at once against one Postgres and the same CPUs. A test's own setup is small (database copy ~40 ms, sign-in and fixtures ~50 ms, drop ~20 ms); most of the time is the tests' own requests.
+- **Host load decides the rest.** The same command took 69–115 s today with the host's load average between 5 and 98 (one spike during a run). Step 2's 62 s median was measured on a quieter machine.
+- **The suites grew only a little since step 2** (233 → 248 Go tests, 181 → 298 browser checks), so growth explains the browser suite's few extra seconds, not `make test`'s.
