@@ -97,7 +97,7 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	}
 	// The first snapshot is read fresh, so a page opened again sees what changed
 	// meanwhile (D36); the polls after it share the campaign's snapshot (D59).
-	snapshot := func() (statusSnapshot, error) { return h.snapshots.get(ctx, id, interval/2, h.snapshot) }
+	snapshot := func() (statusSnapshot, error) { return h.snapshots.get(ctx, id, interval/4, h.snapshot) }
 	snap, err := h.snapshot(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "campaign not found")
