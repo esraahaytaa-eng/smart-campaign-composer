@@ -37,6 +37,15 @@ describe('errorText', () => {
     )
   })
 
+  // D63: 429 is also the real-AI call limit; it says so, with the wait.
+  it('explains the AI call limit with its wait', async () => {
+    const err = new ApiError('AI call limit reached', 429, { code: 'ai_call_limit', retry_after_seconds: 1250 })
+    expect(errorText(err)).toBe('You have reached the AI limit for this hour. Try again in 21 minutes, or edit by hand.')
+    expect(errorText(new ApiError('', 429, { code: 'ai_call_limit', retry_after_seconds: 30 }))).toContain('in 1 minute,')
+    await setLocale('tr')
+    expect(errorText(err)).toBe('Bu saatlik yapay zekâ sınırına ulaştınız. 21 dakika sonra yeniden deneyin ya da elle düzenleyin.')
+  })
+
   it('explains a session that could not be loaded after signing in', () => {
     expect(errorText(sessionLoadError())).toBe('Signed in, but the session could not be loaded. Try again.')
   })

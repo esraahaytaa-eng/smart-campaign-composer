@@ -486,6 +486,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Trade-offs:** More load on the test database at once; a shared-state test made parallel by mistake would be flaky, so 5 consecutive runs check it.
 - **History:** 2026-10-24, measured. 138 tests run in parallel; 19 stay serial (4 read shared metrics, 15 depend on timing). One package at a time is much faster (`campaign` 15–20 s → 4–5 s), but the full `make test` is not: alternating old and new code gave 60–64 s both ways, because the full run already keeps the machine busy and `e2e` (already parallel) is now the longest package. The 76 s median before was host load; at a load around 10, both meet T1. 8 of 8 full runs passed.
 
+### D63 — Real AI calls are limited per marketer
+- **Status:** Accepted · 2026-10-24
+- **Decision:** With real AI, each marketer may make at most `AI_CALLS_PER_HOUR` (default 10) provider calls in any 60 minutes; every call counts, including the retry inside one operation. Over the limit the API answers `429` with `Retry-After` and code `ai_call_limit`. Mock AI is unlimited. In memory, per api process.
+- **Why:** Every create, brief edit and message generation can cost up to two paid calls, with nothing capping them (security review, step 4).
+- **Rejected:** *Counting operations instead of calls:* retries would go uncounted. *A token bucket:* allows more than N in an hour after a quiet spell. *Limits stored in Postgres:* one api replica; a restart needs operator access.
+- **Trade-offs:** Resets on restart; a refused retry ends the operation with 429 although its first call was spent. The Anthropic console's spend limit remains the real ceiling.
+
 ## Open Questions
 
 Proposed 2026-10-23 after the step 7 measurements (`docs/performance.md`). Q1, Q2, Q5 and the first half of Q3 were approved as D59–D62.

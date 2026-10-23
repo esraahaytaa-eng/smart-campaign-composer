@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"smart-campaign-composer/internal/campaign"
 	"smart-campaign-composer/internal/llm"
 )
 
@@ -335,7 +336,7 @@ func TestEvents_FinishedCampaignShowsActiveResend(t *testing.T) {
 // elsewhere) sees what changed since the last stream ended (D36).
 func TestEvents_ANewStreamSeesChangesAtOnce(t *testing.T) {
 	t.Parallel()
-	a := newAppEvery(t, llm.NewMock(), 10*time.Second) // a shared snapshot would be kept for 5 s
+	a := newAppWith(t, llm.NewMock(), func(h *campaign.Handler) { h.EventsInterval = 10 * time.Second }) // a shared snapshot would be kept a while
 	id := a.sendingCampaign()
 	a.exec(`UPDATE messages SET status = 'cancelled' WHERE campaign_id = $1 AND status IN ('pending', 'sending', 'retry_scheduled')`, id)
 	a.exec(`UPDATE campaigns SET status = 'completed', completed_at = $2 WHERE id = $1`, id, fixedNow)

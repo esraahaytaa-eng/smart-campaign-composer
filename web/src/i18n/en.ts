@@ -47,6 +47,10 @@ export const en = {
 
   'error.network': "Can't reach the server. Check that it is running.",
   'error.server': 'The server ran into a problem. Try again in a moment.',
+  'error.aiCallLimit': {
+    one: 'You have reached the AI limit for this hour. Try again in {count} minute, or edit by hand.',
+    other: 'You have reached the AI limit for this hour. Try again in {count} minutes, or edit by hand.',
+  },
   'error.tooManySignIns': 'Too many failed sign-ins. Wait a few minutes, then try again.',
   'error.notFound': 'This campaign doesn’t exist, or it was deleted.',
   'error.changed': 'This draft was changed elsewhere, in another tab or by another marketer. Reload to see the latest version before editing again.',

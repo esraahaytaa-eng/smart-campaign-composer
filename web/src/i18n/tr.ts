@@ -46,6 +46,10 @@ export const tr: Record<Key, Message> = {
 
   'error.network': 'Sunucuya ulaşılamıyor. Çalıştığından emin olun.',
   'error.server': 'Sunucuda bir sorun oluştu. Birazdan tekrar deneyin.',
+  'error.aiCallLimit': {
+    one: 'Bu saatlik yapay zekâ sınırına ulaştınız. {count} dakika sonra yeniden deneyin ya da elle düzenleyin.',
+    other: 'Bu saatlik yapay zekâ sınırına ulaştınız. {count} dakika sonra yeniden deneyin ya da elle düzenleyin.',
+  },
   'error.tooManySignIns': 'Çok fazla başarısız giriş denemesi. Birkaç dakika bekleyip tekrar deneyin.',
   'error.notFound': 'Bu kampanya yok ya da silinmiş.',
   'error.changed': 'Bu taslak başka bir yerde, başka bir sekmede ya da başka bir pazarlamacı tarafından değiştirildi. Tekrar düzenlemeden önce en son hâlini görmek için yenileyin.',

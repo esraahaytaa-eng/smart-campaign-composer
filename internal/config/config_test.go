@@ -11,7 +11,7 @@ import (
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 	keys := []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "DEMO_MARKETER_PASSWORD",
-		"LLM_TIMEOUT", "PROVIDER_DB_PASSWORD", "PROVIDER_SEED", "PROVIDER_URL", "MAX_ATTEMPTS", "WEB_DIR", "RETRY_BACKOFF_MAX"}
+		"LLM_TIMEOUT", "PROVIDER_DB_PASSWORD", "PROVIDER_SEED", "PROVIDER_URL", "MAX_ATTEMPTS", "WEB_DIR", "RETRY_BACKOFF_MAX", "AI_CALLS_PER_HOUR"}
 	for _, ch := range []string{"SMS", "EMAIL"} {
 		for _, suffix := range []string{"_DELAY_MS_MIN", "_DELAY_MS_MAX", "_ERROR_RATE", "_RATE_LIMIT_RATE", "_TIMEOUT_RATE"} {
 			keys = append(keys, ch+suffix)
@@ -38,7 +38,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LLMMode != "mock" || cfg.AnthropicModel != "claude-opus-5-5" || cfg.HTTPAddr != ":8080" || cfg.LLMTimeout != 60*time.Second {
+	if cfg.LLMMode != "mock" || cfg.AnthropicModel != "claude-opus-5-5" || cfg.HTTPAddr != ":8080" || cfg.LLMTimeout != 60*time.Second || cfg.AICallsPerHour != 10 {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }
@@ -81,6 +81,8 @@ func TestLoadConfig_Errors(t *testing.T) {
 		{"provider seed", "mock-provider", map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_SEED": "x"}, "PROVIDER_SEED"},
 		{"bad llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "soon"}, "LLM_TIMEOUT"},
 		{"zero llm timeout", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_TIMEOUT": "0s"}, "LLM_TIMEOUT"},
+		{"ai calls zero", "api", map[string]string{"DATABASE_URL": "postgres://db", "AI_CALLS_PER_HOUR": "0"}, "AI_CALLS_PER_HOUR"},
+		{"ai calls not a number", "api", map[string]string{"DATABASE_URL": "postgres://db", "AI_CALLS_PER_HOUR": "ten"}, "AI_CALLS_PER_HOUR"},
 		{"unknown llm mode", "api", map[string]string{"DATABASE_URL": "postgres://db", "LLM_MODE": "fake"}, "LLM_MODE"},
 	}
 	for _, tc := range cases {
@@ -112,6 +114,14 @@ func TestLoadConfig_LLMTimeout(t *testing.T) {
 	cfg, err := Load("api")
 	if err != nil || cfg.LLMTimeout != 90*time.Second {
 		t.Fatalf("want 90s, got %v (%v)", cfg.LLMTimeout, err)
+	}
+}
+
+func TestLoadConfig_AICallsPerHour(t *testing.T) {
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "AI_CALLS_PER_HOUR": "25"})
+	cfg, err := Load("api")
+	if err != nil || cfg.AICallsPerHour != 25 {
+		t.Fatalf("want 25, got %d, %v", cfg.AICallsPerHour, err)
 	}
 }
 

@@ -60,11 +60,11 @@ func (garbageLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.Ra
 
 func newApp(t *testing.T, model llm.LLM) *app {
 	t.Helper()
-	return newAppEvery(t, model, 20*time.Millisecond)
+	return newAppWith(t, model, nil)
 }
 
-// newAppEvery is newApp with the status stream polling every interval.
-func newAppEvery(t *testing.T, model llm.LLM, interval time.Duration) *app {
+// newAppWith is newApp with handler settings changed by configure.
+func newAppWith(t *testing.T, model llm.LLM, configure func(*campaign.Handler)) *app {
 	t.Helper()
 	ctx := context.Background()
 	pool := dbtest.MigratedDB(t)
@@ -86,7 +86,10 @@ func newAppEvery(t *testing.T, model llm.LLM, interval time.Duration) *app {
 	api := auth.Routes(mux, pool, "mock")
 	stopping := make(chan struct{})
 	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: 5 * time.Second, Now: func() time.Time { return fixedNow },
-		EventsInterval: interval, Stopping: stopping}
+		EventsInterval: 20 * time.Millisecond, Stopping: stopping}
+	if configure != nil {
+		configure(h)
+	}
 	h.Routes(api)
 
 	a := &app{t: t, pool: pool, mux: mux, stopping: stopping}

@@ -97,7 +97,11 @@ func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error 
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
 	api := auth.Routes(mux, pool, cfg.LLMMode)
-	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}).Routes(api)
+	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}
+	if cfg.LLMMode == "real" { // mock AI costs nothing and stays unlimited (D63)
+		h.AICalls = campaign.NewAICallLimit(cfg.AICallsPerHour)
+	}
+	h.Routes(api)
 	if cfg.WebDir != "" {
 		mux.Handle("/", spa.Handler(cfg.WebDir))
 	}

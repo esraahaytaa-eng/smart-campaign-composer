@@ -37,6 +37,9 @@ type Handler struct {
 	// end, since http.Server.Shutdown waits for every handler to return.
 	Stopping <-chan struct{}
 
+	// AICalls limits real AI calls per marketer (D63); nil means no limit (mock AI).
+	AICalls *AICallLimit
+
 	snapshots snapshotCache // shared by the status streams (D59)
 }
 
@@ -146,7 +149,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		got, err := Interpret(r.Context(), h.LLM, llm.InterpretInput{Text: text, Now: h.Now(), TimeZone: in.TimeZone, Catalog: cat}, h.Timeout)
+		got, err := Interpret(r.Context(), h.model(), llm.InterpretInput{Text: text, Now: h.Now(), TimeZone: in.TimeZone, Catalog: cat}, h.Timeout)
 		if err != nil {
 			writeAIError(w, err)
 			return
@@ -302,7 +305,7 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "load catalog", err)
 		return
 	}
-	got, err := Interpret(ctx, h.LLM, llm.InterpretInput{Text: in.Request, Now: h.Now(), TimeZone: zone, Catalog: cat}, h.Timeout)
+	got, err := Interpret(ctx, h.model(), llm.InterpretInput{Text: in.Request, Now: h.Now(), TimeZone: zone, Catalog: cat}, h.Timeout)
 	if err != nil {
 		writeAIError(w, err)
 		return
@@ -521,7 +524,10 @@ func loadZone(name string) (*time.Location, error) {
 }
 
 func writeAIError(w http.ResponseWriter, err error) {
+	var limited *aiLimitError
 	switch {
+	case errors.As(err, &limited):
+		writeAILimit(w, limited)
 	case errors.Is(err, ErrRequestText):
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, ErrAIInvalid):

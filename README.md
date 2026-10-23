@@ -72,7 +72,7 @@ curl -b cookies.txt -X POST localhost:8080/api/campaigns -d '{"request":"Send a 
 
 ### Trying the real AI (manual check)
 
-Tests never call Claude. To check real mode by hand: set `LLM_MODE=real` and `ANTHROPIC_API_KEY` in `.env`, run `docker compose up --build`, log in as above, and post a free-form brief (e.g. "Send a thank-you note to customers in Izmir who spent at least 2,000 TL"). Expect a draft with matching rules, or `"unsupported": true` with a reason for a brief the rule catalog can't express (e.g. one that mentions age). `LLM_TIMEOUT` (default `60s`) limits each AI call. Each call costs real API credits.
+Tests never call Claude. To check real mode by hand: set `LLM_MODE=real` and `ANTHROPIC_API_KEY` in `.env`, run `docker compose up --build`, log in as above, and post a free-form brief (e.g. "Send a thank-you note to customers in Izmir who spent at least 2,000 TL"). Expect a draft with matching rules, or `"unsupported": true` with a reason for a brief the rule catalog can't express (e.g. one that mentions age). `LLM_TIMEOUT` (default `60s`) limits each AI call. Each call costs real API credits. Each marketer can make at most `AI_CALLS_PER_HOUR` (default 10) AI calls in any hour, retries included (D63).
 
 ## Mock AI briefs
 
@@ -274,4 +274,4 @@ The security review (T19) with its evidence is in `docs/security-review.md`. In 
 - After a campaign's status stream has ended, a resend created in another tab is noticed when the page is opened again or a resend fails (D36).
 - The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.
 - Sign-in limits are kept in memory per api process and reset on restart; behind a proxy, all clients share its address.
-- AI calls are not rate-limited. Every create or brief edit can cost up to two AI calls (one retry), parallel edits of the same draft each make their own call before the version check at save rejects all but one, and an unsupported answer can be asked again at once. Mock mode costs nothing; in real mode every call uses API credits.
+- Real AI calls are limited to `AI_CALLS_PER_HOUR` (default 10) per marketer in any hour, retries included (D63); over the limit the API answers `429` with `Retry-After`. The limit is kept in memory per api process and resets on restart; the Anthropic console's spend limit is the real cost ceiling. Mock AI is unlimited.

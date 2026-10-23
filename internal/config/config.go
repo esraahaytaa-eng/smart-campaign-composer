@@ -19,6 +19,7 @@ type Config struct {
 	AnthropicAPIKey string
 	AnthropicModel  string
 	LLMTimeout      time.Duration // per AI call (D15)
+	AICallsPerHour  int           // real AI calls per marketer per hour (D63)
 	WebDir          string        // built frontend the api serves (T15); empty serves none
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
@@ -81,6 +82,11 @@ func Load(process string) (Config, error) {
 		return Config{}, fmt.Errorf("LLM_TIMEOUT must be a positive duration such as 60s, got %q", os.Getenv("LLM_TIMEOUT"))
 	}
 	cfg.LLMTimeout = timeout
+	calls, err := strconv.Atoi(getenv("AI_CALLS_PER_HOUR", "10"))
+	if err != nil || calls < 1 {
+		return Config{}, fmt.Errorf("AI_CALLS_PER_HOUR must be a whole number of at least 1, got %q", os.Getenv("AI_CALLS_PER_HOUR"))
+	}
+	cfg.AICallsPerHour = calls
 	// Without the build every page would be a 404 after a normal-looking start.
 	if cfg.WebDir != "" {
 		if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err != nil {

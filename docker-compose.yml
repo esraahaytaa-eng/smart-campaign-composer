@@ -36,6 +36,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-60s}
+      AI_CALLS_PER_HOUR: ${AI_CALLS_PER_HOUR:-10} # real AI only (D63)
       WEB_DIR: /srv/web # the built frontend in the image (T15)
     ports:
       - "8080:8080"
