@@ -134,21 +134,84 @@ func TestEvents_SnapshotCounts(t *testing.T) {
 		"audience": float64(7),
 		"counts": map[string]any{"pending": float64(1), "sending": float64(0), "retry_scheduled": float64(1), "sent": float64(1),
 			"failed": float64(2), "skipped": float64(2), "cancelled": float64(0)},
-		"retries":          float64(1),
-		"rate_limited":     float64(1),
-		"skip_reasons":     map[string]any{"character_limit_exceeded": float64(1), "no_consent": float64(1)},
-		"failure_reasons":  []any{map[string]any{"reason": "HTTP 400", "count": float64(2)}},
-		"uncertain":        float64(1),
-		"resendable":       float64(1),
-		"active_resend_id": nil,
+		"groups": map[string]any{"sent": float64(1), "uncertain": float64(0), "failed": float64(2), "skipped": float64(2),
+			"cancelled": float64(0), "retrying": float64(1), "pending": float64(1)},
+		"reasons": map[string]any{
+			"failed":   map[string]any{"provider_rejected": float64(2)},
+			"skipped":  map[string]any{"character_limit_exceeded": float64(1), "no_consent": float64(1)},
+			"retrying": map[string]any{"server_error": float64(1)}, // uncertain, but still in progress
+		},
+		"retries":             float64(1),
+		"rate_limited":        float64(1),
+		"rate_limited_recent": float64(1),
+		"skip_reasons":        map[string]any{"character_limit_exceeded": float64(1), "no_consent": float64(1)},
+		"resendable":          float64(1),
+		"active_resend_id":    nil,
 	}
 	if !reflect.DeepEqual(sms, want) {
 		t.Fatalf("sms:\n got %v\nwant %v", sms, want)
 	}
 	email := channels["email"].(map[string]any)
 	if email["audience"] != float64(1) || email["counts"].(map[string]any)["sending"] != float64(1) ||
-		email["failure_reasons"] == nil || len(email["failure_reasons"].([]any)) != 0 {
+		email["groups"].(map[string]any)["pending"] != float64(1) || len(email["reasons"].(map[string]any)) != 0 {
 		t.Fatalf("email: %v", email)
+	}
+}
+
+// Every message falls in exactly one display group (D46): an uncertain
+// delivery is its own group once the message has ended without being sent.
+func TestEvents_GroupsAndReasons(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	id := a.sendingCampaign()
+	a.exec(`UPDATE messages SET status = 'retry_scheduled' WHERE campaign_id = $1 AND user_id = 6 AND channel = 'sms'`, id)
+	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason, delivery_uncertain) VALUES
+		($1, 2, 'email', 'sent', NULL, true),
+		($1, 3, 'email', 'failed', NULL, true),
+		($1, 4, 'email', 'skipped', 'no_consent', true),
+		($1, 5, 'email', 'cancelled', NULL, true),
+		($1, 6, 'email', 'cancelled', NULL, false),
+		($1, 7, 'email', 'failed', NULL, false)`, id)
+	a.exec(`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, outcome, http_status)
+		SELECT m.id, a.no, $2::timestamptz - a.ago * interval '1 minute', a.outcome, a.code FROM messages m
+		JOIN (VALUES (2, 1, 'timeout', NULL, 1), (2, 2, 'accepted', 200, 0),
+			(3, 1, 'timeout', NULL, 1), (3, 2, 'rejected', 400, 0),
+			(5, 1, 'interrupted', NULL, 0),
+			(7, 1, 'server_error', 503, 12), (7, 2, 'rate_limited', 429, 10), (7, 3, 'server_error', 503, 1)
+		) a(user_id, no, outcome, code, ago) ON a.user_id = m.user_id
+		WHERE m.campaign_id = $1 AND m.channel = 'email'`, id, fixedNow)
+
+	e, _ := a.stream(id).next(t)
+
+	channels := e.Data["channels"].(map[string]any)
+	sms := channels["sms"].(map[string]any)
+	if g := sms["groups"].(map[string]any); g["retrying"] != float64(2) || g["pending"] != float64(0) {
+		t.Fatalf("sms groups: %v", g)
+	}
+	if r := sms["reasons"].(map[string]any)["retrying"]; !reflect.DeepEqual(r, map[string]any{"server_error": float64(1), "requeued": float64(1)}) {
+		t.Fatalf("a retry without an attempt is requeued, got %v", r)
+	}
+	email := channels["email"].(map[string]any)
+	wantGroups := map[string]any{"sent": float64(1), "uncertain": float64(3), "failed": float64(1), "skipped": float64(0),
+		"cancelled": float64(1), "retrying": float64(0), "pending": float64(1)}
+	if !reflect.DeepEqual(email["groups"], wantGroups) {
+		t.Fatalf("email groups:\n got %v\nwant %v", email["groups"], wantGroups)
+	}
+	wantReasons := map[string]any{
+		"uncertain": map[string]any{"timeout": float64(1), "interrupted": float64(1), "no_response_recorded": float64(1)},
+		"failed":    map[string]any{"retries_exhausted": float64(1)},
+	}
+	if !reflect.DeepEqual(email["reasons"], wantReasons) {
+		t.Fatalf("email reasons:\n got %v\nwant %v", email["reasons"], wantReasons)
+	}
+	if email["rate_limited"] != float64(1) || email["rate_limited_recent"] != float64(0) {
+		t.Fatalf("a 429 from 10 minutes ago counts only in the total: %v / %v", email["rate_limited"], email["rate_limited_recent"])
+	}
+	var sum float64
+	for _, n := range email["groups"].(map[string]any) {
+		sum += n.(float64)
+	}
+	if sum != email["audience"] {
+		t.Fatalf("groups add up to %v, audience %v", sum, email["audience"])
 	}
 }
 

@@ -17,7 +17,39 @@ import (
 
 var messageStatuses = []string{"pending", "sending", "retry_scheduled", "sent", "failed", "skipped", "cancelled"}
 
-const maxFailureReasons = 10 // per channel, most frequent first
+// Display groups (D46): every message is in exactly one, so they add up to
+// the audience. An uncertain delivery is its own group once the message has
+// ended without being sent.
+var deliveryGroups = []string{"sent", "uncertain", "failed", "skipped", "cancelled", "retrying", "pending"}
+
+// groupSQL is a message's display group; m is the messages row.
+const groupSQL = `CASE
+	WHEN m.status = 'sent' THEN 'sent'
+	WHEN m.status IN ('failed', 'skipped', 'cancelled') AND m.delivery_uncertain THEN 'uncertain'
+	WHEN m.status = 'retry_scheduled' THEN 'retrying'
+	WHEN m.status IN ('pending', 'sending') THEN 'pending'
+	ELSE m.status END`
+
+// lastAttemptsSQL joins the message's latest attempt (la) and its latest
+// attempt without a clear answer (lu), for reasonSQL.
+const lastAttemptsSQL = `
+	LEFT JOIN LATERAL (SELECT outcome FROM delivery_attempts WHERE message_id = m.id ORDER BY id DESC LIMIT 1) la ON true
+	LEFT JOIN LATERAL (SELECT outcome FROM delivery_attempts WHERE message_id = m.id
+		AND outcome IN ('timeout', 'network_error', 'interrupted') ORDER BY id DESC LIMIT 1) lu ON true`
+
+// reasonSQL is the reason code within the group (D46), or NULL for groups
+// without reasons. Codes, never provider text, so the UI can translate them.
+// An uncertain delivery without such an attempt was held by a worker that
+// stopped mid-attempt; a retry without an attempt was handed back unsent.
+const reasonSQL = `CASE ` + groupSQL + `
+	WHEN 'failed' THEN CASE WHEN la.outcome = 'rejected' THEN 'provider_rejected' ELSE 'retries_exhausted' END
+	WHEN 'skipped' THEN m.skip_reason
+	WHEN 'uncertain' THEN coalesce(lu.outcome, 'no_response_recorded')
+	WHEN 'retrying' THEN coalesce(la.outcome, 'requeued')
+	END`
+
+// recentWindow is how far back rate_limited_recent counts 429s.
+const recentWindow = 5 * time.Minute
 
 // statusSnapshot is what the dashboard shows live (D16). Counts come from the
 // database; the approval estimate is kept next to the actual audience.
@@ -32,20 +64,16 @@ type statusSnapshot struct {
 }
 
 type channelStatus struct {
-	Audience       int            `json:"audience"` // messages created when sending started
-	Counts         map[string]int `json:"counts"`   // by message status
-	Retries        int            `json:"retries"`  // attempts after a message's first
-	RateLimited    int            `json:"rate_limited"`
-	SkipReasons    map[string]int `json:"skip_reasons"`
-	FailureReasons []reasonCount  `json:"failure_reasons"`
-	Uncertain      int            `json:"uncertain"`  // may have been delivered without confirmation (D5)
-	Resendable     int            `json:"resendable"` // who a resend would reach now (D31)
-	ActiveResendID *int64         `json:"active_resend_id"`
-}
-
-type reasonCount struct {
-	Reason string `json:"reason"`
-	Count  int    `json:"count"`
+	Audience          int                       `json:"audience"` // messages created when sending started
+	Counts            map[string]int            `json:"counts"`   // by message status
+	Groups            map[string]int            `json:"groups"`   // by display group (D46)
+	Reasons           map[string]map[string]int `json:"reasons"`  // group → reason code → count
+	Retries           int                       `json:"retries"`  // attempts after a message's first
+	RateLimited       int                       `json:"rate_limited"`
+	RateLimitedRecent int                       `json:"rate_limited_recent"` // in the last recentWindow
+	SkipReasons       map[string]int            `json:"skip_reasons"`
+	Resendable        int                       `json:"resendable"` // who a resend would reach now (D31)
+	ActiveResendID    *int64                    `json:"active_resend_id"`
 }
 
 // events streams the campaign's status: a snapshot at once, then one on each
@@ -119,25 +147,28 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 	}
 	s.Channels = map[string]*channelStatus{}
 	for _, ch := range channels {
-		cs := &channelStatus{Counts: map[string]int{}, SkipReasons: map[string]int{}, FailureReasons: []reasonCount{}}
+		cs := &channelStatus{Counts: map[string]int{}, Groups: map[string]int{}, Reasons: map[string]map[string]int{}, SkipReasons: map[string]int{}}
 		for _, st := range messageStatuses {
 			cs.Counts[st] = 0
+		}
+		for _, g := range deliveryGroups {
+			cs.Groups[g] = 0
 		}
 		s.Channels[ch] = cs
 	}
 
-	rows, err := tx.Query(ctx, `SELECT channel, status, coalesce(skip_reason, ''), count(*), count(*) FILTER (WHERE delivery_uncertain)
-		FROM messages WHERE campaign_id = $1 GROUP BY 1, 2, 3`, id)
+	rows, err := tx.Query(ctx, `SELECT channel, status, coalesce(skip_reason, ''), `+groupSQL+`, count(*)
+		FROM messages m WHERE campaign_id = $1 GROUP BY 1, 2, 3, 4`, id)
 	if err != nil {
 		return s, err
 	}
-	var ch, status, reason string
-	var n, uncertain int
-	_, err = pgx.ForEachRow(rows, []any{&ch, &status, &reason, &n, &uncertain}, func() error {
+	var ch, status, reason, group string
+	var n int
+	_, err = pgx.ForEachRow(rows, []any{&ch, &status, &reason, &group, &n}, func() error {
 		cs := s.Channels[ch]
 		cs.Audience += n
 		cs.Counts[status] += n
-		cs.Uncertain += uncertain
+		cs.Groups[group] += n
 		if reason != "" {
 			cs.SkipReasons[reason] += n
 		}
@@ -150,28 +181,37 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		return s, err
 	}
 
-	rows, err = tx.Query(ctx, `SELECT m.channel, count(*) FILTER (WHERE a.attempt_no > 1), count(*) FILTER (WHERE a.outcome = 'rate_limited')
-		FROM delivery_attempts a JOIN messages m ON m.id = a.message_id WHERE m.campaign_id = $1 GROUP BY 1`, id)
+	rows, err = tx.Query(ctx, `SELECT m.channel, count(*) FILTER (WHERE a.attempt_no > 1), count(*) FILTER (WHERE a.outcome = 'rate_limited'),
+		count(*) FILTER (WHERE a.outcome = 'rate_limited' AND a.started_at > $2)
+		FROM delivery_attempts a JOIN messages m ON m.id = a.message_id WHERE m.campaign_id = $1 GROUP BY 1`, id, h.Now().Add(-recentWindow))
 	if err != nil {
 		return s, err
 	}
-	var retries, limited int
-	if _, err = pgx.ForEachRow(rows, []any{&ch, &retries, &limited}, func() error {
-		s.Channels[ch].Retries, s.Channels[ch].RateLimited = retries, limited
+	var retries, limited, recent int
+	if _, err = pgx.ForEachRow(rows, []any{&ch, &retries, &limited, &recent}, func() error {
+		s.Channels[ch].Retries, s.Channels[ch].RateLimited, s.Channels[ch].RateLimitedRecent = retries, limited, recent
 		return nil
 	}); err != nil {
 		return s, err
 	}
 
-	rows, err = tx.Query(ctx, `SELECT channel, coalesce(last_error, 'unknown'), count(*) FROM messages
-		WHERE campaign_id = $1 AND status = 'failed' GROUP BY 1, 2 ORDER BY 3 DESC, 2`, id)
+	// Only messages whose group has reasons, so the lateral joins stay off
+	// the sent and pending majority.
+	rows, err = tx.Query(ctx, `SELECT m.channel, `+groupSQL+`, `+reasonSQL+`, count(*) FROM messages m`+lastAttemptsSQL+`
+		WHERE m.campaign_id = $1 AND m.status IN ('failed', 'skipped', 'cancelled', 'retry_scheduled') GROUP BY 1, 2, 3`, id)
 	if err != nil {
 		return s, err
 	}
-	if _, err = pgx.ForEachRow(rows, []any{&ch, &reason, &n}, func() error {
-		if cs := s.Channels[ch]; len(cs.FailureReasons) < maxFailureReasons {
-			cs.FailureReasons = append(cs.FailureReasons, reasonCount{reason, n})
+	var code *string
+	if _, err = pgx.ForEachRow(rows, []any{&ch, &group, &code, &n}, func() error {
+		if code == nil {
+			return nil // a plain cancelled message has no reason
 		}
+		cs := s.Channels[ch]
+		if cs.Reasons[group] == nil {
+			cs.Reasons[group] = map[string]int{}
+		}
+		cs.Reasons[group][*code] += n
 		return nil
 	}); err != nil {
 		return s, err
