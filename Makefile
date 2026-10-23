@@ -16,11 +16,12 @@ test:
 test-local:
 	go test -count=1 ./...
 
-# Format and vet checks in Docker; fails if any file needs gofmt. The
+# Format and vet checks in Docker on the module's own packages (not caches such
+# as CI's .ci-cache); fails if any file needs gofmt. The
 # frontend's TypeScript type check runs as part of web-test (make test).
 lint:
 	docker compose --profile test run --rm --no-deps go-test \
-		sh -c 'files=$$(gofmt -l .); if [ -n "$$files" ]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi; go vet ./...'
+		sh -c 'files=$$(gofmt -l $$(go list -f "{{.Dir}}" ./...)); if [ -n "$$files" ]; then echo "gofmt needed:"; echo "$$files"; exit 1; fi; go vet ./...'
 
 # Opt-in browser tests (Playwright) on their own stack (D53): a separate
 # Compose project with a fresh database, started here and removed afterwards,
