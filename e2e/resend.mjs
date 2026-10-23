@@ -3,7 +3,7 @@
 // follow-up goes through the content and review steps and reaches only the
 // skipped recipients. Sends to the Ankara SMS customers through the mock
 // provider (the original and the resend).
-import { ANKARA_BRIEF, BASE, LONG_SMS, longSmsToAnkara, suite } from './lib.mjs'
+import { BASE, LONG_SMS, longSmsToAnkara, suite } from './lib.mjs'
 
 const SHORT = 'Merhaba {{first_name}}, hafta sonu indirimi başladı! Kod: HAFTA'
 
@@ -31,7 +31,18 @@ export default () =>
     check((await dlg.locator('.funnel').innerText()).includes(String(groups.skipped)), 'the dialog starts from the skipped count')
     check(await dlg.getByText('Uncertain — never resent').isVisible(), 'the dialog says uncertain recipients are left out')
     await t.shot('resend-dialog')
+
+    // a conflict: a resend is created elsewhere while the dialog is open
+    const elsewhere = t.track((await (await page.request.post(`${BASE}/api/campaigns/${id}/resend`, { data: { channel: 'sms' } })).json()).id)
+    await dlg.getByRole('button', { name: 'Create the resend draft' }).click()
+    await dlg.getByText('already has an active resend', { exact: false }).waitFor()
+    check(true, 'a resend created elsewhere is reported, not duplicated')
     await dlg.getByRole('button', { name: 'Go back' }).click()
+    await page.getByRole('link', { name: 'Open the resend' }).waitFor()
+    check(true, 'the page then points to the existing resend')
+    // Deleting that draft frees the channel for the rest of this file.
+    const other = await t.get(elsewhere)
+    check((await page.request.delete(`${BASE}/api/campaigns/${elsewhere}`, { data: { version: other.version } })).ok(), 'test setup: the other resend draft is deleted')
 
     // the drawer's Skipped tab offers it too
     await page.goto(`${BASE}/campaigns/${id}?recipients=skipped&channel=sms`)
@@ -70,21 +81,4 @@ export default () =>
     await page.goto(`${BASE}/campaigns?q=${encodeURIComponent('weekend sale announcement')}`)
     const row = page.locator('[role=row]', { has: page.locator(`a[href="/campaigns/${resend}"]`) })
     check((await row.getByRole('link', { name: /^Resend of/ }).getAttribute('href')) === `/campaigns/${id}`, 'the list links the resend to its original')
-
-    // a conflict: the resend is created elsewhere while the dialog is open
-    const other = await t.draft(ANKARA_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${other}/content`, { data: { version: 1, content: { sms: { body: LONG_SMS } } } })
-    await page.request.post(`${BASE}/api/campaigns/${other}/approve`, { data: { version: 2, send: 'now' } })
-    await done(other)
-    await page.goto(`${BASE}/campaigns/${other}`)
-    await offer.click()
-    await dlg.waitFor()
-    const elsewhere = await page.request.post(`${BASE}/api/campaigns/${other}/resend`, { data: { channel: 'sms' } })
-    t.track((await elsewhere.json()).id)
-    await dlg.getByRole('button', { name: 'Create the resend draft' }).click()
-    await dlg.getByText('already has an active resend', { exact: false }).waitFor()
-    check(true, 'a resend created elsewhere is reported, not duplicated')
-    await dlg.getByRole('button', { name: 'Go back' }).click()
-    await page.getByRole('link', { name: 'Open the resend' }).waitFor()
-    check(true, 'the page then points to the existing resend')
   })
