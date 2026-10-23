@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, isNavigationFailure, NavigationFailureType } from 'vue-router'
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
 import { logout, session } from '../session'
 import BrandMark from '../components/BrandMark.vue'
@@ -21,7 +21,11 @@ const initials = computed(() =>
 const modeLabel = computed(() => t(session.value?.llm_mode === 'real' ? 'mode.real' : 'mode.mock'))
 const modeTitle = computed(() => t(session.value?.llm_mode === 'real' ? 'mode.realHelp' : 'mode.mockHelp'))
 
+// Leave the page first, so its guard can save unsaved text or ask; signing
+// out first would leave nothing able to save it. A blocked leave keeps the session.
 async function signOut() {
+  const failure = await router.push({ name: 'dashboard' })
+  if (isNavigationFailure(failure, NavigationFailureType.aborted)) return
   await logout().catch(() => {}) // the session is cleared locally either way
   await router.replace({ name: 'login' })
 }

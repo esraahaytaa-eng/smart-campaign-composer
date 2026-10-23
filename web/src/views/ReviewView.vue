@@ -7,6 +7,7 @@ import { briefTitle } from '../campaign/title'
 import type { Campaign, Channel } from '../campaign/types'
 import { approvalBlockers, type Blocker } from '../content/approval'
 import { SAMPLES } from '../content/preview'
+import { contentWasStale } from '../content/stale'
 import { browserZone, fromLocalInput, scheduleProblem, suggestion, toLocalInput } from '../content/schedule'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessagePreview from '../components/MessagePreview.vue'
@@ -18,6 +19,8 @@ import { ApiError } from '../api'
 const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
+// The brief was re-interpreted after the messages were written (D40).
+const stale = contentWasStale(id)
 
 const campaign = ref<Campaign | null>(null)
 const estimate = ref<Estimate | null>(null)
@@ -52,7 +55,8 @@ async function load() {
       when.value = 'later'
       localAt.value = toLocalInput(s.at)
     }
-    estimate.value = await campaigns.estimate(id)
+    // Without the estimate the page still works: the counts fall back to the draft's.
+    estimate.value = await campaigns.estimate(id).catch(() => null)
   } catch (err) {
     loadError.value = err
   }
@@ -142,6 +146,7 @@ function reload() {
 
       <template v-else>
         <StepBar :current="3" :campaign-id="id" />
+        <div v-if="stale" role="alert" class="alert alert-warning">{{ t('campaign.staleContent') }}</div>
         <!-- 409: approved or edited elsewhere since this page loaded (review 4). -->
         <div v-if="conflict" role="alert" class="alert alert-warning">
           <span>{{ t('error.changed') }}</span>

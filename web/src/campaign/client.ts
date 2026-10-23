@@ -69,9 +69,16 @@ export async function streamContent(id: number, version: number, onEvent: (e: SS
   const reader = res.body.getReader()
   const decoder = new TextDecoder() // stream: true keeps characters split across chunks
   for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    parser.push(decoder.decode(value, { stream: true }))
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch (err) {
+      // The connection dropped mid-stream: a network problem, said as one.
+      if (err instanceof DOMException && err.name === 'AbortError') throw err
+      throw new ApiError("Can't reach the server.", 0) // i18n-ignore: the UI shows errorText()
+    }
+    if (chunk.done) break
+    parser.push(decoder.decode(chunk.value, { stream: true }))
   }
   parser.push(decoder.decode())
   parser.end()

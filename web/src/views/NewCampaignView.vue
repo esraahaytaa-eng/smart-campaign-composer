@@ -23,6 +23,7 @@ const length = computed(() => [...brief.value.trim()].length)
 const tooLong = computed(() => length.value > MAX_BRIEF)
 
 async function interpret() {
+  if (busy.value) return // a double click must not create two campaigns
   problem.value = null
   if (length.value === 0 || tooLong.value) {
     const empty = length.value === 0

@@ -84,6 +84,7 @@ async function commit(quiet = false): Promise<boolean> {
   }
   incomplete.value = false
   saveError.value = null
+  unsavedGeneration.value = false
   let sent = false
   try {
     // The save may wait in the queue: check again when it runs, so text
@@ -160,6 +161,8 @@ onBeforeUnmount(() => {
 
 // ---- AI writing (D34): live text while it streams; nothing saved if stopped ----
 const streaming = ref(false)
+// A stopped or failed generation saves nothing (D34), so the header must not say "Saved".
+const unsavedGeneration = ref(false)
 const retrying = ref(false)
 const live = ref<Record<string, string>>({})
 const aiProblem = ref<string | null>(null) // the stream's own error text (English) as details
@@ -213,6 +216,7 @@ async function write() {
       if (result.outcome === 'conflict') throw new ApiError('changed elsewhere', 409) // i18n-ignore: the page shows its conflict banner
       return fresh
     })
+    unsavedGeneration.value = result.outcome !== 'done'
     if (result.outcome === 'done') {
       fromCampaign(campaign.value!)
       notice.value = 'content.done'
@@ -264,7 +268,7 @@ const statusText = computed(() => {
         </RouterLink>
         <h1 class="title">{{ briefTitle(campaign.request_text) }}</h1>
         <span class="status">{{ t(`status.${campaign.status}`) }}</span>
-        <span class="save-state">{{ saver.state.value === 'saving' && !streaming ? t('save.saving') : saver.state.value === 'saved' ? t('save.saved') : '' }}</span>
+        <span class="save-state">{{ saver.state.value === 'saving' && !streaming ? t('save.saving') : saver.state.value === 'saved' && !unsavedGeneration ? t('save.saved') : '' }}</span>
       </div>
 
       <div v-if="!isDraft" class="alert alert-info">{{ t('campaign.notEditable', { status: t(`status.${campaign.status}`) }) }} <RouterLink :to="{ name: 'campaign', params: { id: campaign.id } }">{{ t('campaign.openDelivery') }}</RouterLink></div>
