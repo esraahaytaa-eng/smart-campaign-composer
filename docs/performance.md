@@ -176,3 +176,18 @@ Interactions (slowest event, as INP measures it; Google rates ≤ 200 ms good, �
 - **Each `make test` is as long as its slowest package**, and that package runs its tests one after another: `campaign` (82 tests, 32 s alone, 70–95 s inside the full run) because all 13 packages run at once against one Postgres and the same CPUs. A test's own setup is small (database copy ~40 ms, sign-in and fixtures ~50 ms, drop ~20 ms); most of the time is the tests' own requests.
 - **Host load decides the rest.** The same command took 69–115 s today with the host's load average between 5 and 98 (one spike during a run). Step 2's 62 s median was measured on a quieter machine.
 - **The suites grew only a little since step 2** (233 → 248 Go tests, 181 → 298 browser checks), so growth explains the browser suite's few extra seconds, not `make test`'s.
+
+## After the fixes (D59–D62), 2026-10-24
+
+Same machine and method; the host was quieter than before (load average 5–13 instead of 6–44), so compare the changes that the fixes explain, not every number.
+
+| Fix | Before | After |
+|---|---|---|
+| **D59, live screens share a snapshot** (P6) | 1,005–2,178 ms of api database time per second; 5,291–6,491 statements; slowest update 1.1–3.9 s behind | 23–29 ms/s; 263–275 statements; slowest update 0.98–1.48 s behind (3 runs). **P6 met.** |
+| **D60, precompressed assets** (P7, loading) | 263–294 kB of JavaScript per first visit | 96–109 kB. Phone profile: sign-in first paint 4.6 → 2.5 s, dashboard 5.2 → 3.3 s, campaign list 5.5 → 4.0 s. Desktop unchanged (~0.2 s, a local connection). |
+| **D61, parallel database tests** (T1) | `make test` 76 s median (busy host) | Alternating old and new code: 60–64 s both ways, so no gain for the full run; one package alone is faster (`campaign` 15–20 → 4–5 s). At this load both meet T1; 9 of 9 full runs passed. |
+| **D62, pager above the list** | Below the fold at 1440×900 | 155 px from the top; checked in the browser |
+
+D59 needed two corrections on the way, both measured: a new stream's first snapshot is read fresh (the browser suite caught a page opened again right after a resend that still showed none), and a snapshot is reused for a quarter of the poll interval instead of half (with half, the slowest update was 1.4–2.1 s behind, at the edge of 2 s).
+
+Not changed by these fixes, and still as above: P4 and P5 under back-to-back load (list search p95 112–161 ms, recipients 120–170 ms; met with realistic pauses), and the largest-chunk part of P7 (43.9 kB gzipped; Vue's runtime alone is ~43 kB). The phone interactions measured faster after (status filter 120–128 ms, back to English 128–136 ms) with no rendering change, so that is the quieter host, not a fix.

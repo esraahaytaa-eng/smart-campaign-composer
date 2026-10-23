@@ -267,12 +267,11 @@ The security review (T19) with its evidence is in `docs/security-review.md`. In 
 
 ## Known limitations
 
-- Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown; about 20 ms of database time for a 6,000-message campaign, see `docs/performance.md`), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
+- The streams of a campaign share one status snapshot (D59): its database cost grows with the campaigns being watched, not with the screens (20 screens on one send: about 25 ms of database time per second, see `docs/performance.md`). Nothing limits how many streams are open, and the sharing is per api process.
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
 - Recipient details page by offset (D47): while a campaign sends, rows can move between pages, and the panel shows a snapshot with its time. Sorting by last attempt costs about 15 ms for a 5,000-message group; see `docs/performance.md` for the upgrade path.
 - After a campaign's status stream has ended, a resend created in another tab is noticed when the page is opened again or a resend fails (D36).
 - The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.
-- The built frontend is served uncompressed: a first visit downloads 263–294 kB of JavaScript (94–98 kB if gzipped); see `docs/performance.md`.
 - Sign-in limits are kept in memory per api process and reset on restart; behind a proxy, all clients share its address.
 - AI calls are not rate-limited. Every create or brief edit can cost up to two AI calls (one retry), parallel edits of the same draft each make their own call before the version check at save rejects all but one, and an unsupported answer can be asked again at once. Mock mode costs nothing; in real mode every call uses API credits.
