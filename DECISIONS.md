@@ -173,10 +173,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D46 — Delivery outcomes shown in seven groups, with reason codes
 - **Status:** Accepted · 2026-10-23
-- **Decision:** The UI shows messages in seven groups that add up to the audience: Sent (`sent`), Uncertain (`failed`, `skipped` or `cancelled` with an uncertain delivery, D5), Failed, Skipped, Cancelled (the rest of those statuses), Retrying (`retry_scheduled`), Pending (`pending` and `sending`). Reasons are codes the UI translates (D44): failed `provider_rejected` / `retries_exhausted`; skipped `character_limit_exceeded` (with the rendered length) / `no_consent`; uncertain and retrying by the last attempt's outcome. The status stream (D36) gains the groups, the reason codes and the 429s of the last 5 minutes; its raw error strings and the separate `uncertain` count are removed (the Uncertain group replaces it).
+- **Decision:** The UI shows messages in seven groups that add up to the audience: Sent (`sent`), Uncertain (`failed`, `skipped` or `cancelled` with an uncertain delivery, D5), Failed, Skipped, Cancelled (the rest of those statuses), Retrying (`retry_scheduled`), Pending (`pending` and `sending`). Reasons are codes the UI translates (D44): failed `provider_rejected` / `retries_exhausted`; skipped `character_limit_exceeded` (with the rendered length) / `no_consent`; uncertain by the latest attempt without a clear answer (`timeout`, `network_error`, `interrupted`, or `no_response_recorded` when a worker died mid-attempt); retrying by the last attempt's outcome, or `requeued` when the latest claim was handed back unsent. The status stream (D36) gains the groups, the reason codes and the 429s of the last 5 minutes; its raw error strings and the separate `uncertain` count are removed (the Uncertain group replaces it).
 - **Why:** Matches the design's vocabulary; one definition for the live screen and recipient details; provider text is neither translated nor safe to show.
 - **Rejected:** *Uncertain as a separate overlapping count:* groups wouldn't add up. *Showing `last_error`:* untranslatable, may contain provider data.
 - **Trade-offs:** A sent message whose earlier attempt timed out counts only as Sent; changes the T14 stream's fields.
+- **History:** 2026-10-23 (PR #6 review). The reasons are worded as implemented; a retry handed back unsent after an earlier attempt now reads `requeued` instead of that attempt's outcome.
 
 ### D47 — Recipient API: paged, name search only, masked contacts
 - **Status:** Accepted · 2026-10-23
