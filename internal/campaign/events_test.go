@@ -330,6 +330,31 @@ func TestEvents_FinishedCampaignShowsActiveResend(t *testing.T) {
 	}
 }
 
+// D59: streams share snapshots, but a stream's first one is read fresh, so a
+// page opened again (e.g. after a resend failed because one was made
+// elsewhere) sees what changed since the last stream ended (D36).
+func TestEvents_ANewStreamSeesChangesAtOnce(t *testing.T) {
+	t.Parallel()
+	a := newAppEvery(t, llm.NewMock(), 10*time.Second) // a shared snapshot would be kept for 5 s
+	id := a.sendingCampaign()
+	a.exec(`UPDATE messages SET status = 'cancelled' WHERE campaign_id = $1 AND status IN ('pending', 'sending', 'retry_scheduled')`, id)
+	a.exec(`UPDATE campaigns SET status = 'completed', completed_at = $2 WHERE id = $1`, id, fixedNow)
+	first := a.stream(id)
+	if e, _ := first.next(t); e.Data["channels"].(map[string]any)["sms"].(map[string]any)["active_resend_id"] != nil {
+		t.Fatalf("no resend yet, got %v", e)
+	}
+	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(id)+"/resend", `{"channel":"sms"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("resend: %d %s", rec.Code, rec.Body)
+	}
+	resend := decode[draft](t, rec)
+
+	e, _ := a.stream(id).next(t)
+	if got := e.Data["channels"].(map[string]any)["sms"].(map[string]any)["active_resend_id"]; got != float64(resend.ID) {
+		t.Fatalf("the page opened again must see the resend %d, got %v", resend.ID, got)
+	}
+}
+
 func TestEvents_UnknownCampaign404(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())

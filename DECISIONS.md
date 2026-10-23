@@ -465,10 +465,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D59 — Live screens share one snapshot per campaign
 - **Status:** Accepted · 2026-10-23
-- **Decision:** Each status stream keeps its own loop (D36) but reads the campaign's snapshot through an in-process cache: a snapshot younger than half the stream interval is reused, and streams that ask at the same time wait for one database read. Errors are not cached; campaigns nobody reads are dropped.
+- **Decision:** Each status stream keeps its own loop (D36); its first snapshot is read fresh, and its polls after that read the campaign's snapshot through an in-process cache: a snapshot younger than half the stream interval is reused, and streams that ask at the same time wait for one database read. Errors are not cached; campaigns nobody reads are dropped.
 - **Why:** 20 screens on one send cost 1.0–2.2 s of database time per second (P6); the cost should grow with campaigns, not screens.
 - **Rejected:** *A poller per campaign that pushes to subscribers:* same gain, more code and start/stop races. *`LISTEN/NOTIFY` from the worker:* a worker change and notification storms. *Redis or Kafka:* new infrastructure for one process.
 - **Trade-offs:** An update can be up to ~1.5 s old instead of ~1 s; per api process (one replica).
+- **History:** 2026-10-24: the first snapshot was cached too at first; a page opened again right after a resend made elsewhere then missed it (caught by the browser suite), so it is read fresh.
 
 ### D60 — Built assets are served precompressed
 - **Status:** Accepted · 2026-10-23
