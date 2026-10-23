@@ -257,6 +257,10 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 - **AI-generated campaign titles:** the AI could suggest a short title in the same answer that interprets the brief, with the brief's start as the fallback and manual edits kept. Deferred to keep the scope small (D43).
 - **Archiving campaigns:** hide finished campaigns from the list. Not built: deleting drafts removes most of the clutter, and archiving can be added later without changing how deletion works (D37).
 
+## Security
+
+The security review (T19) with its evidence is in `docs/security-review.md`. In short: customer contacts are masked by the server and never cached; the AI never receives customer data; every API route needs a session; failed sign-ins are limited (5 per 15 minutes per email and per address); requests from other sites are refused; the app is served with a strict Content Security Policy; secrets and personal data are scanned before every commit and in CI.
+
 ## Known limitations
 
 - Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown; about 20 ms of database time for a 6,000-message campaign, see `docs/performance.md`), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
@@ -267,4 +271,5 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 - After a campaign's status stream has ended, a resend created in another tab is noticed when the page is opened again or a resend fails (D36).
 - The browser suite (`make e2e`) leaves its cancelled and sent test campaigns in the local list.
 - The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.
+- Sign-in limits are kept in memory per api process and reset on restart; behind a proxy, all clients share its address.
 - AI calls are not rate-limited. Every create or brief edit can cost up to two AI calls (one retry), parallel edits of the same draft each make their own call before the version check at save rejects all but one, and an unsupported answer can be asked again at once. Mock mode costs nothing; in real mode every call uses API credits.

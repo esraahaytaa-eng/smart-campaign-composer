@@ -446,6 +446,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Defense in depth for the screens that show customer data.
 - **Rejected:** *Headers without a CSP:* leaves script injection unmitigated.
 - **Trade-offs:** Any future inline script or third-party asset needs a CSP change.
+- **History:** 2026-10-23 (T19 step 4). Also: state-changing API requests (and sign-in) from another site's page are refused by their `Origin` header, a second layer behind `SameSite=Lax`; the session cookie is `Secure` whenever the request came over HTTPS; idle connections close after 2 minutes. The review is in `docs/security-review.md`.
 
 ### D58 — The Turkish dictionary loads on demand
 - **Status:** Accepted · 2026-10-23
