@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -403,3 +405,32 @@ func TestCampaigns_RequireLogin(t *testing.T) {
 }
 
 func itoa(id int64) string { return strconv.FormatInt(id, 10) }
+
+// Every API route requires a session, found by reading the route patterns
+// from the source, so a route added later can't slip past this test. Only
+// signing in is open.
+func TestEveryAPIRouteRequiresLogin(t *testing.T) {
+	a := newApp(t, llm.NewMock())
+	a.cookie = nil
+	pattern := regexp.MustCompile(`Handle(?:Func)?\("(GET|POST|PUT|DELETE|PATCH) (/api/[^"]+)"`)
+	var routes [][]string
+	for _, f := range []string{"http.go", "../auth/auth.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes = append(routes, pattern.FindAllStringSubmatch(string(src), -1)...)
+	}
+	if len(routes) < 15 {
+		t.Fatalf("found only %d routes; the pattern no longer matches how routes are registered", len(routes))
+	}
+	for _, r := range routes {
+		method, path := r[1], strings.ReplaceAll(r[2], "{id}", "1")
+		if path == "/api/login" {
+			continue
+		}
+		if rec := a.do(method, path, "{}"); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without a session: want 401, got %d", method, r[2], rec.Code)
+		}
+	}
+}
