@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smart-campaign-composer/internal/config"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/provider"
 )
@@ -25,10 +24,7 @@ import (
 // admin one and one logged in as the provider's own role (D6).
 func providerDB(t *testing.T) (admin, prov *pgxpool.Pool) {
 	t.Helper()
-	admin = dbtest.FreshDB(t)
-	if err := db.Migrate(context.Background(), admin); err != nil {
-		t.Fatal(err)
-	}
+	admin = dbtest.MigratedDB(t)
 	return admin, dbtest.ProviderPool(t, admin)
 }
 
@@ -183,13 +179,19 @@ func TestSend_FailuresReleaseTheKey(t *testing.T) {
 // A timeout is a lost response: the send still happens, and the retry with
 // the same key gets the stored result instead of a second send.
 func TestSend_TimeoutIsALostResponse(t *testing.T) {
-	_, prov := providerDB(t)
+	admin, prov := providerDB(t)
 	url := start(t, prov, config.ProviderChannel{TimeoutRate: 1}, func(s *provider.Server) { s.Hang = 300 * time.Millisecond })
 
 	if r := send(t, url, "sms", "msg-1", smsBody, &http.Client{Timeout: 100 * time.Millisecond}); !r.timeout {
 		t.Fatalf("want a client timeout, got %d", r.status)
 	}
-	time.Sleep(400 * time.Millisecond)
+	// The provider finishes the request the client gave up on; wait until it
+	// has stored the result instead of guessing how long that takes.
+	for give := time.Now().Add(10 * time.Second); keyState(t, admin, "msg-1") != "completed"; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(give) {
+			t.Fatal("the provider never completed the request the client gave up on")
+		}
+	}
 
 	r := send(t, url, "sms", "msg-1", smsBody, nil)
 	if r.status != 200 || r.header.Get("Idempotent-Replayed") != "true" {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/worker"
 )
@@ -26,10 +25,7 @@ type fixture struct {
 // (1 allowed both channels, 2 only SMS); user 3 lives in İzmir.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(context.Background(), pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	f := &fixture{t: t, pool: pool, q: &worker.Queue{Pool: pool}}
 	f.exec(`INSERT INTO marketers (id, email, name, password_hash) VALUES (1, 'm@example.com', 'M', 'x')`)
 	f.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at) VALUES

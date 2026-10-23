@@ -15,7 +15,6 @@ import (
 
 	"smart-campaign-composer/internal/auth"
 	"smart-campaign-composer/internal/campaign"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/llm"
 )
@@ -60,10 +59,7 @@ func (garbageLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.Ra
 func newApp(t *testing.T, model llm.LLM) *app {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	exec := func(sql string, args ...any) {
 		if _, err := pool.Exec(ctx, sql, args...); err != nil {
 			t.Fatalf("%v: %s", err, sql)

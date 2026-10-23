@@ -14,7 +14,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"smart-campaign-composer/internal/config"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/provider"
 	"smart-campaign-composer/internal/worker"
@@ -34,10 +33,7 @@ type life struct {
 // newLife: users 1–4 live in Ankara; 1, 3 and 4 allow both channels, 2 only SMS.
 func newLife(t *testing.T) *life {
 	t.Helper()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(context.Background(), pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	l := &life{t: t, pool: pool, prov: dbtest.ProviderPool(t, pool), q: &worker.Queue{Pool: pool}}
 	l.exec(`INSERT INTO marketers (id, email, name, password_hash) VALUES (1, 'm@example.com', 'M', 'x')`)
 	l.exec(`INSERT INTO users (id, first_name, last_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at) VALUES
@@ -235,6 +231,7 @@ var (
 
 // L1: a timeout is a lost response; the retry gets the stored result.
 func TestLifecycle_TimeoutThenRetry_DeliveredOnce(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	mid := l.message(cid, 1, "sms")
@@ -255,6 +252,7 @@ func TestLifecycle_TimeoutThenRetry_DeliveredOnce(t *testing.T) {
 // L2 (finding 1): a worker shutdown mid-attempt is not a failure and does not
 // use up an attempt; the message goes straight back with the same key.
 func TestLifecycle_ShutdownDuringLastAttempt_NotFailed(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	mid := l.message(cid, 1, "sms")
@@ -289,6 +287,7 @@ func TestLifecycle_ShutdownDuringLastAttempt_NotFailed(t *testing.T) {
 // L3: a worker dies after the provider accepted; the expired lease is
 // reclaimed, flagged uncertain, and the retry gets the stored result.
 func TestLifecycle_CrashAfterAcceptance_ReclaimedAndDeliveredOnce(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	mid := l.message(cid, 1, "sms")
@@ -310,6 +309,7 @@ func TestLifecycle_CrashAfterAcceptance_ReclaimedAndDeliveredOnce(t *testing.T) 
 // L4 (findings 2, 4): delivered but unconfirmed, then cancelled. The record
 // says delivery is uncertain, and a later resend must not send it again.
 func TestLifecycle_CrashAfterAcceptanceThenCancel_NoteAndNoResend(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	parent := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	l.exec(`UPDATE messages SET status = 'skipped', skip_reason = 'character_limit_exceeded' WHERE campaign_id = $1 AND user_id = 1`, parent)
@@ -340,6 +340,7 @@ func TestLifecycle_CrashAfterAcceptanceThenCancel_NoteAndNoResend(t *testing.T) 
 // L5 (finding 2, the reviewer's scenario): a resend's message times out (the
 // provider accepts later), the resend is cancelled, a new resend is made.
 func TestLifecycle_TimeoutThenCancelledResend_NewResendSkipsUncertain(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	parent := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	l.exec(`UPDATE messages SET status = 'skipped', skip_reason = 'character_limit_exceeded' WHERE campaign_id = $1 AND user_id IN (1, 2)`, parent)
@@ -364,6 +365,7 @@ func TestLifecycle_TimeoutThenCancelledResend_NewResendSkipsUncertain(t *testing
 // L6: consent revoked between retries stops further sends; after an
 // uncertain attempt the record says so.
 func TestLifecycle_ConsentRevokedBetweenRetries(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	clean, unsure := l.message(cid, 1, "sms"), l.message(cid, 3, "sms")
@@ -387,6 +389,7 @@ func TestLifecycle_ConsentRevokedBetweenRetries(t *testing.T) {
 // L7: a recipient whose name grew after approval is skipped for length at
 // send time and gets the message exactly once through a resend (D3, D31).
 func TestLifecycle_RenamedAfterApproval_SkippedThenResentOnce(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "{{first_name}} "+strings.Repeat("x", 150), nil) // "Ali" fits: 154
 	l.exec(`UPDATE users SET first_name = 'Alexandria' WHERE id = 1`)           // now 161
@@ -413,6 +416,7 @@ func TestLifecycle_RenamedAfterApproval_SkippedThenResentOnce(t *testing.T) {
 // L8 (Review Focus #3): cancelling mid-campaign stops it — no request leaves
 // after the cancel committed (attempts already in progress may finish, D11).
 func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	l.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		SELECT g, 'U', 'u' || g || '@example.com', '+90520' || g, 'Ankara', 'tr', true, true, now() FROM generate_series(100, 159) g`)
@@ -454,6 +458,7 @@ func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
 // L9: two workers on one queue (a misconfigured second replica) with a flaky
 // provider: still no message is really sent twice.
 func TestLifecycle_TwoWorkers_NoDoubleSend(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	l.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		SELECT g, 'U', 'u' || g || '@example.com', '+90520' || g, 'Ankara', 'tr', true, true, now() FROM generate_series(100, 179) g`)
@@ -500,6 +505,7 @@ func TestLifecycle_TwoWorkers_NoDoubleSend(t *testing.T) {
 // L10: retries are limited: after 5 failed attempts the message fails with
 // the last error, and nothing was sent.
 func TestLifecycle_RetriesExhausted(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	mid := l.message(cid, 1, "sms")
@@ -526,6 +532,7 @@ func TestLifecycle_RetriesExhausted(t *testing.T) {
 // A graceful shutdown hands back a message still waiting for its rate-limit
 // slot at once: nothing was sent, no attempt is counted, no 30 s lease to wait out.
 func TestLifecycle_ShutdownWhileWaiting_ReleasesTheMessage(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	mid := l.message(cid, 1, "sms")
@@ -551,6 +558,7 @@ func TestLifecycle_ShutdownWhileWaiting_ReleasesTheMessage(t *testing.T) {
 // An interrupted attempt does not count toward the limit: after 3 errors, an
 // interruption and another error, only 4 attempts count, so it is retried.
 func TestLifecycle_InterruptedAttemptDoesNotCount(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	cid := l.campaign("{sms}", "Merhaba {{first_name}}", nil)
 	mid := l.message(cid, 1, "sms")

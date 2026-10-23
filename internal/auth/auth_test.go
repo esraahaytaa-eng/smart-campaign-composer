@@ -13,7 +13,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"smart-campaign-composer/internal/auth"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/obs"
 	"smart-campaign-composer/internal/obstest"
@@ -33,10 +32,7 @@ type server struct {
 func newServer(t *testing.T) *server {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)

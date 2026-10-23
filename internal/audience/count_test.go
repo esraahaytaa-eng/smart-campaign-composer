@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smart-campaign-composer/internal/audience"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 )
 
@@ -77,10 +76,7 @@ var fixture = []fixtureUser{
 func fixtureDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	exec := func(sql string, args ...any) int64 {
 		var id int64
 		if err := pool.QueryRow(ctx, sql+" RETURNING id", args...).Scan(&id); err != nil {

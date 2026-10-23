@@ -25,10 +25,7 @@ var refTime = time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 
 func migrated(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(context.Background(), pool); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	pool := dbtest.MigratedDB(t)
 	return pool
 }
 
@@ -96,6 +93,7 @@ func rawDump(t *testing.T, pool *pgxpool.Pool) string {
 }
 
 func TestMigrate_RunsTwice(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := migrated(t)
 	if err := db.Migrate(context.Background(), pool); err != nil {
 		t.Fatalf("second migrate: %v", err)
@@ -105,6 +103,7 @@ func TestMigrate_RunsTwice(t *testing.T) {
 // Smoke test: goose's own retries already hide most races, so this passes
 // without the session locker too; it guards that the locker never deadlocks.
 func TestMigrate_ConcurrentRunsBothSucceed(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := dbtest.FreshDB(t)
 
 	errs := make(chan error, 4)
@@ -119,6 +118,7 @@ func TestMigrate_ConcurrentRunsBothSucceed(t *testing.T) {
 }
 
 func TestSeed_Idempotent(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 	counts := func() [4]int {
 		return [4]int{
@@ -144,6 +144,7 @@ func TestSeed_Idempotent(t *testing.T) {
 }
 
 func TestSeed_Deterministic(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	a := seeded(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	b := seeded(t, refTime)
 
@@ -153,6 +154,7 @@ func TestSeed_Deterministic(t *testing.T) {
 }
 
 func TestSeed_RerunChangesNothing(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 	before := rawDump(t, pool)
 
@@ -166,6 +168,7 @@ func TestSeed_RerunChangesNothing(t *testing.T) {
 }
 
 func TestSeed_OneDemoMarketer(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 
 	rows, err := pool.Query(context.Background(), `SELECT email, password_hash FROM marketers`)
@@ -186,6 +189,7 @@ func TestSeed_OneDemoMarketer(t *testing.T) {
 }
 
 func TestSeed_EmptyPasswordFailsAndLeavesNothing(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := migrated(t)
 
 	if err := db.Seed(context.Background(), pool, rngSeed, refTime, ""); err == nil {
@@ -197,6 +201,7 @@ func TestSeed_EmptyPasswordFailsAndLeavesNothing(t *testing.T) {
 }
 
 func TestSeed_NoFutureDates(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 
 	checks := map[string]string{
@@ -225,6 +230,7 @@ const (
 )
 
 func TestSeed_ProfileWindows(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 
 	for _, days := range []int{7, 30, 60, 90} {
@@ -253,6 +259,7 @@ func TestSeed_ProfileWindows(t *testing.T) {
 }
 
 func TestSeed_CoversCatalog(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 
 	rules := map[string]string{
@@ -279,6 +286,7 @@ func TestSeed_CoversCatalog(t *testing.T) {
 }
 
 func TestSeed_CaseExampleMatches(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 
 	// CASE §2: users in Istanbul with a cart in the last 30 days and no order since.
@@ -290,6 +298,7 @@ func TestSeed_CaseExampleMatches(t *testing.T) {
 }
 
 func TestMessagesUniqueConstraint(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
 	ctx := context.Background()
 
@@ -314,6 +323,7 @@ func TestMessagesUniqueConstraint(t *testing.T) {
 }
 
 func TestCharLengthCountsCodePoints(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	pool := migrated(t)
 
 	if n := count(t, pool, `SELECT char_length('şğİ')`); n != 3 {
