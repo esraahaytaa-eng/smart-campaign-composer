@@ -164,6 +164,41 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *English-only mock:* breaks Turkish demos. *Language per recipient:* optional feature, still deferred.
 - **Trade-offs:** Mixed-language briefs depend on Claude's judgement.
 
+### D45 — Recipient details are part of T18
+- **Status:** Accepted · 2026-10-23
+- **Decision:** T18 includes the design's Recipient details screen (board 5), in English and Turkish (D44). It is backed by a new paginated, filterable API that returns each recipient's delivery status, failure or skip reason and attempt history, with privacy protection for customer data.
+- **Why:** Engineer's choice: the counts alone don't show who was affected or why, and the design depends on this screen.
+- **Rejected:** *Deferring it (counts and reason tables only):* CASE.md doesn't require it, but the delivery picture would be incomplete.
+- **Trade-offs:** A new API that returns customer data, so it needs masking, limits and tests; T18 grows by about one task.
+
+### D46 — Delivery outcomes shown in seven groups, with reason codes
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The UI shows messages in seven groups that add up to the audience: Sent (`sent`), Uncertain (`failed`, `skipped` or `cancelled` with an uncertain delivery, D5), Failed, Skipped, Cancelled (the rest of those statuses), Retrying (`retry_scheduled`), Pending (`pending` and `sending`). Reasons are codes the UI translates (D44): failed `provider_rejected` / `retries_exhausted`; skipped `character_limit_exceeded` (with the rendered length) / `no_consent`; uncertain and retrying by the last attempt's outcome. The status stream (D36) gains the groups, the reason codes and the 429s of the last 5 minutes; its raw error strings and the separate `uncertain` count are removed (the Uncertain group replaces it).
+- **Why:** Matches the design's vocabulary; one definition for the live screen and recipient details; provider text is neither translated nor safe to show.
+- **Rejected:** *Uncertain as a separate overlapping count:* groups wouldn't add up. *Showing `last_error`:* untranslatable, may contain provider data.
+- **Trade-offs:** A sent message whose earlier attempt timed out counts only as Sent; changes the T14 stream's fields.
+
+### D47 — Recipient API: paged, name search only, masked contacts
+- **Status:** Accepted · 2026-10-23
+- **Decision:** `GET /api/campaigns/{id}/recipients?group=&channel=&q=&page=` returns 50 rows per page sorted by last attempt, with group and reason counts, `as_of`, and each row's attempt history (time, outcome, HTTP status). Contacts are masked on the server (`+90 555 ••• •• 17`, first 3 characters of an email's local part + `•••@domain`); search matches names only (Turkish-folded, ≤ 50 characters); no message text, error text or other customer fields; `Cache-Control: no-store`. The drawer is a snapshot.
+- **Why:** Implements D45 with the least customer data that still explains each outcome; no contact search means the API can't confirm whether someone is a customer.
+- **Rejected:** *Keyset paging:* more code for at most ~6,000 messages per campaign. *Live updates in the drawer:* rows would move under the reader. *Search by phone or email:* enumeration risk.
+- **Trade-offs:** Rows can shift between pages while a campaign is sending; offset paging gets slower for much larger campaigns.
+
+### D48 — Resend goes through the composer's content and review steps
+- **Status:** Accepted · 2026-10-23
+- **Decision:** "Resend" opens a dialog with who gets the resend and who is not included, then creates the follow-up (D31) and opens its content step, with the original message viewable; it is approved on the normal review step. Offered on any channel with length skips once the campaign has finished.
+- **Why:** A resend is already a draft with its own approval in the backend; reusing T17 keeps one approval flow.
+- **Rejected:** *The design's one-page edit-and-approve:* a second approval flow to build and test.
+- **Trade-offs:** One more click than the design.
+
+### D49 — Campaign list filtered in the browser; dashboard without resend counts
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The campaigns page filters by status and searches the brief (Turkish-folded) in the browser over the newest 200 campaigns the API returns. The dashboard shows status counts and the six most relevant campaigns; resend offers appear on a campaign's page, not on dashboard rows.
+- **Why:** No backend change is needed at this size.
+- **Rejected:** *Server-side filtering:* not needed for 200 rows. *Per-row resend counts:* a query per campaign.
+- **Trade-offs:** Campaigns beyond the newest 200 aren't listed; the dashboard doesn't point out resend opportunities.
+
 ## Architecture & Technical Decisions
 
 ### D17 — PostgreSQL 16
