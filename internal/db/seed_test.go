@@ -117,32 +117,6 @@ func TestMigrate_ConcurrentRunsBothSucceed(t *testing.T) {
 	}
 }
 
-func TestSeed_Idempotent(t *testing.T) {
-	t.Parallel() // own database; nothing shared with other tests
-	pool := seeded(t, refTime)
-	counts := func() [4]int {
-		return [4]int{
-			count(t, pool, "SELECT count(*) FROM users"),
-			count(t, pool, "SELECT count(*) FROM orders"),
-			count(t, pool, "SELECT count(*) FROM cart_items"),
-			count(t, pool, "SELECT count(*) FROM marketers"),
-		}
-	}
-	before := counts()
-
-	if err := db.Seed(context.Background(), pool, rngSeed, refTime, password); err != nil {
-		t.Fatalf("second seed: %v", err)
-	}
-
-	after := counts()
-	if before[0] != 3000 {
-		t.Fatalf("want 3000 users, got %d", before[0])
-	}
-	if before != after {
-		t.Fatalf("second seed changed counts: %v -> %v", before, after)
-	}
-}
-
 func TestSeed_Deterministic(t *testing.T) {
 	t.Parallel() // own database; nothing shared with other tests
 	a := seeded(t, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
@@ -156,21 +130,41 @@ func TestSeed_Deterministic(t *testing.T) {
 func TestSeed_RerunChangesNothing(t *testing.T) {
 	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
+	if n := count(t, pool, "SELECT count(*) FROM users"); n != 3000 {
+		t.Fatalf("want 3000 users, got %d", n)
+	}
 	before := rawDump(t, pool)
 
-	if err := db.Seed(context.Background(), pool, rngSeed, refTime.Add(7*24*time.Hour), password); err != nil {
-		t.Fatalf("rerun: %v", err)
-	}
-
-	if after := rawDump(t, pool); after != before {
-		t.Fatal("rerun with a later now changed stored rows")
+	for _, now := range []time.Time{refTime, refTime.Add(7 * 24 * time.Hour)} {
+		if err := db.Seed(context.Background(), pool, rngSeed, now, password); err != nil {
+			t.Fatalf("rerun at %v: %v", now, err)
+		}
+		if after := rawDump(t, pool); after != before {
+			t.Fatalf("rerun at %v changed stored rows", now)
+		}
 	}
 }
 
-func TestSeed_OneDemoMarketer(t *testing.T) {
+// TestSeed_Data checks the seeded data. The checks only read, so they share
+// one seed (each took 7–9 s with its own).
+func TestSeed_Data(t *testing.T) {
 	t.Parallel() // own database; nothing shared with other tests
 	pool := seeded(t, refTime)
+	for name, check := range map[string]func(*testing.T, *pgxpool.Pool){
+		"OneDemoMarketer":    seedOneDemoMarketer,
+		"NoFutureDates":      seedNoFutureDates,
+		"ProfileWindows":     seedProfileWindows,
+		"CoversCatalog":      seedCoversCatalog,
+		"CaseExampleMatches": seedCaseExampleMatches,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			check(t, pool)
+		})
+	}
+}
 
+func seedOneDemoMarketer(t *testing.T, pool *pgxpool.Pool) {
 	rows, err := pool.Query(context.Background(), `SELECT email, password_hash FROM marketers`)
 	if err != nil {
 		t.Fatal(err)
@@ -200,10 +194,7 @@ func TestSeed_EmptyPasswordFailsAndLeavesNothing(t *testing.T) {
 	}
 }
 
-func TestSeed_NoFutureDates(t *testing.T) {
-	t.Parallel() // own database; nothing shared with other tests
-	pool := seeded(t, refTime)
-
+func seedNoFutureDates(t *testing.T, pool *pgxpool.Pool) {
 	checks := map[string]string{
 		"reference time is now":     `SELECT count(*) FROM seed_meta WHERE reference_time <> '2026-10-21 12:00:00Z'`,
 		"signup in future":          `SELECT count(*) FROM users, seed_meta m WHERE signed_up_at > m.reference_time`,
@@ -229,10 +220,7 @@ const (
 	usersFromRef = `SELECT count(*) FROM users u, seed_meta m WHERE `
 )
 
-func TestSeed_ProfileWindows(t *testing.T) {
-	t.Parallel() // own database; nothing shared with other tests
-	pool := seeded(t, refTime)
-
+func seedProfileWindows(t *testing.T, pool *pgxpool.Pool) {
 	for _, days := range []int{7, 30, 60, 90} {
 		rules := map[string]string{
 			"cart within, no order within": cartWithin + " AND NOT " + orderWithin,
@@ -258,10 +246,7 @@ func TestSeed_ProfileWindows(t *testing.T) {
 	}
 }
 
-func TestSeed_CoversCatalog(t *testing.T) {
-	t.Parallel() // own database; nothing shared with other tests
-	pool := seeded(t, refTime)
-
+func seedCoversCatalog(t *testing.T, pool *pgxpool.Pool) {
 	rules := map[string]string{
 		"İstanbul":                 `SELECT count(*) FROM users WHERE city = 'İstanbul'`,
 		"at least 10 cities":       `SELECT (count(DISTINCT city) >= 10)::int FROM users`,
@@ -285,10 +270,7 @@ func TestSeed_CoversCatalog(t *testing.T) {
 	}
 }
 
-func TestSeed_CaseExampleMatches(t *testing.T) {
-	t.Parallel() // own database; nothing shared with other tests
-	pool := seeded(t, refTime)
-
+func seedCaseExampleMatches(t *testing.T, pool *pgxpool.Pool) {
 	// CASE §2: users in Istanbul with a cart in the last 30 days and no order since.
 	n := count(t, pool, usersFromRef+`u.city = 'İstanbul' AND `+cartWithin+` AND NOT `+orderWithin, 30)
 	if n == 0 {
@@ -298,9 +280,14 @@ func TestSeed_CaseExampleMatches(t *testing.T) {
 }
 
 func TestMessagesUniqueConstraint(t *testing.T) {
-	t.Parallel() // own database; nothing shared with other tests
-	pool := seeded(t, refTime)
+	t.Parallel()        // own database; nothing shared with other tests
+	pool := migrated(t) // one marketer and one customer are enough
 	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO marketers (email, name, password_hash) VALUES ('m@example.com', 'M', 'x');
+		INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
+		VALUES (1, 'A', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
+		t.Fatal(err)
+	}
 
 	var campaignID int64
 	err := pool.QueryRow(ctx, `

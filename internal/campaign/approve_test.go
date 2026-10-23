@@ -86,6 +86,7 @@ func TestApprove_Scheduled(t *testing.T) {
 }
 
 func TestApprove_Rejects(t *testing.T) {
+	t.Parallel() // times are relative to the fixed test clock
 	cases := []struct {
 		name  string
 		setup func(a *app, id int64) // runs on a ready draft at version 2
@@ -109,6 +110,7 @@ func TestApprove_Rejects(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel() // each case has its own database
 			a := newApp(t, llm.NewMock())
 			d := a.readyDraft()
 			if tc.setup != nil {

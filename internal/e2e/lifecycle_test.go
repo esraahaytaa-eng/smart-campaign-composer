@@ -133,8 +133,11 @@ func shutdownWhen(t *testing.T, cond func() bool) context.Context {
 	return ctx
 }
 
+// The retry wait is capped at 2 s like TestEndToEnd's (D53); the 30 s default
+// is tested in internal/worker.
 func (l *life) worker(url string, timeout time.Duration) *worker.Worker {
-	return &worker.Worker{Queue: l.q, ProviderURL: url, Client: worker.NewClient(timeout), MaxAttempts: 5, Poll: 20 * time.Millisecond}
+	return &worker.Worker{Queue: l.q, ProviderURL: url, Client: worker.NewClient(timeout), MaxAttempts: 5,
+		BackoffMax: 2 * time.Second, Poll: 20 * time.Millisecond}
 }
 
 // campaign creates an approved campaign for Ankara (or a resend of parent)
