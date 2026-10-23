@@ -228,6 +228,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *No fixed targets, only measurements:* nothing to decide pass or fail.
 - **Trade-offs:** Numbers are for this machine (Docker Desktop, 8 CPUs, 8 GB); other machines differ.
 
+### D62 — A second pager above the campaign list
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The campaign list shows a compact pager ("1–25 of 300", Previous, Next) above the rows as well as the one below them.
+- **Why:** 25 rows push the lower pager below the fold on a desktop screen.
+- **Rejected:** *Fewer rows per page:* more paging for everyone. *A pager that sticks to the screen bottom:* covers rows and the page note.
+- **Trade-offs:** Two sets of the same buttons; both carry the same labels.
+
 ## Architecture & Technical Decisions
 
 ### D17 — PostgreSQL 16
@@ -456,9 +463,34 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Leave it:* the app is small, but this is the biggest single file.
 - **Trade-offs:** A short wait when switching to Turkish for the first time.
 
+### D59 — Live screens share one snapshot per campaign
+- **Status:** Accepted · 2026-10-23
+- **Decision:** Each status stream keeps its own loop (D36) but reads the campaign's snapshot through an in-process cache: a snapshot younger than half the stream interval is reused, and streams that ask at the same time wait for one database read. Errors are not cached; campaigns nobody reads are dropped.
+- **Why:** 20 screens on one send cost 1.0–2.2 s of database time per second (P6); the cost should grow with campaigns, not screens.
+- **Rejected:** *A poller per campaign that pushes to subscribers:* same gain, more code and start/stop races. *`LISTEN/NOTIFY` from the worker:* a worker change and notification storms. *Redis or Kafka:* new infrastructure for one process.
+- **Trade-offs:** An update can be up to ~1.5 s old instead of ~1 s; per api process (one replica).
+
+### D60 — Built assets are served precompressed
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The image build writes a gzip copy of each built text file; the server sends it when the browser accepts gzip, with the original content type and `Vary: Accept-Encoding`. No further chunk splitting.
+- **Why:** First visits downloaded 263–294 kB of JavaScript uncompressed (~95 kB gzipped).
+- **Rejected:** *Compressing per request:* CPU on every request and a wrapped response writer. *Splitting Vue out:* Vue's runtime alone is ~43 kB, and splitting doesn't reduce bytes. *Brotli:* optional later.
+- **Trade-offs:** A slightly larger image. The largest-chunk part of P7 (≤ 40 kB) stays missed and is reported.
+
+### D61 — Database-backed Go tests run in parallel
+- **Status:** Accepted · 2026-10-23
+- **Decision:** Tests in `campaign`, `worker`, `auth`, `content` and `provider` that use their own database run in parallel (as `db` and `e2e` already do, D53); tests that share process state stay serial. An audit of redundant tests comes separately, each removal approved.
+- **Why:** `make test` is as long as its slowest package, and `campaign` ran 82 tests one after another (32 s, 9 s of CPU); T1 is missed (median 76 s against 65 s).
+- **Rejected:** *Removing tests for speed:* little gain, lost coverage.
+- **Trade-offs:** More load on the test database at once; a shared-state test made parallel by mistake would be flaky, so 5 consecutive runs check it.
+
 ## Open Questions
 
-None currently.
+Proposed 2026-10-23 after the step 7 measurements (`docs/performance.md`). Q1, Q2, Q5 and the first half of Q3 were approved as D59–D62.
+
+- **Q3 (second half) — A test audit.** A report of redundant, overlapping or low-value tests and browser checks that could be faster integration tests; each removal or move needs approval.
+- **Q4 — Desktop first.** Desktop speed and usability come first; phone layouts keep the step 6 checks, and phone-only performance work (list re-render 400–480 ms, language switch) is deferred.
+- **Q6 — How P3–P5 are read.** Report both loads: realistic (10 marketers, a 1 s pause per request: met) and back to back (about 14× that: missed, published as capacity). Targets stay unchanged; which load counts for "met" is yours to decide.
 
 ## Deferred
 
