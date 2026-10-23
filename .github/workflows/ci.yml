@@ -1,0 +1,61 @@
+# Every push (D52): the tests, lint and the secret and personal-data scan,
+# each in Docker exactly as on a developer's machine (make test, make lint,
+# make scan). Actions are pinned to commits, not tags.
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep the Go and npm caches in the workspace so actions/cache can save them.
+  COMPOSE_FILE: docker-compose.yml:.github/ci/compose.cache.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .ci-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('go.sum', 'web/package-lock.json') }}
+          restore-keys: deps-${{ runner.os }}-
+      - run: mkdir -p .ci-cache/gomod .ci-cache/gobuild .ci-cache/web-node-modules
+      - run: make test
+
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .ci-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('go.sum', 'web/package-lock.json') }}
+          restore-keys: deps-${{ runner.os }}-
+      - run: mkdir -p .ci-cache/gomod .ci-cache/gobuild .ci-cache/web-node-modules
+      - run: make lint
+
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # the branch's commits are scanned too
+      - name: The rules still catch planted secrets and personal data
+        run: make scan-selftest
+      - name: Files in the repository
+        run: scripts/scan.sh tree
+      - name: Commits of this branch not on main yet
+        if: github.ref != 'refs/heads/main'
+        run: scripts/scan.sh range origin/main..HEAD

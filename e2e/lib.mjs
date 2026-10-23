@@ -58,6 +58,8 @@ export async function suite(name, body) {
     problems.push(`stopped: ${err.message.split('\n')[0]}`)
     console.log(`FAIL ${name}: stopped: ${err.message.split('\n')[0]}`)
   } finally {
+    // A file that failed leaves a screenshot of where it stopped (CI keeps them).
+    if (SHOTS && problems.length) await page.screenshot({ path: `${SHOTS}/FAILED-${name}.png`, fullPage: true }).catch(() => {})
     for (const id of created) {
       const c = await t.get(id).catch(() => null)
       if (c?.status === 'draft') await page.request.delete(`${BASE}/api/campaigns/${id}`, { data: { version: c.version } })

@@ -157,6 +157,7 @@ services:
     command: ["sh", "-c", "sha256sum package-lock.json | cmp -s - node_modules/.lock-sha || { npm ci --no-audit --no-fund && sha256sum package-lock.json > node_modules/.lock-sha; } && node run.mjs"]
     environment:
       BASE: http://api:8080
+      SHOTS: ${SHOTS:-} # e.g. SHOTS=/e2e/shots make e2e keeps screenshots in e2e/shots
     volumes:
       - ./e2e:/e2e
       - e2enodemodules:/e2e/node_modules

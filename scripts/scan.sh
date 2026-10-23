@@ -5,6 +5,7 @@
 #   scripts/scan.sh tree      files Git tracks or would add (respects .gitignore)
 #   scripts/scan.sh staged    staged changes (the pre-commit hook)
 #   scripts/scan.sh unpushed  commits on no remote branch yet (before a push)
+#   scripts/scan.sh range R   the commits in a git range, e.g. origin/main..HEAD (CI)
 #   scripts/scan.sh history   every commit (report only; see D51)
 #   scripts/scan.sh selftest  planted secrets must be caught, allowed data must not
 set -eu
@@ -51,6 +52,18 @@ unpushed)
 	# shellcheck disable=SC2086
 	gitleaks git /repo --log-opts="HEAD --not --remotes" $OPTS
 	;;
+range)
+	if [ -z "${2:-}" ]; then
+		echo "usage: scripts/scan.sh range <git range>" >&2
+		exit 2
+	fi
+	if [ -z "$(git rev-list "$2")" ]; then
+		echo "no commits in $2"
+		exit 0
+	fi
+	# shellcheck disable=SC2086
+	gitleaks git /repo --log-opts="$2" $OPTS
+	;;
 history)
 	# shellcheck disable=SC2086
 	gitleaks git /repo $OPTS
@@ -59,7 +72,7 @@ selftest)
 	exec "$ROOT/scripts/scan-selftest.sh"
 	;;
 *)
-	echo "usage: scripts/scan.sh tree|staged|unpushed|history|selftest" >&2
+	echo "usage: scripts/scan.sh tree|staged|unpushed|range <git range>|history|selftest" >&2
 	exit 2
 	;;
 esac

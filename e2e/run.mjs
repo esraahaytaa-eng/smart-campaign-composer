@@ -1,5 +1,8 @@
-// Runs every browser test file in order; exits non-zero if any check fails.
+// Runs every browser test file (see the lanes below); exits non-zero if any check fails.
+import { mkdirSync } from 'node:fs'
 import { BASE } from './lib.mjs'
+
+if (process.env.SHOTS) mkdirSync(process.env.SHOTS, { recursive: true })
 
 // The checks rely on the mock AI's answers, and the real AI costs money:
 // refuse to run unless the app is in mock mode.

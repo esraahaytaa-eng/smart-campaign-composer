@@ -1,0 +1,12 @@
+# CI only (COMPOSE_FILE in the workflows): the Go and npm caches live in the
+# workspace instead of Docker volumes, so actions/cache keeps them between runs.
+volumes:
+  gomodcache:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${GITHUB_WORKSPACE}/.ci-cache/gomod" }
+  gobuildcache:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${GITHUB_WORKSPACE}/.ci-cache/gobuild" }
+  webnodemodules:
+    driver: local
+    driver_opts: { type: none, o: bind, device: "${GITHUB_WORKSPACE}/.ci-cache/web-node-modules" }
