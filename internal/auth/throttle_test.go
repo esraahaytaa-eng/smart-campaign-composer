@@ -7,6 +7,7 @@ import (
 
 // D55: 5 failed sign-ins per 15 minutes per key, then a wait.
 func TestThrottle_FiveFailuresThenWait(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	th := newThrottle(5, 15*time.Minute, func() time.Time { return now })
 
@@ -31,6 +32,7 @@ func TestThrottle_FiveFailuresThenWait(t *testing.T) {
 }
 
 func TestThrottle_ResetClearsFailures(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	th := newThrottle(5, 15*time.Minute, func() time.Time { return now })
 	for range 4 {

@@ -91,6 +91,7 @@ func (a *app) generate(id int64, version int) []event {
 }
 
 func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft() // case example, sms + email
 
@@ -120,6 +121,7 @@ func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
 }
 
 func TestGenerate_InvalidThenValid_RetryThenDone(t *testing.T) {
+	t.Parallel()
 	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}}
 	a := newApp(t, model)
 	d := a.newDraft()
@@ -148,6 +150,7 @@ func (a *app) unchanged(id int64) {
 }
 
 func TestGenerate_InvalidTwice_ErrorNothingSaved(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, invalidContent}})
 	d := a.newDraft()
 
@@ -160,6 +163,7 @@ func TestGenerate_InvalidTwice_ErrorNothingSaved(t *testing.T) {
 }
 
 func TestGenerate_AIFailure_ErrorNothingSaved(t *testing.T) {
+	t.Parallel()
 	for name, err := range map[string]error{"refused": llm.ErrRefused, "unavailable": errors.New("503 overloaded")} {
 		t.Run(name, func(t *testing.T) {
 			model := &contentLLM{Mock: llm.NewMock(), err: err}
@@ -179,6 +183,7 @@ func TestGenerate_AIFailure_ErrorNothingSaved(t *testing.T) {
 // The browser closes the tab mid-stream: nothing may be saved, even if the
 // model still returns a valid answer.
 func TestGenerate_ClientDisconnect_NothingSaved(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{validContent}, between: cancel})
 	d := a.newDraft()
@@ -191,6 +196,7 @@ func TestGenerate_ClientDisconnect_NothingSaved(t *testing.T) {
 }
 
 func TestGenerate_Preconditions(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, &contentLLM{Mock: llm.NewMock(), err: errors.New("must not be called")})
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/content"
@@ -216,6 +222,7 @@ func TestGenerate_Preconditions(t *testing.T) {
 }
 
 func TestUpdateContent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/content"
@@ -249,6 +256,7 @@ func TestUpdateContent(t *testing.T) {
 }
 
 func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
+	t.Parallel()
 	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", validContent}}
 	a := newApp(t, model)
 	d := a.newDraft()

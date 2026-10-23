@@ -68,6 +68,7 @@ func recipientNames(p *recipientsPage) []string {
 }
 
 func TestRecipients_FailedWithReasonsAndAttempts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.recipientsCampaign()
 
@@ -94,6 +95,7 @@ func TestRecipients_FailedWithReasonsAndAttempts(t *testing.T) {
 }
 
 func TestRecipients_SkipDetailAndRetry(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.recipientsCampaign()
 
@@ -122,6 +124,7 @@ func TestRecipients_SkipDetailAndRetry(t *testing.T) {
 }
 
 func TestRecipients_NameSearch(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.recipientsCampaign()
 
@@ -145,6 +148,7 @@ func TestRecipients_NameSearch(t *testing.T) {
 }
 
 func TestRecipients_PagesSortedByLastAttempt(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.recipientsCampaign()
 	a.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
@@ -173,6 +177,7 @@ func TestRecipients_PagesSortedByLastAttempt(t *testing.T) {
 // No response may carry a full phone number or email, the city, or the
 // provider's error text (D47).
 func TestRecipients_MasksContacts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.recipientsCampaign()
 	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status) VALUES ($1, 2, 'email', 'pending'), ($1, 3, 'email', 'pending')`, id)
@@ -203,6 +208,7 @@ func TestRecipients_MasksContacts(t *testing.T) {
 }
 
 func TestRecipients_RejectsBadInput(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.recipientsCampaign()
 
@@ -221,6 +227,7 @@ func TestRecipients_RejectsBadInput(t *testing.T) {
 }
 
 func TestRecipients_DraftHasNone(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 

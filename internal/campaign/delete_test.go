@@ -14,6 +14,7 @@ func (a *app) deleteCampaign(id int64, body string) int {
 }
 
 func TestDelete_DraftAndItsContent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft() // version 2, with content
 
@@ -30,6 +31,7 @@ func TestDelete_DraftAndItsContent(t *testing.T) {
 }
 
 func TestDelete_Rejects(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	approved := a.readyDraft()
@@ -62,6 +64,7 @@ func TestDelete_Rejects(t *testing.T) {
 // An abandoned resend draft used to block resends on that channel for good:
 // drafts cannot be cancelled, and the one-active-resend index counts them.
 func TestDelete_AbandonedResendDraftFreesTheChannel(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	parent := a.parentWithSkips()
 	path := "/api/campaigns/" + itoa(parent) + "/resend"
@@ -87,6 +90,7 @@ func TestDelete_AbandonedResendDraftFreesTheChannel(t *testing.T) {
 }
 
 func TestDelete_ConcurrentWithApprove(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 
@@ -112,6 +116,7 @@ func TestDelete_ConcurrentWithApprove(t *testing.T) {
 // Deleting a draft while its content streams: the stream reports an error and
 // nothing is written back.
 func TestDelete_DuringContentGeneration(t *testing.T) {
+	t.Parallel()
 	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{validContent}}
 	a := newApp(t, model)
 	d := a.newDraft()

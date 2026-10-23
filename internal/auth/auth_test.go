@@ -88,6 +88,7 @@ func (s *server) count(sql string, args ...any) int {
 }
 
 func TestLogin_SetsHttpOnlyLaxCookie(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	c := s.sessionCookie()
@@ -101,6 +102,7 @@ func TestLogin_SetsHttpOnlyLaxCookie(t *testing.T) {
 }
 
 func TestLogin_EmailIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	if rec := s.login("Marketer@Example.COM", password); rec.Code != http.StatusOK {
@@ -109,6 +111,7 @@ func TestLogin_EmailIsCaseInsensitive(t *testing.T) {
 }
 
 func TestLogin_WrongPasswordSameAsUnknownEmail(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	wrongPass := s.login(email, "wrong-password")
@@ -129,6 +132,7 @@ func TestLogin_WrongPasswordSameAsUnknownEmail(t *testing.T) {
 }
 
 func TestLogin_InvalidBody400(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	for _, body := range []string{`not json`, `{}`, `{"email":"","password":"x"}`, `{"email":"a@b.c"}`,
@@ -140,6 +144,7 @@ func TestLogin_InvalidBody400(t *testing.T) {
 }
 
 func TestSession_DBStoresOnlyTokenHash(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 
@@ -153,6 +158,7 @@ func TestSession_DBStoresOnlyTokenHash(t *testing.T) {
 }
 
 func TestMe_ReturnsMarketerAndLLMMode(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	rec := s.do(http.MethodGet, "/api/me", "", s.sessionCookie())
@@ -171,6 +177,7 @@ func TestMe_ReturnsMarketerAndLLMMode(t *testing.T) {
 }
 
 func TestRequire_ExpiredSession401(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 	if _, err := s.pool.Exec(context.Background(), `UPDATE sessions SET expires_at = now() - interval '1 second'`); err != nil {
@@ -183,6 +190,7 @@ func TestRequire_ExpiredSession401(t *testing.T) {
 }
 
 func TestRequire_UnknownToken401(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	c := &http.Cookie{Name: auth.CookieName, Value: "forged-token"}
@@ -192,6 +200,7 @@ func TestRequire_UnknownToken401(t *testing.T) {
 }
 
 func TestLogout_InvalidatesSession(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 
@@ -212,6 +221,7 @@ func TestLogout_InvalidatesSession(t *testing.T) {
 }
 
 func TestAPI_RequiresSessionExceptLogin(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	for _, r := range []struct{ method, path string }{
@@ -232,6 +242,7 @@ func TestAPI_RequiresSessionExceptLogin(t *testing.T) {
 }
 
 func TestMarketerID_InContext(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 
@@ -267,6 +278,7 @@ func TestRequire_GuardedRouteLabelsMetrics(t *testing.T) {
 
 // D55: after 5 failed sign-ins for an email, even the right password waits.
 func TestLogin_ThrottledAfterFiveFailures(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	for range 5 {
 		if rec := s.login(email, "wrong-password"); rec.Code != http.StatusUnauthorized {
@@ -281,6 +293,7 @@ func TestLogin_ThrottledAfterFiveFailures(t *testing.T) {
 
 // The client address is limited too, so guessing across many emails stops.
 func TestLogin_ThrottlesAnAddressAcrossEmails(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	for i := range 5 {
 		s.login("nobody"+strings.Repeat("x", i)+"@example.com", "guess")
@@ -291,6 +304,7 @@ func TestLogin_ThrottlesAnAddressAcrossEmails(t *testing.T) {
 }
 
 func TestLogin_SuccessResetsTheCount(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	for range 4 {
 		s.login(email, "wrong-password")
@@ -309,6 +323,7 @@ func TestLogin_SuccessResetsTheCount(t *testing.T) {
 // Writes from another site's page are refused, even with a valid cookie
 // (defense in depth behind SameSite=Lax).
 func TestAPI_RejectsCrossSiteWrites(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 	req := func(origin string) *httptest.ResponseRecorder {
@@ -339,6 +354,7 @@ func TestAPI_RejectsCrossSiteWrites(t *testing.T) {
 
 // D56: API answers are never cached, sniffed or sent as a referrer.
 func TestAPI_SecurityHeaders(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	for _, rec := range []*httptest.ResponseRecorder{
 		s.do(http.MethodGet, "/api/me", ""),                    // 401
@@ -354,6 +370,7 @@ func TestAPI_SecurityHeaders(t *testing.T) {
 
 // The session cookie is Secure whenever the request came over HTTPS.
 func TestLogin_SecureCookieOverHTTPS(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	secure := func(proto string) bool {
 		r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"email":"`+email+`","password":"`+password+`"}`))

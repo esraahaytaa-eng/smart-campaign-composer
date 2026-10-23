@@ -123,6 +123,7 @@ func (a *app) sendingCampaign() int64 {
 }
 
 func TestEvents_SnapshotCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 
@@ -168,6 +169,7 @@ func TestEvents_SnapshotCounts(t *testing.T) {
 // Every message falls in exactly one display group (D46): an uncertain
 // delivery is its own group once the message has ended without being sent.
 func TestEvents_GroupsAndReasons(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	a.exec(`UPDATE messages SET status = 'retry_scheduled' WHERE campaign_id = $1 AND user_id = 6 AND channel = 'sms'`, id)
@@ -224,6 +226,7 @@ func TestEvents_GroupsAndReasons(t *testing.T) {
 }
 
 func TestEvents_SendsOnlyOnChange(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	s := a.stream(id)
@@ -276,6 +279,7 @@ func TestEvents_StopsOnServerShutdown(t *testing.T) {
 // A cancel leaves messages a worker holds in "sending"; the stream ends only
 // once they are final, so the last snapshot is the true result.
 func TestEvents_EndsAfterFinalSnapshot(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	if rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(id)+"/cancel", ""); rec.Code != http.StatusOK {
@@ -303,6 +307,7 @@ func TestEvents_EndsAfterFinalSnapshot(t *testing.T) {
 }
 
 func TestEvents_FinishedCampaignShowsActiveResend(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	a.exec(`UPDATE messages SET status = 'cancelled' WHERE campaign_id = $1 AND status IN ('pending', 'sending', 'retry_scheduled')`, id)
@@ -326,6 +331,7 @@ func TestEvents_FinishedCampaignShowsActiveResend(t *testing.T) {
 }
 
 func TestEvents_UnknownCampaign404(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	if rec := a.do(http.MethodGet, "/api/campaigns/999/events", ""); rec.Code != http.StatusNotFound {
@@ -336,6 +342,7 @@ func TestEvents_UnknownCampaign404(t *testing.T) {
 // attempt_count counts claims, so the retry and 429 query may skip sent
 // messages claimed once (one accepted attempt) but must count the rest.
 func TestEvents_RetryCountsWithRealClaimCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, attempt_count) VALUES

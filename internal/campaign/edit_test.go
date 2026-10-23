@@ -28,6 +28,7 @@ func (a *app) putChannels(id int64, body string) (int, editedDraft) {
 }
 
 func TestChannels_RemovingOneDeletesItsContent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft() // sms + email with content, version 2
 
@@ -48,6 +49,7 @@ func TestChannels_RemovingOneDeletesItsContent(t *testing.T) {
 }
 
 func TestChannels_AddedOneStartsWithoutContent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
@@ -63,6 +65,7 @@ func TestChannels_AddedOneStartsWithoutContent(t *testing.T) {
 }
 
 func TestChannels_Rejects(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	approved := a.readyDraft()
@@ -99,6 +102,7 @@ func TestChannels_Rejects(t *testing.T) {
 }
 
 func TestCatalog(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec := a.do(http.MethodGet, "/api/catalog", "")
@@ -160,6 +164,7 @@ func requestBody(text string, version int) string {
 }
 
 func TestRequest_ReinterpretsAndKeepsContent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft() // the case example: İstanbul cart abandoners, no time, content, version 2
 	before := decode[editedDraft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
@@ -186,6 +191,7 @@ func TestRequest_ReinterpretsAndKeepsContent(t *testing.T) {
 }
 
 func TestRequest_BriefWithoutTimeClearsTheProposal(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	_, d := a.create(map[string]any{"request": ankaraBrief, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
 	if d.SendAt == nil {
@@ -201,6 +207,7 @@ func TestRequest_BriefWithoutTimeClearsTheProposal(t *testing.T) {
 
 // A failed or unsupported interpretation leaves the draft as it was (D15).
 func TestRequest_FailuresLeaveTheDraftUnchanged(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		model llm.LLM
@@ -229,6 +236,7 @@ func TestRequest_FailuresLeaveTheDraftUnchanged(t *testing.T) {
 
 // Stale, approved and resend drafts are refused before the AI is called.
 func TestRequest_RejectsWithoutCallingTheAI(t *testing.T) {
+	t.Parallel()
 	model := &hookLLM{Mock: llm.NewMock()}
 	a := newApp(t, model)
 	d := a.readyDraft()
@@ -262,6 +270,7 @@ func TestRequest_RejectsWithoutCallingTheAI(t *testing.T) {
 // Another edit lands while the AI is reading the brief: the stale answer is
 // not saved over it.
 func TestRequest_EditDuringInterpretation_409(t *testing.T) {
+	t.Parallel()
 	model := &hookLLM{Mock: llm.NewMock()}
 	a := newApp(t, model)
 	d := a.readyDraft()
@@ -282,6 +291,7 @@ func TestRequest_EditDuringInterpretation_409(t *testing.T) {
 // before its update runs: the approved campaign must keep its content. The
 // test holds the row lock to put the two in exactly that order.
 func TestChannels_ApprovedMeanwhile_KeepsContent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	ctx := context.Background()

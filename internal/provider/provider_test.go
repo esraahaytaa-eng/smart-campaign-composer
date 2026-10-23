@@ -81,6 +81,7 @@ func keyState(t *testing.T, pool *pgxpool.Pool, key string) string {
 }
 
 func TestSend_SuccessIsStoredAndReplayed(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 	url := start(t, prov, instant, nil)
 
@@ -99,6 +100,7 @@ func TestSend_SuccessIsStoredAndReplayed(t *testing.T) {
 }
 
 func TestSend_KeyIsInsertedBeforeSimulating(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 	const delay = 400 * time.Millisecond // the simulated send
 	slow := config.ProviderChannel{DelayMin: delay, DelayMax: delay}
@@ -157,6 +159,7 @@ func TestSend_ConcurrentSameKey(t *testing.T) {
 
 // Failed attempts release the key, so the worker's retry is processed (D7).
 func TestSend_FailuresReleaseTheKey(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 
 	url := start(t, prov, config.ProviderChannel{ErrorRate: 1}, nil)
@@ -200,6 +203,7 @@ func TestSend_TimeoutIsALostResponse(t *testing.T) {
 }
 
 func TestSend_StaleInProgressKeyIsTakenOver(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 	if _, err := admin.Exec(context.Background(), `INSERT INTO provider.idempotency_keys (key, channel, state, created_at)
 		VALUES ('msg-1', 'sms', 'in_progress', now() - interval '2 minutes')`); err != nil {
@@ -213,6 +217,7 @@ func TestSend_StaleInProgressKeyIsTakenOver(t *testing.T) {
 }
 
 func TestSend_RestartKeepsKeys(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	first := send(t, start(t, prov, instant, nil), "email", "msg-1", `{"to":"a@example.com","subject":"S","body":"B"}`, nil)
 
@@ -224,6 +229,7 @@ func TestSend_RestartKeepsKeys(t *testing.T) {
 }
 
 func TestSend_MalformedRequests(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	url := start(t, prov, instant, nil)
 	send(t, url, "sms", "used-for-sms", smsBody, nil)
@@ -249,6 +255,7 @@ func TestSend_MalformedRequests(t *testing.T) {
 
 // The same seed gives the same sequence of outcomes, so test runs repeat.
 func TestFailureInjection_IsDeterministic(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	mixed := config.ProviderChannel{ErrorRate: 0.3, RateLimitRate: 0.3}
 	outcomes := func(seed int64, prefix string) []int {
@@ -285,6 +292,7 @@ func TestFailureInjection_IsDeterministic(t *testing.T) {
 
 // D6: the provider's role sees only its own schema.
 func TestProviderRole_CannotReadAppTables(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	ctx := context.Background()
 

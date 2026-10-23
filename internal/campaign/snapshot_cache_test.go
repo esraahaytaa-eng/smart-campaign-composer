@@ -72,6 +72,7 @@ func TestSnapshotCache_StreamsShareOneRead(t *testing.T) {
 }
 
 func TestSnapshotCache_ErrorsAreNotKept(t *testing.T) {
+	t.Parallel()
 	cache := &snapshotCache{now: (&clock{now: time.Unix(0, 0)}).Now}
 	fail := errors.New("database down")
 	calls := 0
@@ -121,6 +122,7 @@ func TestSnapshotCache_ALeavingStreamDoesNotCancelTheRead(t *testing.T) {
 }
 
 func TestSnapshotCache_DropsCampaignsNobodyReads(t *testing.T) {
+	t.Parallel()
 	clk := &clock{now: time.Unix(0, 0)}
 	cache := &snapshotCache{now: clk.Now}
 	load := func(ctx context.Context, id int64) (statusSnapshot, error) { return statusSnapshot{}, nil }

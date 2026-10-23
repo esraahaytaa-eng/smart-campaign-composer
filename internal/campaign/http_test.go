@@ -152,6 +152,7 @@ func (a *app) create(fields map[string]any) (*httptest.ResponseRecorder, draft) 
 }
 
 func TestCreate_FromBrief_DraftWithRulesAndCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec, d := a.create(map[string]any{"request": caseExample, "channels": []string{"sms", "email"}, "time_zone": "Europe/Istanbul"})
@@ -174,6 +175,7 @@ func TestCreate_FromBrief_DraftWithRulesAndCounts(t *testing.T) {
 }
 
 func TestCreate_ScheduleSuggestionIsOnlyAProposal(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec, d := a.create(map[string]any{
@@ -194,6 +196,7 @@ func TestCreate_ScheduleSuggestionIsOnlyAProposal(t *testing.T) {
 }
 
 func TestCreate_Unsupported_422NothingSaved(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec, _ := a.create(map[string]any{"request": "Send something nice to our best customers", "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
@@ -208,6 +211,7 @@ func TestCreate_Unsupported_422NothingSaved(t *testing.T) {
 }
 
 func TestCreate_InvalidInput_NothingSavedNoAICall(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, failingLLM{t})
 	ok := map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"}
 	with := func(k string, v any) string {
@@ -246,6 +250,7 @@ func TestCreate_InvalidInput_NothingSavedNoAICall(t *testing.T) {
 
 // D15: the marketer can build the rules by hand when the AI can't help.
 func TestCreate_ManualRulesSkipAI(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, failingLLM{t})
 
 	rec, d := a.create(map[string]any{
@@ -267,6 +272,7 @@ func TestCreate_ManualRulesSkipAI(t *testing.T) {
 }
 
 func TestCreate_AIInvalidTwice_502NothingSaved(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, garbageLLM{})
 
 	rec, _ := a.create(map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
@@ -289,6 +295,7 @@ func (a *app) newDraft() draft {
 }
 
 func TestUpdateRules(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/rules"
@@ -318,6 +325,7 @@ func TestUpdateRules(t *testing.T) {
 }
 
 func TestUpdateSchedule(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/schedule"
@@ -349,6 +357,7 @@ func TestUpdateSchedule(t *testing.T) {
 }
 
 func TestEdit_NonDraft_409(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 	if _, err := a.pool.Exec(context.Background(), `UPDATE campaigns SET status = 'approved' WHERE id = $1`, d.ID); err != nil {
@@ -365,6 +374,7 @@ func TestEdit_NonDraft_409(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 
@@ -391,6 +401,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestCampaigns_RequireLogin(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.cookie = nil
 
@@ -410,6 +421,7 @@ func itoa(id int64) string { return strconv.FormatInt(id, 10) }
 // from the source, so a route added later can't slip past this test. Only
 // signing in is open.
 func TestEveryAPIRouteRequiresLogin(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.cookie = nil
 	pattern := regexp.MustCompile(`Handle(?:Func)?\("(GET|POST|PUT|DELETE|PATCH) (/api/[^"]+)"`)

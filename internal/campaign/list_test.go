@@ -48,6 +48,7 @@ func (a *app) campaignsFixture(n int) {
 }
 
 func TestList_PagesNewestFirstWithCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.campaignsFixture(247) // 250 in all: more than the old 200-campaign limit
 
@@ -73,6 +74,7 @@ func TestList_PagesNewestFirstWithCounts(t *testing.T) {
 }
 
 func TestList_FilterAndSearch(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.campaignsFixture(3)
 
@@ -105,6 +107,7 @@ func TestList_FilterAndSearch(t *testing.T) {
 }
 
 func TestList_ResendNamesItsOriginal(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.campaignsFixture(0)
 	a.exec(`INSERT INTO campaigns (request_text, channels, status, time_zone, created_by, parent_campaign_id)
@@ -117,6 +120,7 @@ func TestList_ResendNamesItsOriginal(t *testing.T) {
 }
 
 func TestList_RejectsBadInput(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	for _, q := range []string{"status=lost", "page=0", "page=x", "page=10001", "q=" + strings.Repeat("a", 51)} {
 		if _, code := a.list(q); code != http.StatusUnprocessableEntity {
@@ -127,6 +131,7 @@ func TestList_RejectsBadInput(t *testing.T) {
 
 // The dashboard's rows: what's live and what's waiting first (D54).
 func TestDashboard_AttentionOrderAndCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.exec(`INSERT INTO campaigns (request_text, channels, rules, status, time_zone, created_by, send_at, updated_at) VALUES
 		('done old', '{sms}', '[]', 'completed', 'UTC', $1, NULL, $2::timestamptz - interval '3 days'),

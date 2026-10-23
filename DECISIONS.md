@@ -483,6 +483,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** `make test` is as long as its slowest package, and `campaign` ran 82 tests one after another (32 s, 9 s of CPU); T1 is missed (median 76 s against 65 s).
 - **Rejected:** *Removing tests for speed:* little gain, lost coverage.
 - **Trade-offs:** More load on the test database at once; a shared-state test made parallel by mistake would be flaky, so 5 consecutive runs check it.
+- **History:** 2026-10-24, measured. 138 tests run in parallel; 19 stay serial (4 read shared metrics, 15 depend on timing). One package at a time is much faster (`campaign` 15–20 s → 4–5 s), but the full `make test` is not: alternating old and new code gave 60–64 s both ways, because the full run already keeps the machine busy and `e2e` (already parallel) is now the longest package. The 76 s median before was host load; at a load around 10, both meet T1. 8 of 8 full runs passed.
 
 ## Open Questions
 

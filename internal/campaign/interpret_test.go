@@ -64,6 +64,7 @@ func interpret(t *testing.T, s *scripted, text string) (Interpretation, error) {
 }
 
 func TestInterpret_ValidFirstTry(t *testing.T) {
+	t.Parallel()
 	s := &scripted{outputs: []string{output(goodRules, "null", "null")}}
 
 	got, err := interpret(t, s, "brief")
@@ -77,6 +78,7 @@ func TestInterpret_ValidFirstTry(t *testing.T) {
 }
 
 func TestInterpret_InvalidThenValid_RetriesWithErrors(t *testing.T) {
+	t.Parallel()
 	s := &scripted{outputs: []string{output(badRules, "null", "null"), output(goodRules, "null", "null")}}
 
 	got, err := interpret(t, s, "brief")
@@ -93,6 +95,7 @@ func TestInterpret_InvalidThenValid_RetriesWithErrors(t *testing.T) {
 }
 
 func TestInterpret_InvalidTwice_ErrAIInvalid(t *testing.T) {
+	t.Parallel()
 	for name, bad := range map[string]string{
 		"unknown city":         output(badRules, "null", "null"),
 		"not JSON":             `Sure! Here are the rules: city = Istanbul`,
@@ -118,6 +121,7 @@ func TestInterpret_InvalidTwice_ErrAIInvalid(t *testing.T) {
 }
 
 func TestInterpret_UnsupportedPassthrough(t *testing.T) {
+	t.Parallel()
 	s := &scripted{outputs: []string{`{"unsupported":true,"reason":"Age is not in the catalog.","rules":[{"field":"city","op":"in","value":["Ankara"]}],"suggested_send_at":null,"schedule_note":null}`}}
 
 	got, err := interpret(t, s, "brief")
@@ -131,6 +135,7 @@ func TestInterpret_UnsupportedPassthrough(t *testing.T) {
 }
 
 func TestInterpret_Schedule(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, sendAt, note string
 		wantAt             string // "" = not prefilled
@@ -173,6 +178,7 @@ func TestInterpret_TimeoutNoRetry(t *testing.T) {
 }
 
 func TestInterpret_APIErrorNoRetry(t *testing.T) {
+	t.Parallel()
 	s := &scripted{err: errors.New("503 overloaded")}
 
 	_, err := interpret(t, s, "brief")
@@ -183,6 +189,7 @@ func TestInterpret_APIErrorNoRetry(t *testing.T) {
 }
 
 func TestInterpret_RequestTextLimits(t *testing.T) {
+	t.Parallel()
 	for _, text := range []string{"", "   ", strings.Repeat("ş", 1001)} {
 		s := &scripted{}
 		if _, err := interpret(t, s, text); !errors.Is(err, ErrRequestText) || len(s.calls) != 0 {
@@ -198,6 +205,7 @@ func TestInterpret_RequestTextLimits(t *testing.T) {
 // End to end with the real mock: a supported brief gives rules, an unknown one
 // gives "unsupported" and never a guessed audience.
 func TestInterpret_WithMock(t *testing.T) {
+	t.Parallel()
 	m := llm.NewMock()
 	in := llm.InterpretInput{Now: now, TimeZone: "Europe/Istanbul", Catalog: catalog}
 
@@ -215,6 +223,7 @@ func TestInterpret_WithMock(t *testing.T) {
 }
 
 func TestInterpret_InvalidTimeZone_NoAICall(t *testing.T) {
+	t.Parallel()
 	s := &scripted{}
 
 	_, err := Interpret(context.Background(), s, llm.InterpretInput{Text: "brief", Now: now, TimeZone: "Mars/Olympus", Catalog: catalog}, time.Second)
@@ -226,6 +235,7 @@ func TestInterpret_InvalidTimeZone_NoAICall(t *testing.T) {
 
 // A cut-off answer is an invalid answer (D15): retried once, not "unavailable".
 func TestInterpret_TruncatedAnswerIsRetried(t *testing.T) {
+	t.Parallel()
 	s := &scripted{errs: []error{llm.ErrTruncated}, outputs: []string{"", output(goodRules, "null", "null")}}
 	if got, err := interpret(t, s, "brief"); err != nil || len(s.calls) != 2 || len(got.Rules) != 2 {
 		t.Fatalf("truncated then valid: want success after 2 calls, got %v after %d", err, len(s.calls))
