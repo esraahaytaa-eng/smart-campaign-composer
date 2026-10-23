@@ -20,6 +20,6 @@ lint:
 
 # Opt-in browser tests (Playwright) against the app from `docker compose up`.
 # They create campaigns and clean up after themselves (drafts deleted,
-# approved ones cancelled, so nothing is sent).
+# approved ones cancelled); one small campaign is sent to the mock SMS provider.
 e2e:
 	docker compose --profile e2e run --rm e2e
