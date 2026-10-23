@@ -3,21 +3,15 @@
 // Back and Escape, Turkish. Sends one campaign to the Ankara SMS customers
 // through the mock provider, with an SMS that is too long for longer names,
 // so some recipients are sent and some skipped.
-import { ANKARA_BRIEF, BASE, suite } from './lib.mjs'
-
-// 150 characters with the names empty: fits, but not with most full names.
-const LONG = 'Merhaba {{first_name}} {{last_name}}, ' + 'hafta sonu indirimi başladı! Sepetinizdeki ürünlerde geçerli fırsatlar için hemen uygulamayı açın ve kodu girin: HAFTA'.padEnd(150 - 'Merhaba , '.length, '.')
+import { BASE, longSmsToAnkara, suite } from './lib.mjs'
 
 export default () =>
   suite('recipients', async (t) => {
     const { page, check } = t
     await t.signIn()
 
-    const id = await t.draft(ANKARA_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: { sms: { body: LONG } } } })
-    const ok = await page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 2, send: 'now' } })
-    check(ok.ok(), 'test setup: a too-long SMS is sent now to Ankara')
-    for (let i = 0; i < 120 && (await t.get(id)).status !== 'completed'; i++) await page.waitForTimeout(1000)
+    const { id, ok } = await longSmsToAnkara(t) // shared with resend.mjs
+    check(ok, 'test setup: a too-long SMS was sent to Ankara and finished')
     const api = async (q) => (await page.request.get(`${BASE}/api/campaigns/${id}/recipients?${q}`)).json()
     const groups = (await api('group=sent')).groups.sms
     check(groups.sent > 0 && groups.skipped > 0, `test setup: both sent (${groups.sent}) and skipped (${groups.skipped})`)

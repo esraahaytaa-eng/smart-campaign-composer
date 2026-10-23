@@ -57,6 +57,7 @@ services:
       DATABASE_URL: *db-url
       PROVIDER_URL: http://mock-provider:8080
       MAX_ATTEMPTS: ${MAX_ATTEMPTS:-5}
+      RETRY_BACKOFF_MAX: ${RETRY_BACKOFF_MAX:-30s}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -99,6 +100,9 @@ services:
   test-db:
     profiles: ["test"]
     image: postgres:16-alpine
+    # Parallel tests need more connections than the default 100. (Turning off
+    # fsync and friends gained nothing measurable: the data is on tmpfs.)
+    command: ["postgres", "-c", "max_connections=400"]
     environment:
       POSTGRES_USER: scc
       POSTGRES_PASSWORD: scc
@@ -115,7 +119,8 @@ services:
     profiles: ["test"]
     image: golang:1.26-alpine
     working_dir: /src
-    command: ["go", "test", "-count=1", "./..."]
+    # go vet runs in make lint, so the test run skips its own copy of it.
+    command: ["go", "test", "-count=1", "-vet=off", "./..."]
     environment:
       CGO_ENABLED: "0"
       DATABASE_URL: postgres://scc:scc@test-db:5432/scc_test?sslmode=disable
@@ -134,7 +139,8 @@ services:
     profiles: ["test"]
     image: node:22-alpine
     working_dir: /web
-    command: ["sh", "-c", "npm ci --no-audit --no-fund && npm run typecheck && npm test"]
+    # Reinstalls only when the lockfile changed (its hash is kept in the volume).
+    command: ["sh", "-c", "sha256sum package-lock.json | cmp -s - node_modules/.lock-sha || { npm ci --no-audit --no-fund && sha256sum package-lock.json > node_modules/.lock-sha; } && npm run typecheck && npm test"]
     volumes:
       - ./web:/web
       # Its own node_modules, so npm ci never replaces the host's copy.
@@ -147,7 +153,8 @@ services:
     profiles: ["e2e"]
     image: mcr.microsoft.com/playwright:v1.64.1-noble
     working_dir: /e2e
-    command: ["sh", "-c", "npm ci --no-audit --no-fund && node run.mjs"]
+    # Reinstalls only when the lockfile changed (its hash is kept in the volume).
+    command: ["sh", "-c", "sha256sum package-lock.json | cmp -s - node_modules/.lock-sha || { npm ci --no-audit --no-fund && sha256sum package-lock.json > node_modules/.lock-sha; } && node run.mjs"]
     environment:
       BASE: http://api:8080
     volumes:

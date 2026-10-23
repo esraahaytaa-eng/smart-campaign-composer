@@ -3,9 +3,8 @@
 // follow-up goes through the content and review steps and reaches only the
 // skipped recipients. Sends to the Ankara SMS customers through the mock
 // provider (the original and the resend).
-import { ANKARA_BRIEF, BASE, suite } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, LONG_SMS, longSmsToAnkara, suite } from './lib.mjs'
 
-const LONG = 'Merhaba {{first_name}} {{last_name}}, ' + 'hafta sonu indirimi başladı! Sepetinizdeki ürünlerde geçerli fırsatlar için hemen uygulamayı açın ve kodu girin: HAFTA'.padEnd(150 - 'Merhaba , '.length, '.')
 const SHORT = 'Merhaba {{first_name}}, hafta sonu indirimi başladı! Kod: HAFTA'
 
 export default () =>
@@ -16,10 +15,8 @@ export default () =>
       for (let i = 0; i < 120 && (await t.get(id)).status !== 'completed'; i++) await page.waitForTimeout(1000)
     }
 
-    const id = await t.draft(ANKARA_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: { sms: { body: LONG } } } })
-    check((await page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 2, send: 'now' } })).ok(), 'test setup: a too-long SMS is sent to Ankara')
-    await done(id)
+    const { id, ok } = await longSmsToAnkara(t) // shared with recipients.mjs
+    check(ok, 'test setup: a too-long SMS was sent to Ankara and finished')
     const groups = (await (await page.request.get(`${BASE}/api/campaigns/${id}/recipients?group=skipped`)).json()).groups.sms
 
     // the offer and the dialog
@@ -49,7 +46,7 @@ export default () =>
     const created = await t.get(resend)
     check(created.parent_campaign_id === id && created.channels.join() === 'sms', 'the resend is a draft linked to the campaign, SMS only')
     await page.getByText('Show original SMS').click()
-    check(await page.getByText(LONG.slice(0, 40), { exact: false }).isVisible(), 'the original SMS can be shown')
+    check(await page.getByText(LONG_SMS.slice(0, 40), { exact: false }).isVisible(), 'the original SMS can be shown')
     await page.locator('#sms-body').fill(SHORT)
     await page.locator('#sms-body').blur()
     await page.getByText('All changes saved').waitFor()
@@ -76,7 +73,7 @@ export default () =>
 
     // a conflict: the resend is created elsewhere while the dialog is open
     const other = await t.draft(ANKARA_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${other}/content`, { data: { version: 1, content: { sms: { body: LONG } } } })
+    await page.request.put(`${BASE}/api/campaigns/${other}/content`, { data: { version: 1, content: { sms: { body: LONG_SMS } } } })
     await page.request.post(`${BASE}/api/campaigns/${other}/approve`, { data: { version: 2, send: 'now' } })
     await done(other)
     await page.goto(`${BASE}/campaigns/${other}`)
