@@ -47,6 +47,7 @@ export const en = {
 
   'error.network': "Can't reach the server. Check that it is running.",
   'error.server': 'The server ran into a problem. Try again in a moment.',
+  'error.tooManySignIns': 'Too many failed sign-ins. Wait a few minutes, then try again.',
   'error.notFound': 'This campaign doesn’t exist, or it was deleted.',
   'error.changed': 'This draft was changed elsewhere, in another tab or by another marketer. Reload to see the latest version before editing again.',
   'error.aiFailed': 'The AI couldn’t produce a usable answer. Try again, or rephrase the brief.',

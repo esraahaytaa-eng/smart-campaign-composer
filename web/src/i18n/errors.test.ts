@@ -13,6 +13,7 @@ describe('errorText', () => {
     [new ApiError('The AI did not answer in time.', 504), 'The AI didn’t answer in time. Try again.'],
     [new ApiError('internal error', 500), 'The server ran into a problem. Try again in a moment.'],
     [new ApiError('login required', 401), 'Your session has expired. Sign in again.'],
+    [new ApiError('too many failed sign-ins; try again later', 429), 'Too many failed sign-ins. Wait a few minutes, then try again.'],
     [new Error('boom'), 'Something went wrong. Try again.'],
   ])('%s', (err, text) => {
     expect(errorText(err)).toBe(text)

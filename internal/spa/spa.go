@@ -13,6 +13,9 @@ import (
 // frontend router can handle page URLs. Missing files under /assets/ are 404s:
 // index.html served as a script would hide a stale build. Mount it at "/" so
 // /api/ routes stay more specific.
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
+	"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
 func Handler(dir string) http.Handler {
 	files := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -22,8 +25,11 @@ func Handler(dir string) http.Handler {
 			return
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// Other sites may not frame the app (clickjacking of approve and send).
-		w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		// D56: only the app's own files may run, load or be connected to (no
+		// inline scripts or styles), and other sites may not frame it
+		// (clickjacking of approve and send).
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		p := path.Clean("/" + r.URL.Path) // never leaves dir
 		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err == nil && !info.IsDir() {
 			if strings.HasPrefix(p, "/assets/") {

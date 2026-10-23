@@ -264,3 +264,110 @@ func TestRequire_GuardedRouteLabelsMetrics(t *testing.T) {
 		t.Fatalf("want 1 request labelled GET /api/me, got %v", got)
 	}
 }
+
+// D55: after 5 failed sign-ins for an email, even the right password waits.
+func TestLogin_ThrottledAfterFiveFailures(t *testing.T) {
+	s := newServer(t)
+	for range 5 {
+		if rec := s.login(email, "wrong-password"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("want 401, got %d", rec.Code)
+		}
+	}
+	rec := s.login(email, password)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("want 429 with Retry-After, got %d %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+// The client address is limited too, so guessing across many emails stops.
+func TestLogin_ThrottlesAnAddressAcrossEmails(t *testing.T) {
+	s := newServer(t)
+	for i := range 5 {
+		s.login("nobody"+strings.Repeat("x", i)+"@example.com", "guess")
+	}
+	if rec := s.login(email, password); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429 for the address, got %d", rec.Code)
+	}
+}
+
+func TestLogin_SuccessResetsTheCount(t *testing.T) {
+	s := newServer(t)
+	for range 4 {
+		s.login(email, "wrong-password")
+	}
+	if rec := s.login(email, password); rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	for range 4 {
+		s.login(email, "wrong-password")
+	}
+	if rec := s.login(email, password); rec.Code != http.StatusOK {
+		t.Fatalf("the earlier failures were forgotten after a success, want 200, got %d", rec.Code)
+	}
+}
+
+// Writes from another site's page are refused, even with a valid cookie
+// (defense in depth behind SameSite=Lax).
+func TestAPI_RejectsCrossSiteWrites(t *testing.T) {
+	s := newServer(t)
+	c := s.sessionCookie()
+	req := func(origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/logout", nil)
+		r.AddCookie(c)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, r)
+		return rec
+	}
+	if rec := req("https://evil.example"); rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site write: want 403, got %d", rec.Code)
+	}
+	if rec := req("http://example.com"); rec.Code != http.StatusNoContent {
+		t.Fatalf("same-site write (httptest's host): want 204, got %d", rec.Code)
+	}
+
+	login := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"email":"`+email+`","password":"`+password+`"}`))
+	login.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, login)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site sign-in: want 403, got %d", rec.Code)
+	}
+}
+
+// D56: API answers are never cached, sniffed or sent as a referrer.
+func TestAPI_SecurityHeaders(t *testing.T) {
+	s := newServer(t)
+	for _, rec := range []*httptest.ResponseRecorder{
+		s.do(http.MethodGet, "/api/me", ""),                    // 401
+		s.do(http.MethodGet, "/api/me", "", s.sessionCookie()), // 200
+		s.login(email, "wrong-password"),
+	} {
+		h := rec.Header()
+		if h.Get("Cache-Control") != "no-store" || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" {
+			t.Errorf("status %d: headers %v", rec.Code, h)
+		}
+	}
+}
+
+// The session cookie is Secure whenever the request came over HTTPS.
+func TestLogin_SecureCookieOverHTTPS(t *testing.T) {
+	s := newServer(t)
+	secure := func(proto string) bool {
+		r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"email":"`+email+`","password":"`+password+`"}`))
+		if proto != "" {
+			r.Header.Set("X-Forwarded-Proto", proto)
+		}
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, r)
+		return rec.Result().Cookies()[0].Secure
+	}
+	if secure("") {
+		t.Fatal("plain http (the local demo): the cookie must still work, so not Secure")
+	}
+	if !secure("https") {
+		t.Fatal("behind HTTPS the cookie must be Secure")
+	}
+}

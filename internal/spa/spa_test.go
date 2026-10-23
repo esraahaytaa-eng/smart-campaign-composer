@@ -42,6 +42,11 @@ func get(h http.Handler, method, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// D56: only the app's own files may run, load or be connected to; no inline
+// scripts or styles, no plugins, no other site may frame it (clickjacking).
+const csp = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; " +
+	"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
 func TestHandler_PageRoutesGetTheApp(t *testing.T) {
 	h := site(t)
 	for _, path := range []string{"/", "/login", "/campaigns/7", "/campaigns/7/content"} {
@@ -49,8 +54,8 @@ func TestHandler_PageRoutesGetTheApp(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Body.String() != "<!doctype html>app" {
 			t.Errorf("%s: want the app, got %d %q", path, rec.Code, rec.Body)
 		}
-		if rec.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" {
-			t.Errorf("%s: the app must not be framed by other sites (clickjacking)", path)
+		if rec.Header().Get("Content-Security-Policy") != csp || rec.Header().Get("Referrer-Policy") != "no-referrer" {
+			t.Errorf("%s: want the strict CSP and no referrer (D56), got %q / %q", path, rec.Header().Get("Content-Security-Policy"), rec.Header().Get("Referrer-Policy"))
 		}
 		if rec.Header().Get("Cache-Control") != "no-cache" {
 			t.Errorf("%s: index.html must be revalidated so a new build is picked up, got %q", path, rec.Header().Get("Cache-Control"))
@@ -71,8 +76,8 @@ func TestHandler_ServesFiles(t *testing.T) {
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("want nosniff")
 	}
-	if rec.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" {
-		t.Error("the app must not be framed by other sites (clickjacking)")
+	if rec.Header().Get("Content-Security-Policy") != csp {
+		t.Error("want the strict CSP on every file (D56)")
 	}
 	if rec := get(h, http.MethodGet, "/favicon.svg"); rec.Code != http.StatusOK || rec.Body.String() != "<svg/>" {
 		t.Fatalf("want the favicon, got %d", rec.Code)

@@ -17,6 +17,8 @@ export async function suite(name, body) {
   const problems = []
   const created = []
   page.on('pageerror', (e) => problems.push(`page error: ${e.message}`))
+  // A strict CSP (D56) must never block anything the app itself does.
+  page.on('console', (m) => /Content Security Policy/i.test(m.text()) && problems.push(`CSP violation: ${m.text()}`))
   const t = {
     page,
     context,

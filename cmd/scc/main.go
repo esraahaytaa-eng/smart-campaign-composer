@@ -139,8 +139,11 @@ func runWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error
 
 // serve runs an HTTP server until ctx ends, then shuts it down gracefully.
 func serve(ctx context.Context, addr string, handler http.Handler) error {
-	// No WriteTimeout: SSE responses (T8, T14) and slow provider replies stay open.
-	srv := &http.Server{Addr: addr, Handler: obs.Instrument(handler), ReadHeaderTimeout: 10 * time.Second}
+	// No WriteTimeout or ReadTimeout: both would also cut SSE responses (T8,
+	// T14) and slow provider replies. Headers must arrive within 10 s, bodies
+	// are size-capped by the handlers, and idle keep-alive connections close.
+	srv := &http.Server{Addr: addr, Handler: obs.Instrument(handler), ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout: 2 * time.Minute}
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()

@@ -22,6 +22,8 @@ export function errorText(err: unknown): string {
       return t('error.sessionExpired')
     case 404:
       return t('error.notFound')
+    case 429: // only sign-in is limited (D55)
+      return t('error.tooManySignIns')
     case 502:
       return t('error.aiFailed')
     case 504:
