@@ -41,6 +41,7 @@ type Handler struct {
 func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/catalog", h.catalog)
 	mux.HandleFunc("GET /api/campaigns", h.list)
+	mux.HandleFunc("GET /api/dashboard", h.dashboard)
 	mux.HandleFunc("POST /api/campaigns", h.create)
 	mux.HandleFunc("GET /api/campaigns/{id}", h.get)
 	mux.HandleFunc("DELETE /api/campaigns/{id}", h.deleteDraft)
@@ -74,16 +75,18 @@ type campaignJSON struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 	// Set on a resend: its audience is the parent's skipped recipients (D31).
-	ParentCampaignID *int64           `json:"parent_campaign_id"`
-	ApprovalEstimate json.RawMessage  `json:"approval_estimate"`
-	ApprovedBy       *int64           `json:"approved_by"`
-	ApprovedAt       *time.Time       `json:"approved_at"`
-	CancelledBy      *int64           `json:"cancelled_by"`
-	CancelledAt      *time.Time       `json:"cancelled_at"`
-	AudienceBuiltAt  *time.Time       `json:"audience_built_at"`
-	CompletedAt      *time.Time       `json:"completed_at"`
-	Counts           *audience.Counts `json:"counts,omitempty"`
-	Content          *content.Content `json:"content"` // in single-campaign responses
+	ParentCampaignID *int64 `json:"parent_campaign_id"`
+	// The original's brief, in lists only, so a resend can name it (D54).
+	ParentRequestText *string          `json:"parent_request_text,omitempty"`
+	ApprovalEstimate  json.RawMessage  `json:"approval_estimate"`
+	ApprovedBy        *int64           `json:"approved_by"`
+	ApprovedAt        *time.Time       `json:"approved_at"`
+	CancelledBy       *int64           `json:"cancelled_by"`
+	CancelledAt       *time.Time       `json:"cancelled_at"`
+	AudienceBuiltAt   *time.Time       `json:"audience_built_at"`
+	CompletedAt       *time.Time       `json:"completed_at"`
+	Counts            *audience.Counts `json:"counts,omitempty"`
+	Content           *content.Content `json:"content"` // in single-campaign responses
 }
 
 const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
@@ -92,10 +95,14 @@ const campaignColumns = `id, request_text, channels, rules, status, version, sen
 
 func scanCampaign(row pgx.Row) (campaignJSON, error) {
 	var c campaignJSON
-	err := row.Scan(&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
+	return c, scanInto(row, &c)
+}
+
+// scanInto scans campaignColumns into c, then any extra columns.
+func scanInto(row pgx.Row, c *campaignJSON, extra ...any) error {
+	return row.Scan(append([]any{&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
 		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &c.ParentCampaignID, &c.ApprovalEstimate,
-		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt)
-	return c, err
+		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt}, extra...)...)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -175,16 +182,6 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits(),
 	})
-}
-
-func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	rows, _ := h.Pool.Query(r.Context(), `SELECT `+campaignColumns+` FROM campaigns ORDER BY id DESC LIMIT 200`)
-	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (campaignJSON, error) { return scanCampaign(row) })
-	if err != nil {
-		serverError(w, "list campaigns", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, list)
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

@@ -374,8 +374,8 @@ func TestGet(t *testing.T) {
 	}
 
 	rec = a.do(http.MethodGet, "/api/campaigns", "")
-	list := decode[[]draft](t, rec)
-	if rec.Code != http.StatusOK || len(list) != 1 || list[0].ID != d.ID {
+	list := decode[struct{ Campaigns []draft }](t, rec)
+	if rec.Code != http.StatusOK || len(list.Campaigns) != 1 || list.Campaigns[0].ID != d.ID {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
 
