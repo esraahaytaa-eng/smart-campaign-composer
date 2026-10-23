@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,7 +11,7 @@ import (
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
 	keys := []string{"DATABASE_URL", "HTTP_ADDR", "LLM_MODE", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "DEMO_MARKETER_PASSWORD",
-		"LLM_TIMEOUT", "PROVIDER_DB_PASSWORD", "PROVIDER_SEED", "PROVIDER_URL", "MAX_ATTEMPTS"}
+		"LLM_TIMEOUT", "PROVIDER_DB_PASSWORD", "PROVIDER_SEED", "PROVIDER_URL", "MAX_ATTEMPTS", "WEB_DIR"}
 	for _, ch := range []string{"SMS", "EMAIL"} {
 		for _, suffix := range []string{"_DELAY_MS_MIN", "_DELAY_MS_MAX", "_ERROR_RATE", "_RATE_LIMIT_RATE", "_TIMEOUT_RATE"} {
 			keys = append(keys, ch+suffix)
@@ -149,5 +151,26 @@ func TestLoadConfig_WorkerDefaults(t *testing.T) {
 	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "PROVIDER_URL": "http://localhost:9000/", "MAX_ATTEMPTS": "3"})
 	if cfg, err = Load("worker"); err != nil || cfg.ProviderURL != "http://localhost:9000" || cfg.MaxAttempts != 3 {
 		t.Fatalf("overrides: got %q, %d (%v)", cfg.ProviderURL, cfg.MaxAttempts, err)
+	}
+}
+
+// A WEB_DIR without the built frontend would answer every page with 404
+// after a normal-looking start, so the api refuses to start instead.
+func TestLoadConfig_WebDirMustHoldTheBuild(t *testing.T) {
+	dir := t.TempDir()
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db", "WEB_DIR": dir})
+	if _, err := Load("api"); err == nil || !strings.Contains(err.Error(), "WEB_DIR") {
+		t.Fatalf("want an error naming WEB_DIR, got %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := Load("api"); err != nil || cfg.WebDir != dir {
+		t.Fatalf("with index.html: %v, %q", err, cfg.WebDir)
+	}
+	setEnv(t, map[string]string{"DATABASE_URL": "postgres://db"})
+	if _, err := Load("api"); err != nil {
+		t.Fatalf("no WEB_DIR serves no frontend and is fine: %v", err)
 	}
 }

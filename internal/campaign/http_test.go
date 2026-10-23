@@ -398,6 +398,7 @@ func TestCampaigns_RequireLogin(t *testing.T) {
 
 	for _, r := range []struct{ method, path string }{
 		{http.MethodGet, "/api/campaigns"}, {http.MethodPost, "/api/campaigns"}, {http.MethodGet, "/api/campaigns/1"},
+		{http.MethodGet, "/api/campaigns/1/recipients?group=sent"},
 	} {
 		if rec := a.do(r.method, r.path, "{}"); rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s: want 401, got %d", r.method, r.path, rec.Code)

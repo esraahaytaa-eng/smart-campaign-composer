@@ -147,3 +147,53 @@ func TestFixedWindowStarts(t *testing.T) {
 		t.Fatalf("want %v, got %v (%v)", want, starts, err)
 	}
 }
+
+// Fields is what the chip editor builds rules from (D39): a value of each
+// declared type must pass Validate for every operator, so the two can't drift.
+func TestFields_DescribeWhatValidateAccepts(t *testing.T) {
+	samples := map[string][]string{
+		audience.ValueCities:           {`["Ankara"]`},
+		audience.ValueWindow:           {`{"last_days":30}`, `{"from":"2026-10-01"}`},
+		audience.ValueCategoriesWindow: {`{"categories":["books"],"last_days":30}`, `{"categories":["books"],"from":"2026-10-01"}`},
+		audience.ValueCount:            {`3`},
+		audience.ValueAmount:           {`250.5`},
+	}
+	fields := audience.Fields()
+	if len(fields) != 10 {
+		t.Fatalf("want the 10 catalog fields, got %d", len(fields))
+	}
+	for i, f := range fields {
+		if i > 0 && fields[i-1].Field >= f.Field {
+			t.Errorf("fields must be sorted: %s before %s", fields[i-1].Field, f.Field)
+		}
+		values, ok := samples[f.Value]
+		if !ok || len(f.Ops) == 0 {
+			t.Errorf("%s: unknown value type %q or no operators", f.Field, f.Value)
+			continue
+		}
+		for _, op := range f.Ops {
+			for _, v := range values {
+				if _, errs := audience.Validate([]audience.Rule{rule(f.Field, op, v)}, catalog); len(errs) > 0 {
+					t.Errorf("%s %s %s: %v", f.Field, op, v, errs)
+				}
+			}
+		}
+	}
+}
+
+// The catalog hands out copies: a caller changing them cannot change validation.
+func TestFieldsAndLimits_AreCopies(t *testing.T) {
+	audience.Fields()[0].Ops[0] = "changed"
+	limits := audience.Limits()
+	limits["max_rules"] = 0
+
+	if f := audience.Fields()[0]; f.Ops[0] == "changed" {
+		t.Fatalf("Fields shares its operator slices: %+v", f)
+	}
+	if audience.Limits()["max_rules"] != 20 {
+		t.Fatal("Limits shares its map")
+	}
+	if _, errs := audience.Validate([]audience.Rule{rule("cart_added", "within", `{"last_days":30}`)}, catalog); len(errs) > 0 {
+		t.Fatalf("validation changed: %v", errs)
+	}
+}

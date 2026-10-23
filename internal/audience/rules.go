@@ -58,6 +58,55 @@ var fieldOps = map[string][]string{
 	"signed_up":        {"within"},
 }
 
+// Value types of the rule fields, as the chip editor shows them (D39).
+const (
+	ValueCities           = "cities"            // ["İstanbul", ...]
+	ValueWindow           = "window"            // {"last_days": N} or {"from": "YYYY-MM-DD", "to"?: ...}
+	ValueCategoriesWindow = "categories_window" // a window plus "categories": [...]
+	ValueCount            = "count"             // whole number
+	ValueAmount           = "amount"            // number
+)
+
+// fieldValues is each field's value type; parse decodes exactly these shapes.
+var fieldValues = map[string]string{
+	"city":             ValueCities,
+	"cart_added":       ValueWindow,
+	"no_order":         ValueWindow,
+	"signed_up":        ValueWindow,
+	"last_order":       ValueWindow, // "before" takes no "to"
+	"ordered_category": ValueCategoriesWindow,
+	"carted_category":  ValueCategoriesWindow,
+	"order_count":      ValueCount,
+	"total_spend":      ValueAmount,
+	"cart_value":       ValueAmount,
+}
+
+// FieldSpec describes one rule field for the API catalog (D39).
+type FieldSpec struct {
+	Field string   `json:"field"`
+	Ops   []string `json:"ops"`
+	Value string   `json:"value"`
+}
+
+// Fields lists every rule field, sorted by name. The slices are copies.
+func Fields() []FieldSpec {
+	out := make([]FieldSpec, 0, len(fieldOps))
+	for f, ops := range fieldOps {
+		out = append(out, FieldSpec{f, slices.Clone(ops), fieldValues[f]})
+	}
+	slices.SortFunc(out, func(a, b FieldSpec) int { return strings.Compare(a.Field, b.Field) })
+	return out
+}
+
+// Limits are the bounds Validate enforces, as a fresh map: max_count is for
+// order_count, max_amount for total_spend and cart_value.
+func Limits() map[string]any {
+	return map[string]any{
+		"max_rules": maxRules, "max_days": maxDays, "max_count": maxCount, "max_amount": maxAmount,
+		"min_date": minDate.Format(time.DateOnly),
+	}
+}
+
 // Validate checks rules against the catalog and returns them normalized
 // (canonical city and category names), with every problem found.
 func Validate(rules []Rule, cat Catalog) ([]Rule, []FieldError) {

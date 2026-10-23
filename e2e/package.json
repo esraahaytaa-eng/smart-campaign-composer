@@ -1,0 +1,12 @@
+{
+  "name": "smart-campaign-composer-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Opt-in browser tests against a running app (make e2e). Not part of make test.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

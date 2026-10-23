@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type Config struct {
 	AnthropicAPIKey string
 	AnthropicModel  string
 	LLMTimeout      time.Duration // per AI call (D15)
+	WebDir          string        // built frontend the api serves (T15); empty serves none
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
 	ProviderDBPassword   string // migrate sets it on the mock provider's database role (D6)
@@ -47,6 +49,7 @@ func Load(process string) (Config, error) {
 		LLMMode:         getenv("LLM_MODE", "mock"),
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		AnthropicModel:  getenv("ANTHROPIC_MODEL", "claude-opus-5-5"),
+		WebDir:          os.Getenv("WEB_DIR"),
 
 		DemoMarketerPassword: os.Getenv("DEMO_MARKETER_PASSWORD"),
 		ProviderDBPassword:   os.Getenv("PROVIDER_DB_PASSWORD"),
@@ -75,6 +78,12 @@ func Load(process string) (Config, error) {
 		return Config{}, fmt.Errorf("LLM_TIMEOUT must be a positive duration such as 60s, got %q", os.Getenv("LLM_TIMEOUT"))
 	}
 	cfg.LLMTimeout = timeout
+	// Without the build every page would be a 404 after a normal-looking start.
+	if cfg.WebDir != "" {
+		if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err != nil {
+			return Config{}, fmt.Errorf("WEB_DIR %q has no index.html: build the frontend or leave WEB_DIR empty", cfg.WebDir)
+		}
+	}
 	switch cfg.LLMMode {
 	case "mock":
 	case "real":

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,10 +39,14 @@ type Handler struct {
 }
 
 func (h *Handler) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/catalog", h.catalog)
 	mux.HandleFunc("GET /api/campaigns", h.list)
 	mux.HandleFunc("POST /api/campaigns", h.create)
 	mux.HandleFunc("GET /api/campaigns/{id}", h.get)
+	mux.HandleFunc("DELETE /api/campaigns/{id}", h.deleteDraft)
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
+	mux.HandleFunc("PUT /api/campaigns/{id}/channels", h.updateChannels)
+	mux.HandleFunc("PUT /api/campaigns/{id}/request", h.updateRequest)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
@@ -50,6 +55,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/campaigns/{id}/estimate", h.estimate)
 	mux.HandleFunc("POST /api/campaigns/{id}/resend", h.resend)
 	mux.HandleFunc("GET /api/campaigns/{id}/events", h.events)
+	mux.HandleFunc("GET /api/campaigns/{id}/recipients", h.recipients)
 }
 
 // campaignJSON is a campaign as the API returns it. Counts are the current
@@ -158,6 +164,19 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	h.respond(w, r.Context(), http.StatusCreated, id)
 }
 
+// catalog serves the rule language for the chip editor (D39): fields with
+// operators and value types, and the cities and categories rules may name.
+func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
+	cat, err := audience.LoadCatalog(r.Context(), h.Pool)
+	if err != nil {
+		serverError(w, "load catalog", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits(),
+	})
+}
+
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	rows, _ := h.Pool.Query(r.Context(), `SELECT `+campaignColumns+` FROM campaigns ORDER BY id DESC LIMIT 200`)
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (campaignJSON, error) { return scanCampaign(row) })
@@ -187,13 +206,7 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
 		return
 	}
-	var isResend bool
-	if err := h.Pool.QueryRow(r.Context(), `SELECT parent_campaign_id IS NOT NULL FROM campaigns WHERE id = $1`, id).Scan(&isResend); err != nil {
-		serverError(w, "load campaign", err)
-		return
-	}
-	if isResend {
-		writeError(w, http.StatusConflict, "a resend's audience is fixed: the skipped recipients of the original campaign")
+	if h.isResend(w, r.Context(), id, "a resend's audience is fixed: the skipped recipients of the original campaign") {
 		return
 	}
 	cat, err := audience.LoadCatalog(r.Context(), h.Pool)
@@ -208,6 +221,128 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 	}
 	rulesJSON, _ := json.Marshal(rules)
 	h.update(w, r.Context(), id, *in.Version, `rules = $4`, rulesJSON)
+}
+
+// updateChannels changes a draft's channels and deletes the content of any
+// channel removed, so approval is not blocked by text that won't be sent (D38).
+func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version  *int     `json:"version"`
+		Channels []string `json:"channels"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) ||
+		h.isResend(w, ctx, id, "a resend's channel is fixed: the channel of the skipped recipients") {
+		return
+	}
+	if err := checkChannels(in.Channels); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $3, version = version + 1, updated_at = now()
+		WHERE id = $1 AND version = $2 AND status = 'draft'`, id, *in.Version, in.Channels)
+	if err != nil {
+		serverError(w, "update channels", err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1 AND NOT channel = ANY($2)`, id, in.Channels); err != nil {
+		serverError(w, "delete content", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
+		return
+	}
+	h.respond(w, ctx, http.StatusOK, id)
+}
+
+// updateRequest replaces a draft's brief and re-interprets it (D40): the rules
+// and proposed send time are replaced, the content is kept. The version is
+// checked before the AI call, so a stale draft costs no AI call, and again
+// when saving, so an edit made meanwhile is not overwritten.
+func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version *int   `json:"version"`
+		Request string `json:"request"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) ||
+		h.isResend(w, ctx, id, "a resend has no brief to interpret: its recipients come from the original campaign") {
+		return
+	}
+	var version int
+	var zone string
+	if err := h.Pool.QueryRow(ctx, `SELECT version, time_zone FROM campaigns WHERE id = $1`, id).Scan(&version, &zone); err != nil {
+		serverError(w, "load campaign", err)
+		return
+	}
+	if version != *in.Version {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	cat, err := audience.LoadCatalog(ctx, h.Pool)
+	if err != nil {
+		serverError(w, "load catalog", err)
+		return
+	}
+	got, err := Interpret(ctx, h.LLM, llm.InterpretInput{Text: in.Request, Now: h.Now(), TimeZone: zone, Catalog: cat}, h.Timeout)
+	if err != nil {
+		writeAIError(w, err)
+		return
+	}
+	if got.Unsupported {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": got.Reason, "unsupported": true})
+		return
+	}
+	var note *string
+	if got.ScheduleNote != "" {
+		note = &got.ScheduleNote
+	}
+	rulesJSON, _ := json.Marshal(got.Rules)
+	tag, err := h.Pool.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
+		version = version + 1, updated_at = now() WHERE id = $1 AND version = $2 AND status = 'draft'`,
+		id, *in.Version, strings.TrimSpace(in.Request), rulesJSON, got.SuggestedSendAt, note)
+	if err != nil {
+		serverError(w, "update request", err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	h.respond(w, ctx, http.StatusOK, id)
+}
+
+// isResend answers 409 with msg if the campaign is a resend, whose audience
+// and channel come from its parent (D31).
+func (h *Handler) isResend(w http.ResponseWriter, ctx context.Context, id int64, msg string) bool {
+	var resend bool
+	if err := h.Pool.QueryRow(ctx, `SELECT parent_campaign_id IS NOT NULL FROM campaigns WHERE id = $1`, id).Scan(&resend); err != nil {
+		serverError(w, "load campaign", err)
+		return true
+	}
+	if resend {
+		writeError(w, http.StatusConflict, msg)
+	}
+	return resend
 }
 
 func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +373,59 @@ func (h *Handler) updateSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	// The brief's note no longer describes a time the marketer chose.
 	h.update(w, r.Context(), id, *in.Version, `send_at = $4, schedule_note = NULL`, sendAt)
+}
+
+// deleteDraft removes a draft and its content if it still has the expected
+// version (D37). Approved and later campaigns are only ever cancelled (D11).
+func (h *Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version *int `json:"version"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) {
+		return
+	}
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	// The row lock makes a concurrent approve or content save wait, then see it gone.
+	var found bool
+	err = tx.QueryRow(ctx, `SELECT true FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
+		id, *in.Version).Scan(&found)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	if err != nil {
+		serverError(w, "lock draft", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1`, id); err != nil {
+		serverError(w, "delete content", err)
+		return
+	}
+	// Guarded again, so the delete stays draft-only even without the lock above.
+	tag, err := tx.Exec(ctx, `DELETE FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft'`, id, *in.Version)
+	if err != nil {
+		serverError(w, "delete draft", err)
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // editableDraft answers 404/409/422 unless the campaign exists, is a draft

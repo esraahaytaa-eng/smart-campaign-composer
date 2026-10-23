@@ -363,18 +363,41 @@ func TestProcess_CancelDuringRateLimitWait(t *testing.T) {
 	f := newFixture(t)
 	p := &fakeProvider{}
 	w := f.newWorker(p.serve(t))
-	slow := rate.NewLimiter(rate.Every(400*time.Millisecond), 1)
-	slow.Allow() // empty: the next token comes in 400 ms
-	w.Limiters = map[string]*rate.Limiter{"sms": slow, "email": rate.NewLimiter(rate.Inf, 1)}
 	id := f.sendingWithContent("Merhaba {{first_name}}!")
 	job := f.claimOne("sms", 1)
+	const interval = 3 * time.Second
+	slow := rate.NewLimiter(rate.Every(interval), 1)
+	slow.Allow() // empty: the next token is due one interval from now
+	due := time.Now().Add(interval)
+	w.Limiters = map[string]*rate.Limiter{"sms": slow, "email": rate.NewLimiter(rate.Inf, 1)}
 
+	// Cancel once the worker is waiting, not after a guessed delay. Tokens is
+	// at least 0 until the worker's reservation takes the token, and below 0
+	// from then until the token is due.
+	cancelled := make(chan time.Time, 1)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
+		for slow.Tokens() >= 0 && time.Now().Before(due) {
+			time.Sleep(time.Millisecond)
+		}
+		if time.Now().After(due) {
+			close(cancelled) // the worker never waited before the token was due
+			return
+		}
 		f.exec(`UPDATE campaigns SET status = 'cancelled' WHERE id = $1`, id)
+		cancelled <- time.Now()
 	}()
 	if err := w.Process(context.Background(), job); err != nil {
 		t.Fatal(err)
+	}
+	// The limiter can't be released early, so the cancel must commit before the
+	// token is due; otherwise this run proves nothing.
+	select {
+	case at, ok := <-cancelled:
+		if !ok || at.After(due) {
+			t.Fatal("the cancel did not commit while the worker waited for the token; the machine is too slow for this test")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the cancel never finished")
 	}
 
 	if m := f.message(job.MessageID); m.Status != "cancelled" || len(p.requests) != 0 {

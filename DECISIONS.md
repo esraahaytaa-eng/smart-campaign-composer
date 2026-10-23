@@ -164,6 +164,42 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *English-only mock:* breaks Turkish demos. *Language per recipient:* optional feature, still deferred.
 - **Trade-offs:** Mixed-language briefs depend on Claude's judgement.
 
+### D45 — Recipient details are part of T18
+- **Status:** Accepted · 2026-10-23
+- **Decision:** T18 includes the design's Recipient details screen (board 5), in English and Turkish (D44). It is backed by a new paginated, filterable API that returns each recipient's delivery status, failure or skip reason and attempt history, with privacy protection for customer data.
+- **Why:** Engineer's choice: the counts alone don't show who was affected or why, and the design depends on this screen.
+- **Rejected:** *Deferring it (counts and reason tables only):* CASE.md doesn't require it, but the delivery picture would be incomplete.
+- **Trade-offs:** A new API that returns customer data, so it needs masking, limits and tests; T18 grows by about one task.
+
+### D46 — Delivery outcomes shown in seven groups, with reason codes
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The UI shows messages in seven groups that add up to the audience: Sent (`sent`), Uncertain (`failed`, `skipped` or `cancelled` with an uncertain delivery, D5), Failed, Skipped, Cancelled (the rest of those statuses), Retrying (`retry_scheduled`), Pending (`pending` and `sending`). Reasons are codes the UI translates (D44): failed `provider_rejected` / `retries_exhausted`; skipped `character_limit_exceeded` (with the rendered length) / `no_consent`; uncertain by the latest attempt without a clear answer (`timeout`, `network_error`, `interrupted`, or `no_response_recorded` when a worker died mid-attempt); retrying by the last attempt's outcome, or `requeued` when the latest claim was handed back unsent. The status stream (D36) gains the groups, the reason codes and the 429s of the last 5 minutes; its raw error strings and the separate `uncertain` count are removed (the Uncertain group replaces it).
+- **Why:** Matches the design's vocabulary; one definition for the live screen and recipient details; provider text is neither translated nor safe to show.
+- **Rejected:** *Uncertain as a separate overlapping count:* groups wouldn't add up. *Showing `last_error`:* untranslatable, may contain provider data.
+- **Trade-offs:** A sent message whose earlier attempt timed out counts only as Sent; changes the T14 stream's fields.
+- **History:** 2026-10-23 (PR #6 review). The reasons are worded as implemented; a retry handed back unsent after an earlier attempt now reads `requeued` instead of that attempt's outcome.
+
+### D47 — Recipient API: paged, name search only, masked contacts
+- **Status:** Accepted · 2026-10-23
+- **Decision:** `GET /api/campaigns/{id}/recipients?group=&channel=&q=&page=` returns 50 rows per page sorted by last attempt, with group and reason counts, `as_of`, and each row's attempt history (time, outcome, HTTP status). Contacts are masked on the server (`+90 555 ••• •• 17`, first 3 characters of an email's local part + `•••@domain`); search matches names only (Turkish-folded, ≤ 50 characters); no message text, error text or other customer fields; `Cache-Control: no-store`. The drawer is a snapshot.
+- **Why:** Implements D45 with the least customer data that still explains each outcome; no contact search means the API can't confirm whether someone is a customer.
+- **Rejected:** *Keyset paging:* more code for at most ~6,000 messages per campaign. *Live updates in the drawer:* rows would move under the reader. *Search by phone or email:* enumeration risk.
+- **Trade-offs:** Rows can shift between pages while a campaign is sending; offset paging gets slower for much larger campaigns.
+
+### D48 — Resend goes through the composer's content and review steps
+- **Status:** Accepted · 2026-10-23
+- **Decision:** "Resend" opens a dialog with who gets the resend and who is not included, then creates the follow-up (D31) and opens its content step, with the original message viewable; it is approved on the normal review step. Offered on any channel with length skips once the campaign has finished.
+- **Why:** A resend is already a draft with its own approval in the backend; reusing T17 keeps one approval flow.
+- **Rejected:** *The design's one-page edit-and-approve:* a second approval flow to build and test.
+- **Trade-offs:** One more click than the design.
+
+### D49 — Campaign list filtered in the browser; dashboard without resend counts
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The campaigns page filters by status and searches the brief (Turkish-folded) in the browser over the newest 200 campaigns the API returns. The dashboard shows status counts and the six most relevant campaigns; resend offers appear on a campaign's page, not on dashboard rows.
+- **Why:** No backend change is needed at this size.
+- **Rejected:** *Server-side filtering:* not needed for 200 rows. *Per-row resend counts:* a query per campaign.
+- **Trade-offs:** Campaigns beyond the newest 200 aren't listed; the dashboard doesn't point out resend opportunities.
+
 ## Architecture & Technical Decisions
 
 ### D17 — PostgreSQL 16
@@ -240,11 +276,12 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **History:** 2026-10-21. First approved as "clear error, opt-in mock". Changed to mock by default in the same session.
 
 ### D25 — Frontend stack
-- **Status:** Accepted · 2026-10-21
-- **Decision:** Vue 3, Vite, TypeScript, vue-router and PrimeVue. Native `fetch` and `EventSource`. Composables for state, no Pinia. Vitest for unit tests.
+- **Status:** Accepted, UI library superseded by D41 · 2026-10-21
+- **Decision:** Vue 3, Vite, TypeScript, vue-router and ~~PrimeVue~~ (see D41). Native `fetch` and `EventSource`. Composables for state, no Pinia. Vitest for unit tests.
 - **Why:** PrimeVue provides accessible chips (D9), tables, progress bars and toasts, which speeds up the editors and the dashboard.
 - **Rejected:** *No UI library:* more hand-built components, and accessibility is entirely our responsibility. *Tailwind CSS:* components are still built by hand. *Pinia:* not needed for a few screens.
 - **Trade-offs:** A large dependency that is only partly used.
+- **History:** 2026-10-22: PrimeVue 5 moved to a commercial licence that needs a license key; the UI library is replaced by D41. The rest of D25 stands.
 
 ### D26 — Metrics and health endpoints
 - **Status:** Accepted · 2026-10-21
@@ -288,6 +325,64 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Keep the stream open until the client leaves:* one query per second per open tab for nothing.
 - **Trade-offs:** The frontend must close its `EventSource` on `end`, or the browser reconnects every few seconds. A resend created after `end` changes the parent's resend fields without a new event, so the frontend fetches the campaign again after a resend.
 
+### D37 — Drafts can be deleted; nothing else can
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `DELETE /api/campaigns/{id}` with the draft's `version` hard-deletes a `draft` and its content in one transaction. Anything approved or later is never deleted and is still stopped only by cancel (D11, unchanged). Deleting a resend draft frees its channel for a new resend (D31). No archiving (see Deferred).
+- **Why:** An abandoned resend draft blocked resends on that channel forever, because drafts cannot be cancelled. Abandoned drafts also clutter the list. A draft has no messages, so no delivery history is lost.
+- **Rejected:** *Cancelling drafts:* mixes "stopped a send" with "never sent", and the drafts stay in the list. *Deleting sent campaigns:* messages and attempts are the audit trail and the basis for duplicate prevention (D4, D31).
+- **Trade-offs:** A deleted draft cannot be restored. A content stream still running for it fails to save.
+
+### D38 — Channels can be changed on a draft
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `PUT /api/campaigns/{id}/channels` `{channels, version}` on drafts only, validated as on create. A removed channel's content is deleted in the same transaction; an added channel starts without content, so approval waits for it. Resend drafts keep their channel (D31). The frontend asks for confirmation before removing a channel that has content.
+- **Why:** Changing the channel picker otherwise needs a new draft and a new AI call. Approval rejects content for a channel that is not chosen, so leftover content would block it.
+- **Rejected:** *Keeping the removed channel's content:* blocks approval and shows text that will not be sent.
+- **Trade-offs:** Content for a removed channel is lost; re-adding the channel means writing it again.
+
+### D39 — The rule catalog is served by the API
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `GET /api/catalog` returns every rule field with its operators and value type, the current cities and categories, and the rule limits, from the same definitions the server validates against (D14).
+- **Why:** The chip editor (D9) cannot drift from the server's rule language.
+- **Rejected:** *Copying the fields into the frontend:* two definitions that drift apart.
+- **Trade-offs:** One more endpoint to keep in step with the rule language.
+
+### D40 — The brief can be edited and re-interpreted on a draft
+- **Status:** Accepted · 2026-10-22
+- **Decision:** `PUT /api/campaigns/{id}/request` `{request, version}` on drafts only (not resends). The version is checked before the AI call and again when saving. On success the brief, rules and proposed send time with its note are replaced; manual rule edits are overwritten, and the frontend confirms first. On failure (unsupported, invalid twice, timeout, unavailable) the draft is unchanged, with the same errors as create (D15). The content is kept; the frontend warns clearly that it may no longer match the new brief and should be reviewed or regenerated before approval.
+- **Why:** Rephrasing should not need a new draft. Clearing the content would silently drop manual edits, and it is reviewed before approval anyway.
+- **Rejected:** *Clearing the content:* loses hand edits. *Flagging stale content on the server:* the warning is a UI concern.
+- **Trade-offs:** Content can briefly contradict the brief; the warning and the review before approval cover it.
+
+### D41 — Headless UI components (Reka UI) with our own styles
+- **Status:** Accepted · 2026-10-22
+- **Decision:** Reka UI (MIT) provides the accessible behaviour of dialogs, menus, toasts, comboboxes and tag inputs; all styling is our own CSS, built from the colours and spacing of the design reference in `design/` (README, *UI/UX design*). Tables are plain semantic HTML. Replaces PrimeVue in D25.
+- **Why:** PrimeVue 5 needs a license key, or it shows a licence notice; a key can't be committed, so every reviewer would see the notice. The last MIT release (4.5.5) is frozen. The design is fully custom, so a headless library fits it better than a themed one.
+- **Rejected:** *PrimeVue 4.5.5:* a frozen release line, and heavy theming to match the design. *PrimeVue 5 with a Community key:* a licence notice or a key for every reviewer. *No component library:* accessibility of dialogs and menus entirely hand-built (D25's concern).
+- **Trade-offs:** More CSS to write; no ready-made data table or chart components.
+
+### D42 — Campaigns have an editable name
+- **Status:** Superseded by D43 · 2026-10-22
+- **Decision:** Every campaign has a `name`, 1–100 characters. On create it defaults to the brief's first sentence, cut at a word to at most 60 characters with "…"; a resend defaults to its parent's name plus "· resend (SMS)" or "· resend (Email)". `PUT /api/campaigns/{id}/name` `{name, version}` renames a draft (version-checked, D10). Re-interpreting the brief (D40) updates a name that is still the old brief's default and keeps a name the marketer chose. A campaign stored without a name (rows from before this change) shows the default.
+- **Why:** The design names campaigns everywhere; a sentence-long brief is hard to scan in lists.
+- **Rejected:** *A title derived from the brief only:* long, sentence-like and not editable. *Renaming after approval:* everything about an approved campaign stays fixed (D11).
+- **Trade-offs:** One more field to keep in step with the brief.
+- **History:** 2026-10-22: removed before release in favour of brief-based titles (D43). Migration 00005 drops the column added by 00004.
+
+### D43 — Campaigns are identified by their brief
+- **Status:** Accepted · 2026-10-22
+- **Decision:** No separate campaign name. Lists show the brief's first ~60 characters, cut at a word with "…"; the campaign's own page shows the full brief. Replaces D42. AI-generated titles are deferred (README, Future improvements).
+- **Why:** The name only helps marketers recognise a campaign in a list, and the brief already does that; a separate field adds an endpoint, a migration and rules for keeping it in step with the brief.
+- **Rejected:** *Editable name (D42):* more scope than the case needs. *AI-suggested name in the interpretation answer:* better titles at almost no cost, but it grows the AI answer format; revisit if time permits.
+- **Trade-offs:** Titles read like the start of a sentence, and two campaigns with similar briefs look alike in a list.
+
+### D44 — The UI in English and Turkish
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The interface is available in English (default) and Turkish, with a switch on the sign-in page and in the sidebar; the choice is kept in the browser (localStorage) and sets `<html lang>`. A small typed module in `web/src/i18n` holds two dictionaries with the same keys, fills `{placeholders}` and formats numbers, amounts, dates and lists with `Intl` (en-GB, tr-TR). Only UI text is translated: briefs, customer and seed data (names, cities, categories) and AI output (message content, an unsupported brief's reason) are shown exactly as stored; rule chips phrase a rule in the UI language but never change its values (cities, categories, numbers, dates). Errors are localized by situation in the frontend (unreachable, 401, 404, 502/504, 5xx, and a screen's own known cases such as a stale version); everything else, including other 409s, keeps the server's English text as details under a localized heading. A test scans components (text, user-facing attributes, template literals) and modules for phrases that don't come from the dictionaries, with a self-test of the patterns it must catch; developer-only messages are marked `i18n-ignore`.
+- **Why:** The marketers work in Turkish and English; keeping data and AI output untouched means what is approved is exactly what is sent.
+- **Rejected:** *vue-i18n:* a dependency for two languages and a handful of screens. *Error codes from the backend:* cleaner, but every handler and many tests change; revisit if more languages are added. *Storing the language on the server:* needs an endpoint and a column; per-browser is enough here.
+- **Trade-offs:** Server validation details stay in English; the language is per browser, not per account; the scan is a heuristic (it catches phrases and capitalised words, not every possible string).
+- **History:** 2026-10-23 (review): in Turkish the brief is "açıklama" and only the draft is "taslak"; 409 is no longer mapped to "changed elsewhere" by default; the scan also covers template literals, bound attributes and modules.
+
 ## Open Questions
 
 None currently.
@@ -295,3 +390,4 @@ None currently.
 ## Deferred
 
 - **Optional features from `CASE.md`:** A/B testing, messages in the user's language (a `language` field will be seeded now), CI pipeline. Scheduled sending moved into scope (D29). Resend to skipped recipients moved into scope (D31).
+- **Archiving campaigns** (2026-10-22): hiding finished campaigns from the list. Deleting drafts (D37) removes most of the clutter; it can be added later without changing D37.

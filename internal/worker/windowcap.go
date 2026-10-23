@@ -15,6 +15,9 @@ type windowCap struct {
 	n      int
 	window time.Duration
 	times  []time.Time // the last n departures, oldest first
+	// waiting, if set, runs each time a departure has to wait; tests use it to
+	// act at that exact moment. Always nil in production.
+	waiting func()
 }
 
 func newWindowCap(n int, window time.Duration) *windowCap {
@@ -36,6 +39,9 @@ func (c *windowCap) wait(ctx context.Context) (time.Time, error) {
 		}
 		delay := c.times[0].Add(c.window).Sub(now)
 		c.mu.Unlock()
+		if c.waiting != nil {
+			c.waiting()
+		}
 		select {
 		case <-ctx.Done():
 			return time.Time{}, ctx.Err()
