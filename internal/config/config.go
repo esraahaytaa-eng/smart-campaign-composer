@@ -26,6 +26,9 @@ type Config struct {
 
 	ProviderURL string // where the worker sends messages
 	MaxAttempts int    // provider attempts per message before it fails (D7)
+	// RetryBackoffMax caps the wait between retries: 30 s (D7), lower only for
+	// the browser-suite stack (D53).
+	RetryBackoffMax time.Duration
 
 	Provider     map[string]ProviderChannel // mock provider behaviour per channel (D20)
 	ProviderSeed int64                      // seeds the provider's failure injection, so runs repeat
@@ -163,5 +166,10 @@ func loadWorker(cfg Config) (Config, error) {
 		return Config{}, errors.New("MAX_ATTEMPTS must be a whole number from 1 to 10")
 	}
 	cfg.MaxAttempts = n
+	b, err := time.ParseDuration(getenv("RETRY_BACKOFF_MAX", "30s"))
+	if err != nil || b < 100*time.Millisecond || b > 30*time.Second {
+		return Config{}, fmt.Errorf("RETRY_BACKOFF_MAX must be a duration from 100ms to 30s, got %q", os.Getenv("RETRY_BACKOFF_MAX"))
+	}
+	cfg.RetryBackoffMax = b
 	return cfg, nil
 }

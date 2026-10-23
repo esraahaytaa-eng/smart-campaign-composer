@@ -26,13 +26,15 @@ import (
 const (
 	ProviderTimeout = 5 * time.Second
 	DefaultLease    = 30 * time.Second
-	DefaultPoolSize = 20  // concurrent provider requests per channel
-	RatePerSecond   = 100 // provider requests per channel, retries included
-	maxRetryAfter   = 5 * time.Minute
+	// DefaultBackoffMax caps the wait between retries (D7); RETRY_BACKOFF_MAX
+	// can only lower it (D53).
+	DefaultBackoffMax = 30 * time.Second
+	DefaultPoolSize   = 20  // concurrent provider requests per channel
+	RatePerSecond     = 100 // provider requests per channel, retries included
+	maxRetryAfter     = 5 * time.Minute
 	// capWindow is a little over 1 s, so a few milliseconds between recording a
 	// departure and the request reaching the provider cannot push 101 into a second.
 	capWindow        = time.Second + 50*time.Millisecond
-	maxBackoff       = 30 * time.Second
 	maxProviderReply = 64 << 10
 )
 
@@ -67,12 +69,13 @@ func NewClient(timeout time.Duration) *http.Client {
 }
 
 // Backoff is the wait before retry number attempt+1 (D7): exponential from
-// 1 s with jitter (half fixed, half random), capped at 30 s, and never
-// earlier than the provider's Retry-After (itself capped at 5 minutes).
-func Backoff(attempt int, retryAfter time.Duration, rnd *rand.Rand) time.Duration {
-	base := maxBackoff
+// 1 s with jitter (half fixed, half random), capped at maxDelay (30 s by
+// default), and never earlier than the provider's Retry-After (itself capped
+// at 5 minutes).
+func Backoff(attempt int, retryAfter, maxDelay time.Duration, rnd *rand.Rand) time.Duration {
+	base := maxDelay
 	if attempt >= 1 && attempt <= 6 {
-		base = min(time.Second<<(attempt-1), maxBackoff)
+		base = min(time.Second<<(attempt-1), maxDelay)
 	}
 	d := base/2 + time.Duration(rnd.Int64N(int64(base/2)+1))
 	return max(d, min(retryAfter, maxRetryAfter))
@@ -86,6 +89,7 @@ type Worker struct {
 	Client      *http.Client // its Timeout is the provider timeout
 	Limiters    map[string]*rate.Limiter
 	MaxAttempts int
+	BackoffMax  time.Duration // cap of the wait between retries (D7, D53)
 	Lease       time.Duration
 	PoolSize    int
 	Poll        time.Duration // how often idle loops look for work
@@ -105,6 +109,9 @@ func (w *Worker) defaults() {
 	}
 	if w.MaxAttempts == 0 {
 		w.MaxAttempts = 5
+	}
+	if w.BackoffMax == 0 {
+		w.BackoffMax = DefaultBackoffMax
 	}
 	if w.Lease == 0 {
 		w.Lease = DefaultLease
@@ -262,7 +269,7 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 		result.Status = "failed"
 	default: // rate_limited, server_error, timeout, network_error
 		w.mu.Lock()
-		result.NextAttemptAt = w.Now().Add(Backoff(counted, attempt.retryAfter, w.Rand))
+		result.NextAttemptAt = w.Now().Add(Backoff(counted, attempt.retryAfter, w.BackoffMax, w.Rand))
 		w.mu.Unlock()
 		result.Status = "retry_scheduled"
 		sendRetries.WithLabelValues(j.Channel).Inc()

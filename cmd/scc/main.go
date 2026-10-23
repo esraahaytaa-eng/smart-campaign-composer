@@ -129,8 +129,8 @@ func runWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error
 		close(served)
 	}()
 
-	w := &worker.Worker{Queue: &worker.Queue{Pool: pool}, ProviderURL: cfg.ProviderURL, MaxAttempts: cfg.MaxAttempts}
-	slog.Info("worker starting", "provider", cfg.ProviderURL, "max_attempts", cfg.MaxAttempts)
+	w := &worker.Worker{Queue: &worker.Queue{Pool: pool}, ProviderURL: cfg.ProviderURL, MaxAttempts: cfg.MaxAttempts, BackoffMax: cfg.RetryBackoffMax}
+	slog.Info("worker starting", "provider", cfg.ProviderURL, "max_attempts", cfg.MaxAttempts, "retry_backoff_max", cfg.RetryBackoffMax)
 	err := w.Run(ctx)
 	cancel()
 	<-served
