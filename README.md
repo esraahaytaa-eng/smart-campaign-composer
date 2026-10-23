@@ -212,6 +212,8 @@ make e2e          # opt-in browser tests (Playwright) against the app from `dock
 
 Integration tests fail, never skip, when no database is available. `internal/e2e` runs the API, the worker and the mock provider together on a seeded database: a send through a provider that fails, rate-limits and loses responses, a scheduled send, and an over-limit send followed by a resend. Its lifecycle tests cover timeouts and replays, worker shutdowns and crashes, cancellation races, consent changes, length skips, resends after a cancelled resend, retry limits and two workers on one queue.
 
+Performance of the recipient API and the status stream on 3,000 customers, with the benchmark that measures them and the query plans behind the changes: `docs/performance.md`.
+
 The first run compiles all dependencies and takes a few minutes; compiled packages are kept in the `gobuildcache` volume (and in BuildKit cache mounts for image builds), so later runs take seconds. `docker compose down -v` also clears these caches.
 
 ## Architecture (current)
@@ -225,7 +227,7 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 
 ## Known limitations
 
-- Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
+- Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown; about 20 ms of database time for a 6,000-message campaign, see `docs/performance.md`), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
 - The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.

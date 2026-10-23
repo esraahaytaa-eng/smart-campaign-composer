@@ -149,38 +149,46 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 		return out, err
 	}
 
-	// $1 campaign, $2 group, $3 channel ('' for both); the reasons count the
-	// whole group, the name search ($4, LIKE-escaped) narrows only the rows.
-	base := ` FROM messages m JOIN users u ON u.id = m.user_id` + lastAttemptsSQL + `
-		WHERE m.campaign_id = $1 AND ` + groupSQL + ` = $2 AND ($3 = '' OR m.channel = $3)`
-	rows, err = tx.Query(ctx, `SELECT `+reasonSQL+`, count(*)`+base+` GROUP BY 1`, id, group, channel)
-	if err != nil {
-		return out, err
-	}
-	var reason *string
-	if _, err := pgx.ForEachRow(rows, []any{&reason, &n}, func() error {
-		if reason != nil {
-			out.Reasons[*reason] = n
+	// $1 campaign, $2 group, $3 channel ('' for both). The attempt lookups
+	// behind reasonSQL run only where a reason is needed: per message for the
+	// reason counts, and for the 50 rows of the page, never for the whole group.
+	where := ` WHERE m.campaign_id = $1 AND ` + groupSQL + ` = $2 AND ($3 = '' OR m.channel = $3)`
+	if groupsWithReasons[group] {
+		rows, err = tx.Query(ctx, `SELECT `+reasonSQL+`, count(*) FROM messages m`+lastAttemptsSQL+where+` GROUP BY 1`, id, group, channel)
+		if err != nil {
+			return out, err
 		}
-		return nil
-	}); err != nil {
-		return out, err
+		var reason *string
+		if _, err := pgx.ForEachRow(rows, []any{&reason, &n}, func() error {
+			if reason != nil {
+				out.Reasons[*reason] = n
+			}
+			return nil
+		}); err != nil {
+			return out, err
+		}
 	}
 
-	filter, args := base, []any{id, group, channel}
+	// The name search ($4, LIKE-escaped) narrows the total and the rows only.
+	from, args := ` FROM messages m`, []any{id, group, channel}
 	if q != "" {
-		filter += ` AND ` + fold(`concat_ws(' ', u.first_name, u.last_name)`) + ` LIKE '%' || ` + fold(`$4`) + ` || '%'`
+		from += ` JOIN users u ON u.id = m.user_id`
+		where += ` AND ` + fold(`concat_ws(' ', u.first_name, u.last_name)`) + ` LIKE '%' || ` + fold(`$4`) + ` || '%'`
 		args = append(args, likeEscaper.Replace(q))
 	}
-	if err := tx.QueryRow(ctx, `SELECT count(*)`+filter, args...).Scan(&out.Total); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
 
-	rows, err = tx.Query(ctx, `SELECT m.id, concat_ws(' ', u.first_name, u.last_name), u.first_name, coalesce(u.last_name, ''), u.city,
+	rows, err = tx.Query(ctx, `WITH page AS (
+			SELECT m.id, (SELECT max(started_at) FROM delivery_attempts WHERE message_id = m.id) AS last_at`+from+where+`
+			ORDER BY last_at DESC NULLS LAST, m.id DESC
+			LIMIT `+strconv.Itoa(recipientsPageSize)+` OFFSET `+strconv.Itoa((page-1)*recipientsPageSize)+`)
+		SELECT m.id, concat_ws(' ', u.first_name, u.last_name), u.first_name, coalesce(u.last_name, ''), u.city,
 			CASE m.channel WHEN 'sms' THEN u.phone ELSE u.email END, m.channel, `+reasonSQL+`,
-			CASE WHEN m.status = 'retry_scheduled' THEN m.next_attempt_at END`+filter+`
-		ORDER BY (SELECT max(started_at) FROM delivery_attempts WHERE message_id = m.id) DESC NULLS LAST, m.id DESC
-		LIMIT `+strconv.Itoa(recipientsPageSize)+` OFFSET `+strconv.Itoa((page-1)*recipientsPageSize), args...)
+			CASE WHEN m.status = 'retry_scheduled' THEN m.next_attempt_at END
+		FROM page p JOIN messages m ON m.id = p.id JOIN users u ON u.id = m.user_id`+lastAttemptsSQL+`
+		ORDER BY p.last_at DESC NULLS LAST, m.id DESC`, args...)
 	if err != nil {
 		return out, err
 	}

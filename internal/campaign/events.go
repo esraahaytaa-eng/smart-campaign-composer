@@ -22,6 +22,9 @@ var messageStatuses = []string{"pending", "sending", "retry_scheduled", "sent", 
 // ended without being sent.
 var deliveryGroups = []string{"sent", "uncertain", "failed", "skipped", "cancelled", "retrying", "pending"}
 
+// groupsWithReasons are the groups reasonSQL gives a reason code.
+var groupsWithReasons = map[string]bool{"uncertain": true, "failed": true, "skipped": true, "retrying": true}
+
 // groupSQL is a message's display group; m is the messages row.
 const groupSQL = `CASE
 	WHEN m.status = 'sent' THEN 'sent'
@@ -181,9 +184,16 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		return s, err
 	}
 
-	rows, err = tx.Query(ctx, `SELECT m.channel, count(*) FILTER (WHERE a.attempt_no > 1), count(*) FILTER (WHERE a.outcome = 'rate_limited'),
-		count(*) FILTER (WHERE a.outcome = 'rate_limited' AND a.started_at > $2)
-		FROM delivery_attempts a JOIN messages m ON m.id = a.message_id WHERE m.campaign_id = $1 GROUP BY 1`, id, h.Now().Add(-recentWindow))
+	// Per message through the index, so the cost follows this campaign's size,
+	// not every attempt ever recorded (a plain join chose a full table scan).
+	// attempt_count counts claims, so a sent message claimed once had exactly
+	// one attempt, the accepted one: no retries, no 429s. Skipping those
+	// leaves the minority that can add to these counts.
+	rows, err = tx.Query(ctx, `SELECT m.channel, sum(a.retries), sum(a.limited), sum(a.recent) FROM messages m
+		CROSS JOIN LATERAL (SELECT count(*) FILTER (WHERE attempt_no > 1) retries, count(*) FILTER (WHERE outcome = 'rate_limited') limited,
+			count(*) FILTER (WHERE outcome = 'rate_limited' AND started_at > $2) recent
+			FROM delivery_attempts WHERE message_id = m.id) a
+		WHERE m.campaign_id = $1 AND NOT (m.status = 'sent' AND m.attempt_count = 1) GROUP BY 1`, id, h.Now().Add(-recentWindow))
 	if err != nil {
 		return s, err
 	}
