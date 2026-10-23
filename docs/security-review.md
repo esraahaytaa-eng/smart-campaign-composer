@@ -52,4 +52,4 @@ Reviewed 2026-10-23 against the T19 checklist: customer data, authorization, API
 - **Sign-in limits are per api process and in memory.** They reset on restart. Behind a proxy all clients share its address, unless the proxy's forwarded address is trusted.
 - **No overall read timeout.** Go's `ReadTimeout` would also cut the streaming responses (live status, AI writing). Request bodies are size-capped instead.
 - **AI calls are not rate-limited** (README, Known limitations): a cost risk in real mode, not a data risk.
-- **Expired sessions stay in the database** until removed; they can't be used (`expires_at` is checked).
+- ~~**Expired sessions stay in the database**~~ Fixed in step 7.5: every sign-in removes expired sessions (`TestLogin_RemovesExpiredSessions`); they could never be used (`expires_at` is checked).

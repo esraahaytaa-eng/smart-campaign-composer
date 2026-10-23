@@ -157,7 +157,9 @@ func login(pool *pgxpool.Pool, th *throttle) http.HandlerFunc {
 		th.reset(addrKey)
 
 		token := rand.Text()
-		if _, err := pool.Exec(r.Context(), `INSERT INTO sessions (token_hash, marketer_id, expires_at)
+		// Expired sessions can't be used; removing them here keeps the table small.
+		if _, err := pool.Exec(r.Context(), `WITH gone AS (DELETE FROM sessions WHERE expires_at <= now())
+			INSERT INTO sessions (token_hash, marketer_id, expires_at)
 			VALUES ($1, $2, now() + make_interval(secs => $3))`, hashToken(token), m.ID, sessionTTL.Seconds()); err != nil {
 			serverError(w, "create session", err)
 			return

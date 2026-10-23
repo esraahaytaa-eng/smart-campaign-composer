@@ -189,6 +189,30 @@ func TestRequire_ExpiredSession401(t *testing.T) {
 	}
 }
 
+// Expired sessions can't be used (expires_at is checked); signing in also
+// removes them, so the table doesn't keep every session ever made.
+func TestLogin_RemovesExpiredSessions(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	live := s.sessionCookie()
+	if _, err := s.pool.Exec(context.Background(), `INSERT INTO sessions (token_hash, marketer_id, expires_at)
+		SELECT decode(md5(g::text), 'hex'), (SELECT id FROM marketers), now() - interval '1 minute' FROM generate_series(1, 3) g`); err != nil {
+		t.Fatal(err)
+	}
+	s.sessionCookie() // another sign-in
+
+	var expired, valid int
+	if err := s.pool.QueryRow(context.Background(), `SELECT count(*) FILTER (WHERE expires_at <= now()), count(*) FILTER (WHERE expires_at > now()) FROM sessions`).Scan(&expired, &valid); err != nil {
+		t.Fatal(err)
+	}
+	if expired != 0 || valid != 2 {
+		t.Fatalf("want the 3 expired sessions removed and both live ones kept, got %d expired, %d valid", expired, valid)
+	}
+	if rec := s.do(http.MethodGet, "/api/me", "", live); rec.Code != http.StatusOK {
+		t.Fatalf("the earlier live session still works, got %d", rec.Code)
+	}
+}
+
 func TestRequire_UnknownToken401(t *testing.T) {
 	t.Parallel()
 	s := newServer(t)
