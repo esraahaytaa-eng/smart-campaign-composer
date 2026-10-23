@@ -129,6 +129,13 @@ async function cancel(c: Campaign) {
       </div>
     </div>
 
+    <!-- Also above the rows: 25 of them push the lower pager below the fold (D62). -->
+    <nav v-if="info && (info.hasPrev || info.hasNext)" class="pager pager-top" :aria-label="t('pager.above')">
+      <span class="note">{{ info.to ? t('campaigns.range', { from: formatNumber(info.from), to: formatNumber(info.to), total: formatNumber(info.total) }) : '' }}</span>
+      <button type="button" class="btn btn-sm" :disabled="!info.hasPrev" @click="set({ page: info.prevPage }, false)">{{ t('pager.prev') }}</button>
+      <button type="button" class="btn btn-sm" :disabled="!info.hasNext" @click="set({ page: query.page + 1 }, false)">{{ t('pager.next') }}</button>
+    </nav>
+
     <p class="sr-only" role="status">{{ notice ? t(notice) : '' }}</p>
     <div v-if="actionError" role="alert" class="alert alert-error">{{ errorText(actionError) }}</div>
     <div v-if="loadError" role="alert" class="alert alert-error">{{ errorText(loadError) }}</div>
@@ -186,10 +193,10 @@ async function cancel(c: Campaign) {
     </div>
     <div v-if="info && info.total" class="foot">
       <span class="note">{{ info.to ? t('campaigns.showing', { from: formatNumber(info.from), to: formatNumber(info.to), total: formatNumber(info.total) }) : '' }}</span>
-      <span class="pager">
+      <nav class="pager" :aria-label="t('pager.below')">
         <button type="button" class="btn btn-sm" :disabled="!info.hasPrev" @click="set({ page: info.prevPage }, false)">{{ t('pager.prev') }}</button>
         <button type="button" class="btn btn-sm" :disabled="!info.hasNext" @click="set({ page: query.page + 1 }, false)">{{ t('pager.next') }}</button>
-      </span>
+      </nav>
     </div>
     <p class="note">{{ t('campaigns.note') }}</p>
 
@@ -310,7 +317,15 @@ async function cancel(c: Campaign) {
 }
 .pager {
   display: flex;
+  align-items: center;
   gap: 6px;
+}
+.pager-top {
+  align-self: flex-end;
+  margin: -6px 0;
+}
+.pager-top .note {
+  margin-right: 6px;
 }
 .table-wrap {
   padding: 0;

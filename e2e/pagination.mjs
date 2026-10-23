@@ -28,8 +28,11 @@ export default () =>
 
     const rows = page.locator('[role=row]:not(.header)')
     const showing = page.getByText(/^Showing /)
-    const prev = page.getByRole('button', { name: 'Previous page' })
-    const next = page.getByRole('button', { name: 'Next page' })
+    // Two pagers (D62): above the rows and below them, each its own navigation region.
+    const top = page.getByRole('navigation', { name: 'Pages, above the list' })
+    const bottom = page.getByRole('navigation', { name: 'Pages, below the list' })
+    const prev = bottom.getByRole('button', { name: 'Previous page' })
+    const next = bottom.getByRole('button', { name: 'Next page' })
     const titles = async () => (await rows.locator('a.title').allInnerTexts()).map((s) => s.match(/number (\d+)/)?.[1])
     const shows = async (text) => {
       await page.getByText(text, { exact: true }).waitFor()
@@ -53,6 +56,19 @@ export default () =>
     await prev.click()
     await page.waitForURL((u) => !u.searchParams.has('page'))
     check(await shows('Showing 1–25 of 30'), 'Previous goes back to page 1')
+
+    // the pager above the list is on screen without scrolling, and pages too
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    const box = await top.boundingBox()
+    check(!!box && box.y + box.height <= 900, `the pager above the list is visible without scrolling (${box && Math.round(box.y)}px down)`)
+    check(await top.getByText('1–25 of 30').isVisible(), 'it shows the range')
+    await t.shot('campaigns-paged')
+    await top.getByRole('button', { name: 'Next page' }).click()
+    check(await shows('Showing 26–30 of 30') && (await top.getByText('26–30 of 30').isVisible()), 'its Next pages, and both pagers agree')
+    await top.getByRole('button', { name: 'Previous page' }).click()
+    check(await shows('Showing 1–25 of 30'), 'its Previous pages back')
+    await page.setViewportSize({ width: 1440, height: 1100 })
 
     // a filter together with the search starts again at page 1
     await next.click()
