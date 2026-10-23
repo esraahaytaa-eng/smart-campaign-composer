@@ -62,6 +62,7 @@ export default () =>
     await page.goto(`${BASE}/campaigns/${live}`)
     await page.getByText('Read-only results').waitFor()
     await page.getByRole('button', { name: 'Türkçe' }).click()
+    await page.getByText('Salt okunur sonuçlar').waitFor() // Turkish loads on first use (D58)
     check(await page.getByText('Salt okunur sonuçlar').isVisible(), 'the results are in Turkish')
     await page.getByRole('button', { name: 'English' }).click()
   })

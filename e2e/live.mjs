@@ -73,6 +73,7 @@ export default () =>
     // the same screens in Turkish
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'Türkçe' }).click()
+    await page.getByText('Salt okunur sonuçlar').waitFor() // Turkish loads on first use (D58)
     check(await page.getByText('Salt okunur sonuçlar').isVisible() && await page.getByText('Gönderilmeyenler ve istisnalar').isVisible(), 'the results are in Turkish')
     await page.getByRole('link', { name: /^SMS İptal edildi/ }).click()
     await page.getByRole('dialog', { name: 'Alıcı ayrıntıları' }).waitFor()
