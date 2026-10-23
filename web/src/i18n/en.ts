@@ -506,7 +506,7 @@ export const en = {
   'reasonName.requeued': 'Handed back',
   'detail.sent': 'Not proof of delivery',
   'detail.pending': 'Not attempted yet',
-  'detail.cancelled': 'Not sent',
+  'detail.cancelled': 'Stopped by the cancel before it was sent',
   'detail.uncertain': 'No reply — may have been accepted',
   'detail.provider_rejected': 'Rejected, not retried',
   'detail.no_consent': 'Consent withdrawn for this channel',

@@ -505,7 +505,7 @@ export const tr: Record<Key, Message> = {
   'reasonName.requeued': 'Geri kondu',
   'detail.sent': 'Teslimin kanıtı değildir',
   'detail.pending': 'Henüz denenmedi',
-  'detail.cancelled': 'Gönderilmedi',
+  'detail.cancelled': 'Gönderilmeden önce iptalle durduruldu',
   'detail.uncertain': 'Yanıt yok — kabul edilmiş olabilir',
   'detail.provider_rejected': 'Reddedildi, yeniden denenmedi',
   'detail.no_consent': 'Bu kanal için izin geri alındı',
