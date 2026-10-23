@@ -430,6 +430,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Retry waits and local data growth made the suite slow and left test campaigns behind.
 - **Rejected:** *Testing against the developer's running app:* slower, and it fills local data.
 - **Trade-offs:** The suite no longer exercises the 30 s cap (the backend tests still do); one more Compose project to start.
+- **History:** 2026-10-23 (T19 step 2). Shorter mock-provider delays were not added: sends are limited by the 100/s rate, so they brought no gain. The suite also runs in two lanes (checks that send, one after another; checks that don't, alongside), with the dashboard check alone first. Results in `docs/performance.md`.
 
 ### D55 — Failed sign-ins are throttled
 - **Status:** Accepted · 2026-10-23

@@ -45,3 +45,49 @@ About 8–10 ms of every request is fixed: 7–8 statements in one read-only tra
 - **Name search** filters the 3,000 customers with `translate`/`lower` (about 4 ms). A trigram index would only matter with far more customers.
 - **Offset paging** reads the whole group to sort it, so cost grows with the campaign's size (about 3 ms per 1,000 messages in the group), not with the page number. Keyset paging on the stored last-attempt time is the upgrade if campaigns grow well beyond 3,000 customers.
 - **The status stream** still runs its queries once a second for each open live screen (about 20 ms of database time at this size). A shared poller per campaign is the upgrade path (README, Known limitations).
+
+# Test suite speed (T19 step 2, D57 targets T1–T3)
+
+Measured 2026-10-23 on the same machine. Each number is a full wall-clock run of the make target.
+
+## Baseline (before any change)
+
+| | Time | Coverage |
+|---|---|---|
+| `make test` | 132 s, 128 s | 341 Go tests (with subtests), 81.5% of statements; 333 Vitest tests |
+| `make e2e` (against the running app) | 147 s | 181 browser checks |
+
+Where the time went: Go tests ran one after another inside each package, so a package took the sum of its tests (`db` 77 s, `campaign` 71 s, `e2e` 69 s). Every test migrated its own database (~125 ms each), and the frontend half reinstalled its packages on every run (~28 s of its 45 s).
+
+## What changed, each measured
+
+| Change | Effect |
+|---|---|
+| Each test database copied from a template migrated once (`dbtest.MigratedDB`) | Go half 85 → 78 s; `campaign` 71 → 35 s, `worker` 43 → 28 s |
+| `fsync`, `synchronous_commit`, `full_page_writes` off on the test database | No measurable gain (it is on tmpfs); not kept |
+| `db` and `e2e` tests in parallel (each has its own database) | Go half 83 → 62 s |
+| Frontend packages reinstalled only when the lockfile changes; Go and frontend at the same time | Frontend half 45 → about 22 s when the machine is quiet |
+| `go vet` left to `make lint` (`-vet=off` in the test run); 2 s retry cap in `TestEndToEnd` | `make test` 79–93 s → 62–68 s |
+| The browser suite on its own stack, run in two lanes, one shared send | Suite 147 → 67–82 s |
+| Shorter mock-provider delays (planned in D53) | Not done: sends are limited by the 100/s rate, not by the provider's 20–200 ms answers |
+| Faster health checks on the browser-suite stack | No measurable gain; not kept |
+
+A fair comparison of `make test`, alternating the old code (`main`) and the new code three times each under the same conditions, gave medians of 111 s (old) and 90 s (new) before the last two changes above.
+
+## Results
+
+| Target | Baseline | Now (5 consecutive runs) | Met |
+|---|---|---|---|
+| T1 `make test` ≤ 50% | 130 s | 83, 74, 61, 61, 62 s (median 62 s, 48%) | yes |
+| T2 `make e2e` ≤ 50% | 147 s | suite 96, 82, 67, 71, 67 s (median 71 s, 48%); whole target including starting and removing its stack 139, 115, 91, 98, 90 s (median 98 s, 67%) | the suite yes; with stack startup, no |
+| T3 no flaky failures in 5 consecutive full runs | — | 10 of 10 runs passed | yes |
+
+Coverage is preserved: all 341 baseline Go tests still run and pass, 4 new ones were added, statement coverage 81.5% → 82.1%; Vitest 333 → 333; browser checks 181 → 181.
+
+Flaky tests found and fixed on the way (each showed up under load; the first one also failed on `main`):
+- the provider role's password set by two packages at once ("tuple concurrently updated"); now serialized, with a regression test that failed every time before the fix;
+- a worker test whose 400 ms window could expire during setup; now 3 s, and it fails with a clear message if the worker never waited;
+- a provider test that slept 400 ms instead of waiting for the stored result;
+- the scheduled-send check in `TestEndToEnd`, now with a 2 s margin and a database-clock check that it ran before the send time.
+
+Timings on a laptop vary a lot with other load (the same `make test` took 75–112 s in one series); compare runs made back to back.
