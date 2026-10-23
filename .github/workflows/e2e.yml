@@ -1,20 +1,22 @@
-# The browser suite (D52): nightly, on request, and when a push changes the
-# suite or its stack; not on every push (it takes minutes). make e2e starts its
-# own stack in the job (D53) and removes it.
+# The browser suite (D52): every pull request, every push to main, nightly and
+# on request. make e2e starts its own stack in the job (D53) and removes it.
 name: Browser checks
 
 on:
-  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
   schedule:
     - cron: "30 2 * * *" # nightly, 02:30 UTC
-  push:
-    paths:
-      - "e2e/**"
-      - "docker-compose.e2e.yml"
-      - ".github/workflows/e2e.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  # A newer commit cancels the older run of the same pull request or branch.
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   e2e:

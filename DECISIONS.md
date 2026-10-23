@@ -419,11 +419,11 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D52 — CI with GitHub Actions
 - **Status:** Accepted · 2026-10-23
-- **Decision:** Every push and pull request runs `make test`, `make lint` and `make scan`. The browser suite runs in a separate workflow, manually and nightly, against a stack started in the job, keeping screenshots of failures.
-- **Why:** Guards every change from T19 on, especially T20's changes to the send path.
-- **Rejected:** *The browser suite on every PR:* about 10 more minutes per run.
-- **Trade-offs:** A browser regression is found nightly rather than on the PR, unless the workflow is started by hand.
-- **History:** 2026-10-23 (T19 step 3). The browser checks also run when a push changes the suite, its stack or the workflow (GitHub can start a workflow by hand or on a schedule only once it is on `main`). `make lint` checks only the module's own packages, so CI's restored module cache is not linted.
+- **Decision:** Tests, lint and the secret and personal-data scan (`make test`, `make lint`, the scan with its self-test) run on every push and every pull request. The browser suite runs on every pull request, every push to `main`, nightly and on request, on its own stack, keeping screenshots of failures. Runs are not duplicated: a push to a branch with an open pull request is left to the pull request's run (which tests the commit merged with `main`), and a newer commit cancels the older run of the same pull request or branch.
+- **Why:** Guards every change from T19 on, especially T20's changes to the send path; the browser suite catches UI regressions before a merge.
+- **Rejected:** *Both the push and the pull request run for the same commit:* twice the minutes for the same code. *The browser suite on every push to any branch:* minutes without a pull request to report to.
+- **Trade-offs:** A small gate job checks for an open pull request on each branch push; the browser suite adds about 4 minutes to every pull request update.
+- **History:** 2026-10-23 (T19 step 3). First version: the browser suite only nightly and on request, then also when a push changed the suite (GitHub can start a workflow by hand or on a schedule only once it is on `main`). Replaced the same day by the strategy above, at the user's request. `make lint` checks only the module's own packages, so CI's restored module cache is not linted.
 
 ### D53 — A separate, faster stack for the browser suite
 - **Status:** Accepted · 2026-10-23
