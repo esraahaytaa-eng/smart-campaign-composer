@@ -47,6 +47,10 @@ export function setLocale(next: Locale) {
 
 export type Params = Record<string, string | number>
 
+// isKey tells whether text from the server, such as a reason code, has a
+// translation, so unknown codes can be shown as they are.
+export const isKey = (k: string): k is Key => k in en
+
 // t returns the text for key in the current language, with {placeholders}
 // filled in once (a value containing "{x}" is left as it is).
 export function t(key: Key, params: Params = {}): string {
@@ -91,6 +95,14 @@ export const formatLongDate = (d: Date) =>
 // An instant's day in the browser's zone: "22 Oct 2026".
 export const formatDay = (iso: string) =>
   new Intl.DateTimeFormat(formats[current.value], { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso))
+
+// A clock time with seconds: "19:58:41".
+export const formatTime = (d: Date) =>
+  new Intl.DateTimeFormat(formats[current.value], { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(d)
+
+// 82.1 → "82.1%" / "%82,1".
+export const formatPercent = (n: number) =>
+  new Intl.NumberFormat(formats[current.value], { style: 'percent', maximumFractionDigits: 1 }).format(n / 100)
 
 export const formatOr = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'disjunction' }).format(items)
 export const formatAnd = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'conjunction' }).format(items)

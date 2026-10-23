@@ -138,7 +138,7 @@ function reload() {
         <span class="status">{{ campaign.status === 'draft' ? t('review.badge') : t(`status.${campaign.status}`) }}</span>
       </div>
 
-      <div v-if="campaign.status !== 'draft'" class="alert alert-info">{{ t('campaign.notEditable', { status: t(`status.${campaign.status}`) }) }}</div>
+      <div v-if="campaign.status !== 'draft'" class="alert alert-info">{{ t('campaign.notEditable', { status: t(`status.${campaign.status}`) }) }} <RouterLink :to="{ name: 'campaign', params: { id: campaign.id } }">{{ t('campaign.openDelivery') }}</RouterLink></div>
 
       <template v-else>
         <StepBar :current="3" :campaign-id="id" />

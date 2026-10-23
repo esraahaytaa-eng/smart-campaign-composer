@@ -69,6 +69,8 @@ export function deliverySummary(s: Snapshot) {
     notSent: total(['failed', 'skipped', 'cancelled']),
     uncertain: total(['uncertain']),
     inProgress: total(['retrying', 'pending']),
+    pending: total(['pending']),
+    retrying: total(['retrying']),
     finished,
     finishedPct: pct(finished, messages),
     // Per channel, as messages: the estimate's total counts people, not messages.
@@ -94,4 +96,28 @@ export function resendOffer(s: Snapshot, channel: Channel): ResendOffer {
   if (c.active_resend_id !== null) return { state: 'active', skipped, resendId: c.active_resend_id }
   if (c.resendable > 0) return { state: 'available', skipped, count: c.resendable }
   return { state: 'nobodyLeft', skipped }
+}
+
+export type Section = 'sent' | 'inProgress' | 'notSent' | 'unknown'
+
+// The design's rows per channel: sent, in progress, not sent, unknown.
+const ROWS: [Section, Group][] = [
+  ['sent', 'sent'],
+  ['inProgress', 'pending'],
+  ['inProgress', 'retrying'],
+  ['notSent', 'failed'],
+  ['notSent', 'skipped'],
+  ['notSent', 'cancelled'],
+  ['unknown', 'uncertain'],
+]
+
+export function channelRows(c: ChannelStatus) {
+  return ROWS.map(([section, group]) => ({
+    section,
+    group,
+    count: c.groups[group],
+    reasons: Object.entries(c.reasons[group] ?? {})
+      .map(([code, count]) => ({ code, count }))
+      .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code)),
+  }))
 }

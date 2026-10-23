@@ -12,8 +12,10 @@ import type { Campaign, Catalog, Channel, FieldError, Rule } from '../campaign/t
 import AudiencePanel from '../components/AudiencePanel.vue'
 import ChannelPicker from '../components/ChannelPicker.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import DeliveryStatus from '../components/DeliveryStatus.vue'
 import RuleChips from '../components/RuleChips.vue'
 import RuleEditor from '../components/RuleEditor.vue'
+import StatusBadge from '../components/StatusBadge.vue'
 import StepBar from '../components/StepBar.vue'
 import { formatAnd, t, type Key } from '../i18n'
 import { aiReason, errorText } from '../i18n/errors'
@@ -23,6 +25,7 @@ const router = useRouter()
 
 const campaign = ref<Campaign | null>(null)
 const catalog = ref<Catalog | null>(null)
+const parent = ref<Campaign | null>(null)
 // Messages are kept as errors, keys or text functions, so they follow a
 // language switch while on screen (D44).
 type Text = () => string
@@ -58,6 +61,8 @@ async function load() {
     campaign.value = c
     catalog.value = cat
     brief.value = c.request_text
+    // A resend names its original campaign (D31); without it the page still works.
+    if (c.parent_campaign_id) parent.value = await campaigns.get(c.parent_campaign_id).catch(() => null)
   } catch (err) {
     loadError.value = err
   }
@@ -236,7 +241,7 @@ function reload() {
         </RouterLink>
         <!-- Campaigns are identified by their brief (D43); the full brief is below. -->
         <h1 class="title">{{ briefTitle(campaign.request_text) }}</h1>
-        <span class="status">{{ t(`status.${campaign.status}`) }}</span>
+        <StatusBadge :status="campaign.status" />
         <span v-if="isResend" class="status">{{ t('campaign.resendBadge', { channel: channelName(campaign.channels[0]!) }) }}</span>
         <span class="save-state" :class="saver.state.value">{{ saveLabel }}</span>
         <button v-if="isDraft" type="button" class="btn btn-sm btn-danger-outline" :disabled="locked" @click="deleteConfirm = true">{{ t('campaign.delete') }}</button>
@@ -249,9 +254,13 @@ function reload() {
       </div>
       <div v-else-if="saveError" role="alert" class="alert alert-error">{{ errorText(saveError) }}</div>
 
-      <div v-if="!isDraft" class="alert alert-info">
-        {{ t('campaign.notEditable', { status: t(`status.${campaign.status}`) }) }}
-      </div>
+      <DeliveryStatus
+        v-if="!isDraft"
+        :campaign="campaign"
+        :parent="parent"
+        @updated="(c) => (campaign = c)"
+        @status="(s) => (campaign!.status = s)"
+      />
 
       <template v-else>
         <StepBar :current="1" :campaign-id="id" />

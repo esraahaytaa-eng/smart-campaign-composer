@@ -264,7 +264,7 @@ const statusText = computed(() => {
         <span class="save-state">{{ saver.state.value === 'saving' && !streaming ? t('save.saving') : saver.state.value === 'saved' ? t('save.saved') : '' }}</span>
       </div>
 
-      <div v-if="!isDraft" class="alert alert-info">{{ t('campaign.notEditable', { status: t(`status.${campaign.status}`) }) }}</div>
+      <div v-if="!isDraft" class="alert alert-info">{{ t('campaign.notEditable', { status: t(`status.${campaign.status}`) }) }} <RouterLink :to="{ name: 'campaign', params: { id: campaign.id } }">{{ t('campaign.openDelivery') }}</RouterLink></div>
 
       <template v-else>
         <StepBar :current="2" :campaign-id="id" />

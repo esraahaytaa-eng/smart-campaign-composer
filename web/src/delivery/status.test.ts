@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deliveryPhase, deliverySummary, resendOffer, type ChannelStatus, type Snapshot } from './status'
+import { channelRows, deliveryPhase, deliverySummary, resendOffer, type ChannelStatus, type Snapshot } from './status'
 
 type ChannelSummary = ReturnType<typeof deliverySummary>['channels'][number]
 
@@ -56,6 +56,7 @@ describe('deliverySummary', () => {
     expect(s.notSent).toBe(7) // failed + skipped + cancelled
     expect(s.uncertain).toBe(1)
     expect(s.inProgress).toBe(17) // retrying + pending
+    expect([s.pending, s.retrying]).toEqual([14, 3])
     expect(s.finished).toBe(78)
     expect(s.finishedPct).toBeCloseTo(82.1, 1)
   })
@@ -128,5 +129,28 @@ describe('resendOffer', () => {
     const s = snapshot({ status: 'completed' })
     delete s.channels.email
     expect(resendOffer(s, 'email')).toEqual({ state: 'none' })
+  })
+})
+
+describe('channelRows', () => {
+  it("groups a channel's counts like the design, with the reasons behind each", () => {
+    const c = channel(
+      { sent: 30, failed: 2, skipped: 5, uncertain: 1, retrying: 3, pending: 10 },
+      { reasons: { failed: { provider_rejected: 1, retries_exhausted: 1 }, skipped: { character_limit_exceeded: 4, no_consent: 1 }, uncertain: { timeout: 1 } } },
+    )
+    expect(channelRows(c)).toEqual([
+      { section: 'sent', group: 'sent', count: 30, reasons: [] },
+      { section: 'inProgress', group: 'pending', count: 10, reasons: [] },
+      { section: 'inProgress', group: 'retrying', count: 3, reasons: [] },
+      { section: 'notSent', group: 'failed', count: 2, reasons: [{ code: 'provider_rejected', count: 1 }, { code: 'retries_exhausted', count: 1 }] },
+      { section: 'notSent', group: 'skipped', count: 5, reasons: [{ code: 'character_limit_exceeded', count: 4 }, { code: 'no_consent', count: 1 }] },
+      { section: 'notSent', group: 'cancelled', count: 0, reasons: [] },
+      { section: 'unknown', group: 'uncertain', count: 1, reasons: [{ code: 'timeout', count: 1 }] },
+    ])
+  })
+
+  it('lists the most frequent reason first', () => {
+    const c = channel({ failed: 5 }, { reasons: { failed: { provider_rejected: 1, retries_exhausted: 4 } } })
+    expect(channelRows(c).find((r) => r.group === 'failed')?.reasons.map((r) => r.code)).toEqual(['retries_exhausted', 'provider_rejected'])
   })
 })

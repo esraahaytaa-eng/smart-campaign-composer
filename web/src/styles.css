@@ -41,6 +41,15 @@
   --status-cancelled-bg: #f1f1ef;
   --status-cancelled-ink: #3f4652;
   --status-cancelled-dot: #6b7280;
+  /* Delivery groups (board 4) */
+  --group-sent: #12866f;
+  --group-failed: #c8372b;
+  --group-skipped: #d99a2b;
+  --group-uncertain: #7c4ddb;
+  --group-uncertain-soft: #f3eefd;
+  --group-retrying: #3b6fe0;
+  --group-cancelled: #6b7280;
+  --group-pending: #b8bfcc;
   --radius-sm: 8px;
   --radius: 10px;
   --radius-lg: 14px;
