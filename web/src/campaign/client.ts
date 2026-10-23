@@ -9,7 +9,9 @@ const path = (id: number, rest = '') => `/api/campaigns/${id}${rest}`
 export const campaigns = {
   create: (request: string, channels: Channel[], timeZone: string) =>
     api<Campaign>('/api/campaigns', { method: 'POST', body: { request, channels, time_zone: timeZone } }),
+  list: () => api<Campaign[]>('/api/campaigns'), // the newest 200 (D49)
   get: (id: number) => api<Campaign>(path(id)),
+  cancel: (id: number) => api<Campaign>(path(id, '/cancel'), { method: 'POST' }),
   setRules: (id: number, version: number, rules: Rule[]) => api<Campaign>(path(id, '/rules'), { method: 'PUT', body: { version, rules } }),
   setChannels: (id: number, version: number, channels: Channel[]) =>
     api<Campaign>(path(id, '/channels'), { method: 'PUT', body: { version, channels } }),

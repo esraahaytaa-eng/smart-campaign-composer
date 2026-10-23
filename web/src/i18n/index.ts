@@ -84,6 +84,14 @@ export const formatDateTime = (iso: string) =>
     timeZoneName: 'short',
   }).format(new Date(iso))
 
+// "Thursday, 22 October 2026" / "22 Ekim 2026 Perşembe".
+export const formatLongDate = (d: Date) =>
+  new Intl.DateTimeFormat(formats[current.value], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(d)
+
+// An instant's day in the browser's zone: "22 Oct 2026".
+export const formatDay = (iso: string) =>
+  new Intl.DateTimeFormat(formats[current.value], { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso))
+
 export const formatOr = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'disjunction' }).format(items)
 export const formatAnd = (items: string[]) => new Intl.ListFormat(formats[current.value], { type: 'conjunction' }).format(items)
 

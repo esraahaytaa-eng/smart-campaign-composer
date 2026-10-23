@@ -25,6 +25,22 @@
   --notice-line: #f1d9ae;
   --notice-dot: #d99a2b;
   --notice-ink: #7a4505;
+  /* Campaign statuses (board B) */
+  --status-draft-bg: #f1f0ec;
+  --status-draft-ink: #3e465c;
+  --status-draft-dot: #9aa3b5;
+  --status-approved-bg: #eeedfc;
+  --status-approved-ink: #2e2a8f;
+  --status-approved-dot: #4b44d6;
+  --status-sending-bg: #e8eefd;
+  --status-sending-ink: #1d4ed8;
+  --status-sending-dot: #3b6fe0;
+  --status-completed-bg: #e6f4f0;
+  --status-completed-ink: #0e5a4d;
+  --status-completed-dot: #12866f;
+  --status-cancelled-bg: #f1f1ef;
+  --status-cancelled-ink: #3f4652;
+  --status-cancelled-dot: #6b7280;
   --radius-sm: 8px;
   --radius: 10px;
   --radius-lg: 14px;

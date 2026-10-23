@@ -56,3 +56,18 @@ export function campaignActions(c: Campaign): Action[] {
       return ['viewResults']
   }
 }
+
+// The dashboard row's one button and its line under the title (board B).
+export function dashboardAction(c: Campaign): 'edit' | 'monitor' | 'view' {
+  return c.status === 'draft' ? 'edit' : c.status === 'sending' ? 'monitor' : 'view'
+}
+
+export type DashboardHint =
+  | { key: 'sending' | 'completed' | 'cancelled' }
+  | { key: 'draft' | 'scheduled'; at: string }
+
+export function dashboardHint(c: Campaign): DashboardHint {
+  if (c.status === 'draft') return { key: 'draft', at: c.updated_at }
+  if (c.status === 'approved') return { key: 'scheduled', at: c.send_at ?? c.updated_at }
+  return { key: c.status }
+}

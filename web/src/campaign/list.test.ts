@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { campaignActions, dashboardCampaigns, filterCampaigns, statusCounts } from './list'
+import { campaignActions, dashboardAction, dashboardHint, dashboardCampaigns, filterCampaigns, statusCounts } from './list'
 import type { Campaign, Status } from './types'
 
 let nextId = 1
@@ -76,5 +76,19 @@ describe('campaignActions', () => {
     ['cancelled', ['viewResults']],
   ] as const)('%s offers %j', (status, actions) => {
     expect(campaignActions(c(status))).toEqual(actions)
+  })
+})
+
+describe('dashboard rows', () => {
+  it.each([
+    ['sending', 'monitor', { key: 'sending' }],
+    ['draft', 'edit', { key: 'draft', at: '2026-10-21T08:00:00Z' }],
+    ['approved', 'view', { key: 'scheduled', at: '2026-10-25T10:00:00Z' }],
+    ['completed', 'view', { key: 'completed' }],
+    ['cancelled', 'view', { key: 'cancelled' }],
+  ] as const)('a %s campaign opens with %s and says %j', (status, action, hint) => {
+    const x = c(status, { updated_at: '2026-10-21T08:00:00Z', send_at: '2026-10-25T10:00:00Z' })
+    expect(dashboardAction(x)).toBe(action)
+    expect(dashboardHint(x)).toEqual(hint)
   })
 })
