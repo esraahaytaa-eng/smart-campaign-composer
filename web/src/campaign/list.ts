@@ -1,45 +1,45 @@
-// The campaign list and dashboard (D49): filtered and searched in the
-// browser over the newest campaigns the API returns.
+// The campaign list (D54): filtered, searched, paged and counted by the
+// server; the filters live in the address, so a reload or Back keeps them.
+import type { LocationQuery, LocationQueryRaw } from 'vue-router'
 import type { Campaign, Status } from './types'
 
 const STATUSES: Status[] = ['draft', 'approved', 'sending', 'completed', 'cancelled']
+const MAX_QUERY = 50 // characters, as the API allows
+const MAX_PAGE = 10000 // as the API allows
 
 export type StatusFilter = Status | 'all'
+export type ListQuery = { status: StatusFilter; q: string; page: number }
 
-export function statusCounts(list: Campaign[]): Record<StatusFilter, number> {
-  const out = { all: list.length } as Record<StatusFilter, number>
-  for (const s of STATUSES) out[s] = list.filter((c) => c.status === s).length
-  return out
+export type ListPage = {
+  campaigns: Campaign[]
+  total: number
+  page?: number
+  page_size?: number
+  counts: Record<StatusFilter, number> // over all campaigns
 }
 
-const turkish: Record<string, string> = { ç: 'c', ğ: 'g', ı: 'i', i̇: 'i', ö: 'o', ş: 's', ü: 'u' }
+const first = (v: LocationQuery[string] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
 
-// fold makes "İstanbul", "ISTANBUL" and "istanbul" match, like the backend.
-export function fold(s: string): string {
-  return s
-    .replace(/I/g, 'i')
-    .toLocaleLowerCase('tr')
-    .replace(/i̇|[çğıöşü]/g, (ch) => turkish[ch]!)
-    .replace(/\s+/g, ' ')
-    .trim()
+export function readListQuery(query: LocationQuery): ListQuery {
+  const status = first(query.status)
+  const page = Number(first(query.page))
+  return {
+    status: (STATUSES as string[]).includes(status) ? (status as Status) : 'all',
+    q: [...first(query.q)].slice(0, MAX_QUERY).join(''),
+    page: Number.isInteger(page) && page >= 1 ? Math.min(page, MAX_PAGE) : 1,
+  }
 }
 
-export function filterCampaigns(list: Campaign[], status: StatusFilter, query: string): Campaign[] {
-  const q = fold(query)
-  return list.filter((c) => (status === 'all' || c.status === status) && (!q || fold(c.request_text).includes(q)))
+export function writeListQuery(l: ListQuery): LocationQueryRaw {
+  return { ...(l.status !== 'all' && { status: l.status }), ...(l.q && { q: l.q }), ...(l.page > 1 && { page: String(l.page) }) }
 }
 
-// What's live and what's waiting comes first: sending, drafts, then
-// scheduled by send time, then finished ones most recent first.
-const RANK: Record<Status, number> = { sending: 0, draft: 1, approved: 2, completed: 3, cancelled: 3 }
-
-export function dashboardCampaigns(list: Campaign[], n: number): { rows: Campaign[]; more: number } {
-  const key = (c: Campaign) => (c.status === 'approved' ? (c.send_at ?? '') : c.updated_at)
-  const sorted = [...list].sort((a, b) => {
-    if (RANK[a.status] !== RANK[b.status]) return RANK[a.status] - RANK[b.status]
-    return a.status === 'approved' ? key(a).localeCompare(key(b)) : key(b).localeCompare(key(a))
-  })
-  return { rows: sorted.slice(0, n), more: Math.max(0, list.length - n) }
+export function listPath(l: ListQuery): string {
+  const p = new URLSearchParams()
+  if (l.status !== 'all') p.set('status', l.status)
+  if (l.q.trim()) p.set('q', l.q.trim())
+  p.set('page', String(l.page))
+  return `/api/campaigns?${p}`
 }
 
 export type Action = 'delete' | 'edit' | 'cancel' | 'view' | 'monitor' | 'viewResults'

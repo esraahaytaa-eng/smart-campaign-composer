@@ -1,6 +1,7 @@
 import { api, ApiError, responseError } from '../api'
 import { createSSEParser, type SSEEvent } from '../content/sse'
 import { recipientsPath, type RecipientsPage, type RecipientsQuery } from '../delivery/recipients'
+import { listPath, type ListPage, type ListQuery } from './list'
 import type { Campaign, Catalog, Channel, Content, Rule } from './types'
 
 export type Estimate = { audience: { total: number; sms: number; email: number }; over_limit: { sms: number; email: number } | null; calculated_at: string }
@@ -10,7 +11,8 @@ const path = (id: number, rest = '') => `/api/campaigns/${id}${rest}`
 export const campaigns = {
   create: (request: string, channels: Channel[], timeZone: string) =>
     api<Campaign>('/api/campaigns', { method: 'POST', body: { request, channels, time_zone: timeZone } }),
-  list: () => api<Campaign[]>('/api/campaigns'), // the newest 200 (D49)
+  list: (q: ListQuery) => api<ListPage>(listPath(q)), // D54
+  dashboard: () => api<ListPage>('/api/dashboard'),
   get: (id: number) => api<Campaign>(path(id)),
   cancel: (id: number) => api<Campaign>(path(id, '/cancel'), { method: 'POST' }),
   // A draft follow-up for the recipients skipped for length on one channel (D31).
