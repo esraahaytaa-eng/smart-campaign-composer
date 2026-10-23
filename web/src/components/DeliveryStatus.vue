@@ -4,7 +4,8 @@ import { campaigns } from '../campaign/client'
 import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Channel } from '../campaign/types'
-import { channelRows, deliveryPhase, deliverySummary, resendOffer, type Group, type Snapshot } from '../delivery/status'
+import { api } from '../api'
+import { channelRows, deliveryPhase, deliverySummary, firstNonEmpty, resendOffer, type Group, type Snapshot } from '../delivery/status'
 import { writeQuery } from '../delivery/recipients'
 import { watchStatus } from '../delivery/stream'
 import { formatDateTime, formatNumber, formatPercent, formatTime, isKey, t } from '../i18n'
@@ -23,6 +24,7 @@ const asOf = ref<Date | null>(null)
 const ended = ref(false)
 const paused = ref(false)
 const reconnecting = ref(false)
+const closed = ref(false) // the browser gave up on the stream
 const cancelling = ref<Campaign | null>(null)
 const actionError = ref<unknown>(null)
 const resending = ref<Channel | null>(null)
@@ -31,6 +33,7 @@ let stream: { close: () => void } | null = null
 function connect() {
   stream?.close()
   ended.value = false
+  closed.value = false
   stream = watchStatus(props.campaign.id, {
     onStatus: (s) => {
       snap.value = s
@@ -39,6 +42,12 @@ function connect() {
     },
     onEnd: () => (ended.value = true),
     onTrouble: (r) => (reconnecting.value = r),
+    onClosed: () => {
+      reconnecting.value = false
+      closed.value = true
+      // EventSource hides the status: a session check sends an expired session to sign-in.
+      api('/api/me').catch(() => {})
+    },
   })
 }
 connect()
@@ -60,12 +69,14 @@ async function cancel(c: Campaign) {
   } catch (err) {
     actionError.value = err
   }
-  if (!paused.value) connect() // the stream ends once nothing is in flight
+  // Show the result even if updates were paused; the stream ends once nothing is in flight.
+  paused.value = false
+  connect()
 }
 
 const phase = computed(() => (snap.value ? deliveryPhase(snap.value) : null))
 const summary = computed(() => (snap.value ? deliverySummary(snap.value) : null))
-const live = computed(() => phase.value === 'sending' && !ended.value)
+const live = computed(() => phase.value === 'sending' && !ended.value && !paused.value)
 const cancellable = computed(() => snap.value?.status === 'approved' || snap.value?.status === 'sending')
 
 const pct = formatPercent
@@ -102,6 +113,8 @@ function refresh() {
 
 // Each count opens recipient details for its group (board 5).
 const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, q: '', page: 1 }) })
+// A summary count opens the first of its groups that has messages.
+const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels.map((c) => c.status.groups) ?? [], order))
 </script>
 
 <template>
@@ -112,10 +125,14 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
       <RouterLink :to="{ name: 'campaign', params: { id: campaign.parent_campaign_id! } }">{{ t('delivery.openOriginal') }}</RouterLink>
     </div>
 
-    <p v-if="!snap" class="loading" role="status">{{ t('delivery.loading') }}</p>
+    <div v-if="closed" role="alert" class="alert alert-error">
+      <span>{{ t('delivery.closed') }}</span>
+      <button type="button" class="btn btn-sm" @click="connect">{{ t('delivery.retry') }}</button>
+    </div>
+    <p v-if="!snap && !closed" class="loading" role="status">{{ t('delivery.loading') }}</p>
 
     <!-- scheduled: approved, sending not started -->
-    <div v-else-if="phase === 'scheduled'" class="scheduled">
+    <div v-else-if="snap && phase === 'scheduled'" class="scheduled">
       <div class="main">
         <section class="card section" aria-labelledby="aud-h">
           <h2 id="aud-h">{{ t('delivery.audience') }}</h2>
@@ -158,7 +175,7 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
     </div>
 
     <!-- sending, completed or cancelled -->
-    <template v-else-if="summary">
+    <template v-else-if="snap && summary">
       <div class="toolbar">
         <h2 class="toolbar-title">{{ t('delivery.title') }}</h2>
         <span v-if="live" class="pill live"><span class="pulse" aria-hidden="true" />{{ t('delivery.live') }}</span>
@@ -203,10 +220,10 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
           <div class="card stat">
             <span class="kicker">{{ t('delivery.exceptions') }}</span>
             <span class="value">{{ formatNumber(summary.notSent + summary.uncertain) }}</span>
-            <RouterLink :to="open('failed')" class="pair"><span><span class="dot failed" aria-hidden="true" />{{ t('delivery.notSent') }} <span class="muted">· {{ t('delivery.notSentSub') }}</span></span><strong>{{ formatNumber(summary.notSent) }}</strong></RouterLink>
+            <RouterLink :to="openFirst(['failed', 'skipped', 'cancelled'])" class="pair"><span><span class="dot failed" aria-hidden="true" />{{ t('delivery.notSent') }} <span class="muted">· {{ t('delivery.notSentSub') }}</span></span><strong>{{ formatNumber(summary.notSent) }}</strong></RouterLink>
             <RouterLink :to="open('uncertain')" class="pair"><span><span class="dot uncertain" aria-hidden="true" />{{ t('delivery.unknown') }} <span class="muted">· {{ t('delivery.unknownSub') }}</span></span><strong>{{ formatNumber(summary.uncertain) }}</strong></RouterLink>
           </div>
-          <RouterLink :to="open('pending')" class="card stat">
+          <RouterLink :to="openFirst(['pending', 'retrying'])" class="card stat">
             <span class="kicker"><span class="dot retrying" aria-hidden="true" />{{ t('delivery.inProgress') }}</span>
             <span class="value">{{ formatNumber(summary.inProgress) }}</span>
             <span class="muted">
@@ -225,7 +242,7 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
             <div
               class="bar"
               role="img"
-              :aria-label="t('delivery.bar', { channel: channelName(c.channel), sent: c.status.groups.sent, failed: c.status.groups.failed, skipped: c.status.groups.skipped, uncertain: c.status.groups.uncertain, retrying: c.status.groups.retrying, pending: c.status.groups.pending })"
+              :aria-label="t('delivery.bar', { channel: channelName(c.channel), sent: formatNumber(c.status.groups.sent), failed: formatNumber(c.status.groups.failed), skipped: formatNumber(c.status.groups.skipped), cancelled: formatNumber(c.status.groups.cancelled), uncertain: formatNumber(c.status.groups.uncertain), retrying: formatNumber(c.status.groups.retrying), pending: formatNumber(c.status.groups.pending) })"
             >
               <div v-for="s in c.segments" :key="s.group" :class="['seg', s.group]" :style="{ width: `${(s.count / (c.status.audience || 1)) * 100}%` }" />
             </div>
@@ -244,7 +261,8 @@ const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: write
               </RouterLink>
             </div>
             <p class="muted small">
-              {{ t(`delivery.rate.${c.channel}`, { count: c.status.rate_limited_recent }) }}
+              <!-- "In the last 5 minutes" only means something while sending. -->
+              <template v-if="phase === 'sending' && !ended">{{ t(`delivery.rate.${c.channel}`, { count: c.status.rate_limited_recent }) }}</template>
               {{ t('delivery.rateTotal', { retries: formatNumber(c.status.retries), limited: formatNumber(c.status.rate_limited) }) }}
             </p>
             <div v-if="offers[c.channel]!.state !== 'none'" class="resend-box">

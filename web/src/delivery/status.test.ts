@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { channelRows, deliveryPhase, deliverySummary, resendFunnel, resendOffer, type ChannelStatus, type Snapshot } from './status'
+import { channelRows, deliveryPhase, deliverySummary, firstNonEmpty, resendFunnel, resendOffer, type ChannelStatus, type Snapshot } from './status'
 
 type ChannelSummary = ReturnType<typeof deliverySummary>['channels'][number]
 
@@ -175,5 +175,15 @@ describe('resendFunnel', () => {
     const s = snapshot()
     delete s.channels.email
     expect(resendFunnel(s, 'email')).toBeNull()
+  })
+})
+
+describe('firstNonEmpty', () => {
+  it('opens the first group of a summary that has messages', () => {
+    const g = groups({ failed: 0, skipped: 5, pending: 0, retrying: 2 })
+    expect(firstNonEmpty([g], ['failed', 'skipped', 'cancelled'])).toBe('skipped')
+    expect(firstNonEmpty([g], ['pending', 'retrying'])).toBe('retrying')
+    expect(firstNonEmpty([g, groups({ failed: 1 })], ['failed', 'skipped'])).toBe('failed') // across channels
+    expect(firstNonEmpty([g], ['cancelled', 'uncertain'])).toBe('cancelled') // nothing: the first
   })
 })

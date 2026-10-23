@@ -25,7 +25,7 @@ class FakeSource {
 }
 
 describe('watchStatus', () => {
-  const mocks = () => ({ onStatus: vi.fn<(s: Snapshot) => void>(), onEnd: vi.fn<() => void>(), onTrouble: vi.fn<(r: boolean) => void>() })
+  const mocks = () => ({ onStatus: vi.fn<(s: Snapshot) => void>(), onEnd: vi.fn<() => void>(), onTrouble: vi.fn<(r: boolean) => void>(), onClosed: vi.fn<() => void>() })
   let handlers: ReturnType<typeof mocks>
   beforeEach(() => {
     handlers = mocks()
@@ -52,6 +52,14 @@ describe('watchStatus', () => {
     expect(handlers.onTrouble).toHaveBeenCalledWith(true)
     FakeSource.last.emit('status', { status: 'sending' })
     expect(handlers.onTrouble).toHaveBeenLastCalledWith(false)
+  })
+
+  it('reports a stream the browser gave up on, instead of "reconnecting" forever', () => {
+    open()
+    FakeSource.last.readyState = 2 // CLOSED: e.g. a 401 after the session expired
+    FakeSource.last.onerror!()
+    expect(handlers.onClosed).toHaveBeenCalledOnce()
+    expect(handlers.onTrouble).not.toHaveBeenCalledWith(true)
   })
 
   it('ignores a snapshot that is not JSON', () => {

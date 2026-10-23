@@ -17,7 +17,7 @@ import {
   type RecipientsQuery,
 } from '../delivery/recipients'
 import type { Group, ResendOffer } from '../delivery/status'
-import { formatDateTime, formatNumber, formatTime, isKey, t } from '../i18n'
+import { formatDateTime, formatNumber, formatTime, isKey, locale, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 
 // Recipient details (board 5, D47): a side dialog whose filters live in the
@@ -33,8 +33,10 @@ const loadError = ref<unknown>(null)
 const loading = ref(false)
 const openRow = ref<number | null>(null)
 const search = ref('')
+const searchInput = ref<HTMLInputElement>()
 
 let seq = 0 // only the latest request may fill the table
+let timer: ReturnType<typeof setTimeout> | undefined
 async function load(q: RecipientsQuery) {
   const mine = ++seq
   loading.value = true
@@ -52,12 +54,17 @@ watch(
   query,
   (q, old) => {
     if (!q) {
+      seq++ // a request still on its way must not fill the closed drawer
+      clearTimeout(timer) // nor a pending search reopen it (Back while typing)
       data.value = null
       return
     }
-    if (q.q !== search.value.trim()) search.value = q.q
+    // Keep what is being typed: the address can lag behind the input.
+    if (q.q !== search.value.trim() && document.activeElement !== searchInput.value) search.value = q.q
     if (JSON.stringify(q) !== JSON.stringify(old)) {
       openRow.value = null
+      // Another tab or channel: show nothing rather than the last one's rows.
+      if (old && (q.group !== old.group || q.channel !== old.channel)) data.value = null
       load(q)
     }
   },
@@ -65,12 +72,12 @@ watch(
 )
 
 function set(patch: Partial<RecipientsQuery>) {
-  const next = { ...query.value!, page: 1, ...patch }
+  if (!query.value) return
+  const next = { ...query.value, page: 1, ...patch }
   router.replace({ query: writeQuery(next) })
 }
 
 // The name search follows typing after a short pause, and at once on Enter.
-let timer: ReturnType<typeof setTimeout> | undefined
 function onSearch() {
   clearTimeout(timer)
   timer = setTimeout(() => set({ q: search.value.trim() }), 300)
@@ -140,10 +147,10 @@ function resend(ch: Channel) {
         <div class="head">
           <div class="titles">
             <span v-if="data" class="meta">
-              {{ t('recipients.meta', { campaign: briefTitle(campaign.request_text), count: formatNumber(total), time: formatTime(new Date(data.as_of)) }) }}
+              {{ t('recipients.meta', { campaign: briefTitle(campaign.request_text), count: total, n: formatNumber(total), time: formatTime(new Date(data.as_of)) }) }}
             </span>
             <DialogTitle class="title">{{ t('recipients.title') }}</DialogTitle>
-            <DialogDescription class="sr-only">{{ t('recipients.meta', { campaign: briefTitle(campaign.request_text), count: formatNumber(total), time: '' }) }}</DialogDescription>
+            <DialogDescription class="sr-only">{{ t('recipients.description', { campaign: briefTitle(campaign.request_text) }) }}</DialogDescription>
           </div>
           <DialogClose class="close" :aria-label="t('recipients.close')">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -172,7 +179,7 @@ function resend(ch: Channel) {
                 <path d="M20 20l-4-4" />
               </svg>
               <span class="sr-only">{{ t('recipients.search') }}</span>
-              <input v-model="search" type="search" :maxlength="MAX_QUERY" :placeholder="t('recipients.searchPlaceholder')" @input="onSearch" @keydown.enter.prevent="searchNow" />
+              <input ref="searchInput" v-model="search" type="search" :maxlength="MAX_QUERY" :placeholder="t('recipients.searchPlaceholder')" @input="onSearch" @keydown.enter.prevent="searchNow" />
             </label>
             <div v-if="channels.length" role="group" class="segmented" :aria-label="t('recipients.channel')">
               <button v-for="ch in channels" :key="ch" type="button" :aria-pressed="query.channel === ch" @click="set({ channel: ch })">
@@ -239,7 +246,7 @@ function resend(ch: Channel) {
                   </div>
                 </template>
                 <p v-if="!data.recipients.length" class="empty">
-                  {{ query.q ? t('recipients.noMatch', { q: query.q }) : t('recipients.noMessages', { group: groupLabel(query.group).toLocaleLowerCase() }) }}
+                  {{ query.q ? t('recipients.noMatch', { q: query.q }) : t('recipients.noMessages', { group: groupLabel(query.group).toLocaleLowerCase(locale) }) }}
                 </p>
               </div>
             </div>
@@ -252,7 +259,7 @@ function resend(ch: Channel) {
                 {{ t('resend.drawerLink', { channel: t(`channel.inline.${resendChannel}`) }) }}
               </button>
               <span class="pager">
-                <button type="button" class="btn btn-sm" :disabled="!info?.hasPrev" @click="set({ page: query.page - 1 })">{{ t('recipients.prev') }}</button>
+                <button type="button" class="btn btn-sm" :disabled="!info?.hasPrev" @click="set({ page: info!.prevPage })">{{ t('recipients.prev') }}</button>
                 <button type="button" class="btn btn-sm" :disabled="!info?.hasNext" @click="set({ page: query.page + 1 })">{{ t('recipients.next') }}</button>
               </span>
             </div>

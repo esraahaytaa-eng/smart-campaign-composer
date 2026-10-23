@@ -137,3 +137,9 @@ export function resendFunnel(s: Snapshot, channel: Channel) {
     failed: c.groups.failed,
   }
 }
+
+// firstNonEmpty: the group a summary count opens, the first one with
+// messages on any channel, so the drawer never opens on an empty tab.
+export function firstNonEmpty(channels: Record<Group, number>[], order: Group[]): Group {
+  return order.find((g) => channels.some((c) => c[g] > 0)) ?? order[0]!
+}

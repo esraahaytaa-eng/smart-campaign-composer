@@ -9,6 +9,7 @@ import { formatDateTime, formatLongDate, formatNumber, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 
 const ROWS = 6
+const LIST_LIMIT = 200 // what GET /api/campaigns returns (D49)
 const STATUSES: Status[] = ['draft', 'approved', 'sending', 'completed', 'cancelled']
 
 const list = ref<Campaign[] | null>(null)
@@ -75,6 +76,7 @@ function hint(c: Campaign): string {
         </p>
         <RouterLink v-if="dash.more" :to="{ name: 'campaigns' }" class="link more">{{ t('dashboard.more', { count: dash.more }) }}</RouterLink>
       </section>
+      <p v-if="list.length >= LIST_LIMIT" class="kicker">{{ t('campaigns.limit', { count: LIST_LIMIT }) }}</p>
     </template>
   </div>
 </template>

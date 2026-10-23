@@ -31,6 +31,7 @@ export type RecipientsPage = {
 }
 
 export const MAX_QUERY = 50 // characters, as the API allows
+const MAX_PAGE = 1000 // as the API allows
 
 const first = (v: LocationQuery[string] | undefined) => (Array.isArray(v) ? v[0] : v) ?? ''
 
@@ -43,7 +44,7 @@ export function readQuery(query: LocationQuery): RecipientsQuery | null {
     group,
     channel: channel === 'sms' || channel === 'email' ? channel : 'all',
     q: [...first(query.q)].slice(0, MAX_QUERY).join(''),
-    page: Number.isInteger(page) && page >= 1 ? page : 1,
+    page: Number.isInteger(page) && page >= 1 ? Math.min(page, MAX_PAGE) : 1,
   }
 }
 
@@ -73,7 +74,15 @@ export function tabCounts(groups: RecipientsPage['groups'], channel: Channel | '
 
 export function pageInfo(p: Pick<RecipientsPage, 'total' | 'page' | 'page_size'>, rows: number) {
   const from = rows > 0 ? (p.page - 1) * p.page_size + 1 : 0
-  return { from, to: rows > 0 ? from + rows - 1 : 0, total: p.total, hasPrev: p.page > 1, hasNext: p.page * p.page_size < p.total }
+  const last = Math.max(1, Math.ceil(p.total / p.page_size))
+  return {
+    from,
+    to: rows > 0 ? from + rows - 1 : 0,
+    total: p.total,
+    hasPrev: p.page > 1,
+    hasNext: p.page * p.page_size < p.total,
+    prevPage: Math.max(1, Math.min(p.page - 1, last)), // past the end: straight to the last page
+  }
 }
 
 // rowDetail is the line under a row's reason (board 5): a dictionary key

@@ -22,6 +22,7 @@ describe('readQuery / writeQuery', () => {
     expect(readQuery({ recipients: 'sent', channel: 'fax', page: '-2' })).toEqual({ ...base, group: 'sent' })
     expect(readQuery({ recipients: 'sent', page: 'x' })?.page).toBe(1)
     expect(readQuery({ recipients: 'sent', q: 'a'.repeat(80) })?.q).toHaveLength(50)
+    expect(readQuery({ recipients: 'sent', page: '5000' })?.page).toBe(1000) // the API's limit
   })
 
   it('takes the first value of a repeated parameter', () => {
@@ -64,13 +65,15 @@ describe('tabCounts', () => {
 
 describe('pageInfo', () => {
   it('describes the rows shown and the paging buttons', () => {
-    expect(pageInfo({ total: 121, page: 1, page_size: 50 }, 50)).toEqual({ from: 1, to: 50, total: 121, hasPrev: false, hasNext: true })
-    expect(pageInfo({ total: 121, page: 3, page_size: 50 }, 21)).toEqual({ from: 101, to: 121, total: 121, hasPrev: true, hasNext: false })
-    expect(pageInfo({ total: 0, page: 1, page_size: 50 }, 0)).toEqual({ from: 0, to: 0, total: 0, hasPrev: false, hasNext: false })
+    expect(pageInfo({ total: 121, page: 1, page_size: 50 }, 50)).toEqual({ from: 1, to: 50, total: 121, hasPrev: false, hasNext: true, prevPage: 1 })
+    expect(pageInfo({ total: 121, page: 3, page_size: 50 }, 21)).toEqual({ from: 101, to: 121, total: 121, hasPrev: true, hasNext: false, prevPage: 2 })
+    expect(pageInfo({ total: 0, page: 1, page_size: 50 }, 0)).toEqual({ from: 0, to: 0, total: 0, hasPrev: false, hasNext: false, prevPage: 1 })
   })
 
-  it('offers a way back from a page past the end', () => {
-    expect(pageInfo({ total: 10, page: 4, page_size: 50 }, 0)).toEqual({ from: 0, to: 0, total: 10, hasPrev: true, hasNext: false })
+  it('offers a way back from a page past the end, straight to the last page', () => {
+    expect(pageInfo({ total: 10, page: 4, page_size: 50 }, 0)).toEqual({ from: 0, to: 0, total: 10, hasPrev: true, hasNext: false, prevPage: 1 })
+    expect(pageInfo({ total: 120, page: 9, page_size: 50 }, 0).prevPage).toBe(3)
+    expect(pageInfo({ total: 120, page: 3, page_size: 50 }, 20).prevPage).toBe(2)
   })
 })
 

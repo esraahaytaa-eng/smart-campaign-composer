@@ -5,6 +5,7 @@ type Handlers = {
   onStatus: (s: Snapshot) => void
   onEnd: () => void // the campaign is finished; nothing more will change
   onTrouble: (reconnecting: boolean) => void // the browser is reconnecting on its own
+  onClosed: () => void // the browser gave up (e.g. 401, 404, 500 on reconnect)
 }
 
 export function watchStatus(id: number, h: Handlers, Source: typeof EventSource = EventSource) {
@@ -24,6 +25,7 @@ export function watchStatus(id: number, h: Handlers, Source: typeof EventSource 
     es.close()
     h.onEnd()
   })
-  es.onerror = () => h.onTrouble(true)
+  // A non-200 answer to a reconnect closes the source for good.
+  es.onerror = () => (es.readyState === 2 ? h.onClosed() : h.onTrouble(true))
   return { close: () => es.close() }
 }
