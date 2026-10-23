@@ -48,6 +48,7 @@ export default () =>
     await page.waitForURL((u) => u.searchParams.get('q') === 'WEEKEND SALE ANNOUNCEMENT')
     check(await row(scheduled).isVisible(), 'search finds the brief (case-insensitive)')
     await page.reload()
+    await row(scheduled).waitFor() // the list loads after the page
     check(await row(scheduled).isVisible() && (await page.getByRole('searchbox', { name: 'Search campaigns' }).inputValue()) === 'WEEKEND SALE ANNOUNCEMENT',
       'the search survives a reload')
     check((await row(scheduled).innerText()).includes('Approved'), 'a scheduled campaign shows its status')
