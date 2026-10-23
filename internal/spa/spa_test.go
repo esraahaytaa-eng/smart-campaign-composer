@@ -1,6 +1,9 @@
 package spa_test
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,7 +28,10 @@ func site(t *testing.T) http.Handler {
 	}
 	write("index.html", "<!doctype html>app")
 	write("assets/app-1a2b.js", "console.log(1)")
-	write("favicon.svg", "<svg/>")
+	write("favicon.svg", "<svg/>") // no compressed copy
+	// The image build's compressed copies (D60).
+	write("index.html.gz", gz(t, "<!doctype html>app"))
+	write("assets/app-1a2b.js.gz", gz(t, "console.log(1)"))
 	// A secret next to the site must stay unreachable.
 	if err := os.WriteFile(filepath.Join(filepath.Dir(dir), "secret.txt"), []byte("secret"), 0o644); err != nil {
 		t.Fatal(err)
@@ -36,10 +42,72 @@ func site(t *testing.T) http.Handler {
 	return mux
 }
 
-func get(h http.Handler, method, path string) *httptest.ResponseRecorder {
+func gz(t *testing.T, s string) string {
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+	if _, err := w.Write([]byte(s)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func get(h http.Handler, method, path string, header ...string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	req := httptest.NewRequest(method, path, nil)
+	for i := 0; i+1 < len(header); i += 2 {
+		req.Header.Set(header[i], header[i+1])
+	}
+	h.ServeHTTP(rec, req)
 	return rec
+}
+
+// D60: a browser that accepts gzip gets the precompressed copy, with the
+// original file's type (nosniff would block a script typed as gzip) and the
+// same caching and security headers.
+func TestHandler_ServesCompressedCopies(t *testing.T) {
+	h := site(t)
+	for _, c := range []struct{ path, body, typ, cache string }{
+		{"/assets/app-1a2b.js", "console.log(1)", "javascript", "immutable"},
+		{"/campaigns/7", "<!doctype html>app", "text/html", "no-cache"},
+	} {
+		rec := get(h, http.MethodGet, c.path, "Accept-Encoding", "br, gzip")
+		if rec.Code != http.StatusOK || rec.Header().Get("Content-Encoding") != "gzip" {
+			t.Fatalf("%s: want the gzip copy, got %d %q", c.path, rec.Code, rec.Header().Get("Content-Encoding"))
+		}
+		r, err := gzip.NewReader(rec.Body)
+		if err != nil {
+			t.Fatalf("%s: %v", c.path, err)
+		}
+		if body, _ := io.ReadAll(r); string(body) != c.body {
+			t.Errorf("%s: decompressed to %q", c.path, body)
+		}
+		if !strings.Contains(rec.Header().Get("Content-Type"), c.typ) || !strings.Contains(rec.Header().Get("Cache-Control"), c.cache) {
+			t.Errorf("%s: want type %s and cache %s, got %q, %q", c.path, c.typ, c.cache, rec.Header().Get("Content-Type"), rec.Header().Get("Cache-Control"))
+		}
+		if rec.Header().Get("Vary") != "Accept-Encoding" || rec.Header().Get("Content-Security-Policy") != csp || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: want Vary, the CSP and nosniff on the compressed copy", c.path)
+		}
+	}
+}
+
+func TestHandler_PlainWhenGzipIsNotAccepted(t *testing.T) {
+	h := site(t)
+	for _, accept := range []string{"", "br", "gzip;q=0", "x-gzip-not"} {
+		rec := get(h, http.MethodGet, "/assets/app-1a2b.js", "Accept-Encoding", accept)
+		if rec.Body.String() != "console.log(1)" || rec.Header().Get("Content-Encoding") != "" {
+			t.Errorf("Accept-Encoding %q: want the plain file, got %q %q", accept, rec.Header().Get("Content-Encoding"), rec.Body)
+		}
+		if rec.Header().Get("Vary") != "Accept-Encoding" {
+			t.Errorf("Accept-Encoding %q: a shared cache must keep the two versions apart (Vary)", accept)
+		}
+	}
+	// A file without a compressed copy is sent as it is.
+	if rec := get(h, http.MethodGet, "/favicon.svg", "Accept-Encoding", "gzip"); rec.Body.String() != "<svg/>" || rec.Header().Get("Content-Encoding") != "" {
+		t.Errorf("favicon: want it plain, got %q", rec.Header().Get("Content-Encoding"))
+	}
 }
 
 // D56: only the app's own files may run, load or be connected to; no inline

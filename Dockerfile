@@ -14,7 +14,8 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY web/ ./
-RUN npm run build
+# A gzip copy of every text file next to it; the api sends it to browsers that accept gzip (D60).
+RUN npm run build && find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' \) -exec gzip -9 -k {} +
 
 # alpine (not distroless) so compose healthchecks can use busybox wget.
 FROM alpine:3.20
