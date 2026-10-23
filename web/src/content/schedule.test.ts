@@ -31,10 +31,12 @@ describe('scheduleProblem', () => {
 })
 
 describe('local date-time input', () => {
-  it('round-trips through the browser zone and is sent as UTC', () => {
+  // The tests run in Europe/Istanbul (vite.config.ts), so the conversion is real.
+  it('shows the instant in the browser zone and sends it as UTC', () => {
     const local = toLocalInput('2026-10-23T07:00:00Z')
-    expect(local).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+    expect(local).toBe('2026-10-23T10:00')
     expect(fromLocalInput(local)).toBe('2026-10-23T07:00:00.000Z')
+    expect(fromLocalInput('2026-10-24T00:30')).toBe('2026-10-23T21:30:00.000Z') // the day changes too
   })
 
   it('rejects an empty input', () => {

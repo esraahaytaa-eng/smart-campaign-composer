@@ -11,5 +11,7 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts'],
+    // A zone away from UTC, so time conversions are really tested (Docker runs in UTC).
+    env: { TZ: 'Europe/Istanbul' },
   },
 })

@@ -10,6 +10,13 @@ const noOrder = rule('no_order', 'within', { last_days: 30 })
 
 describe('withRule / withoutRule', () => {
   it('replaces the rule being edited, even when its operator changes', () => {
+    const orders = rule('order_count', 'gte', 2)
+    const edited = rule('order_count', 'lte', 5) // a different operator, so a different key
+    expect(ruleKey(edited)).not.toBe(ruleKey(orders))
+    expect(withRule([city, orders, noOrder], ruleKey(orders), edited)).toEqual([city, edited, noOrder])
+  })
+
+  it('replaces a rule whose value changes', () => {
     const edited = rule('cart_added', 'within', { last_days: 14 })
     expect(withRule([city, cart, noOrder], ruleKey(cart), edited)).toEqual([city, edited, noOrder])
   })
