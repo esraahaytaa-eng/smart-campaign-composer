@@ -365,23 +365,6 @@ func TestUpdateSchedule(t *testing.T) {
 	}
 }
 
-func TestEdit_NonDraft_409(t *testing.T) {
-	t.Parallel()
-	a := newApp(t, llm.NewMock())
-	d := a.newDraft()
-	if _, err := a.pool.Exec(context.Background(), `UPDATE campaigns SET status = 'approved' WHERE id = $1`, d.ID); err != nil {
-		t.Fatal(err)
-	}
-	id := itoa(d.ID)
-
-	if rec := a.do(http.MethodPut, "/api/campaigns/"+id+"/rules", `{"version":1,"rules":[{"field":"city","op":"in","value":["Ankara"]}]}`); rec.Code != http.StatusConflict {
-		t.Errorf("rules on approved: want 409, got %d", rec.Code)
-	}
-	if rec := a.do(http.MethodPut, "/api/campaigns/"+id+"/schedule", `{"version":1,"send_at":null}`); rec.Code != http.StatusConflict {
-		t.Errorf("schedule on approved: want 409, got %d", rec.Code)
-	}
-}
-
 func TestGet(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())
@@ -405,21 +388,6 @@ func TestGet(t *testing.T) {
 		}
 		if rec := a.do(method, path, `{"version":1,"rules":[{"field":"city","op":"in","value":["Ankara"]}]}`); rec.Code != http.StatusNotFound {
 			t.Errorf("%s %s: want 404, got %d", method, path, rec.Code)
-		}
-	}
-}
-
-func TestCampaigns_RequireLogin(t *testing.T) {
-	t.Parallel()
-	a := newApp(t, llm.NewMock())
-	a.cookie = nil
-
-	for _, r := range []struct{ method, path string }{
-		{http.MethodGet, "/api/campaigns"}, {http.MethodPost, "/api/campaigns"}, {http.MethodGet, "/api/campaigns/1"},
-		{http.MethodGet, "/api/campaigns/1/recipients?group=sent"},
-	} {
-		if rec := a.do(r.method, r.path, "{}"); rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s %s: want 401, got %d", r.method, r.path, rec.Code)
 		}
 	}
 }

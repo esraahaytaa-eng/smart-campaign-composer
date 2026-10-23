@@ -61,9 +61,7 @@ export default () =>
     check((await cancelledRow.innerText()).includes(g.cancelled.toLocaleString('en-GB')), 'the page shows the cancelled count')
     check((await page.getByRole('button', { name: 'Cancel campaign…' }).count()) === 0, 'it cannot be cancelled twice')
     await t.shot('cancelled-mid-send')
-    await page.waitForTimeout(3000)
-    const later = (await (await page.request.get(`${BASE}/api/campaigns/${id}/recipients?group=sent`)).json()).groups.sms.sent
-    check(later === g.sent, 'no message is sent after the cancel')
+    // Nothing is sent after a cancel: TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel (Go).
 
     // Turkish on the resend-free result page and in the drawer
     await page.getByRole('link', { name: /^SMS Cancelled/ }).click()
