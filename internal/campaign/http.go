@@ -55,6 +55,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/campaigns/{id}/estimate", h.estimate)
 	mux.HandleFunc("POST /api/campaigns/{id}/resend", h.resend)
 	mux.HandleFunc("GET /api/campaigns/{id}/events", h.events)
+	mux.HandleFunc("GET /api/campaigns/{id}/recipients", h.recipients)
 }
 
 // campaignJSON is a campaign as the API returns it. Counts are the current

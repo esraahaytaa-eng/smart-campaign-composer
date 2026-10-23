@@ -1,0 +1,27 @@
+package campaign
+
+import "testing"
+
+func TestMaskContacts(t *testing.T) {
+	for in, want := range map[string]string{
+		"+905551234517":  "+90 555 ••• •• 17",
+		"+4915112345678": "••• 78", // not Turkish: last two digits only
+		"12345":          "•••",
+		"":               "•••",
+	} {
+		if got := maskPhone(in); got != want {
+			t.Errorf("maskPhone(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for in, want := range map[string]string{
+		"ayse.demir.17@example.com": "ays•••@example.com",
+		"ab@example.com":            "a•••@example.com", // never more than half
+		"a@example.com":             "•••@example.com",
+		"şükrü@örnek.com":           "şü•••@örnek.com",
+		"no-at-sign":                "•••",
+	} {
+		if got := maskEmail(in); got != want {
+			t.Errorf("maskEmail(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
