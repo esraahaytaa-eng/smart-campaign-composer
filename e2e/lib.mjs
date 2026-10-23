@@ -1,7 +1,7 @@
 // Shared helpers for the browser suite. Each test file signs in, creates the
 // campaigns it needs, checks behaviour against the API, and cleans up: drafts
-// are deleted, approved campaigns cancelled. Only delivery.mjs and
-// recipients.mjs send, each one campaign to the mock SMS provider.
+// are deleted, approved campaigns cancelled. Only delivery.mjs,
+// recipients.mjs and resend.mjs send, to the mock SMS provider only.
 import { chromium } from 'playwright'
 
 export const BASE = process.env.BASE ?? 'http://localhost:8080'
