@@ -50,6 +50,15 @@
   --group-retrying: #3b6fe0;
   --group-cancelled: #6b7280;
   --group-pending: #b8bfcc;
+  --group-pending-bg: #eef0f4;
+  --group-pending-ink: #3e465c;
+  --group-uncertain-ink: #5b21b6;
+  --group-uncertain-line: #b9a2ee;
+  --group-uncertain-faint: #fbf9ff;
+  --danger-faint: #fffaf9;
+  --notice-faint: #fffcf6;
+  --success-faint: #f3faf8;
+  --drawer-shadow: -16px 0 40px rgba(18, 26, 51, 0.18);
   --radius-sm: 8px;
   --radius: 10px;
   --radius-lg: 14px;

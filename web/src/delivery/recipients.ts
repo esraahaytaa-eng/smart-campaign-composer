@@ -75,3 +75,43 @@ export function pageInfo(p: Pick<RecipientsPage, 'total' | 'page' | 'page_size'>
   const from = rows > 0 ? (p.page - 1) * p.page_size + 1 : 0
   return { from, to: rows > 0 ? from + rows - 1 : 0, total: p.total, hasPrev: p.page > 1, hasNext: p.page * p.page_size < p.total }
 }
+
+// rowDetail is the line under a row's reason (board 5): a dictionary key
+// with its values.
+export type RowDetail =
+  | { key: 'detail.sent' | 'detail.pending' | 'detail.cancelled' | 'detail.uncertain' | 'detail.provider_rejected' | 'detail.no_consent' | 'detail.lengthUnknown' }
+  | { key: 'detail.retries_exhausted'; count: number }
+  | { key: 'detail.length.sms' | 'detail.length.subject' | 'detail.length.body'; length: number; limit: number }
+  | { key: 'detail.nextAttempt'; at: string }
+
+export function rowDetail(r: Recipient): RowDetail {
+  switch (r.group) {
+    case 'failed':
+      return r.reason === 'provider_rejected' ? { key: 'detail.provider_rejected' } : { key: 'detail.retries_exhausted', count: r.attempts.length }
+    case 'skipped':
+      if (r.reason === 'no_consent') return { key: 'detail.no_consent' }
+      // The length is worked out with today's names; null if they changed since.
+      return r.detail ? { key: `detail.length.${r.detail.part}`, length: r.detail.length, limit: r.detail.limit } : { key: 'detail.lengthUnknown' }
+    case 'retrying':
+      return r.next_attempt_at ? { key: 'detail.nextAttempt', at: r.next_attempt_at } : { key: 'detail.pending' }
+    case 'uncertain':
+      return { key: 'detail.uncertain' }
+    default:
+      return { key: `detail.${r.group}` }
+  }
+}
+
+export type AttemptView = {
+  code: string | null // "HTTP 429"; null when the answer is better said in words
+  outcome: string // accepted, rate_limited, …, or none when no answer was recorded
+  next: 'retry' | 'sent' | 'failed' | 'skipped' | 'cancelled' | 'uncertain'
+  tone: 'ok' | 'retry' | 'fail' | 'unknown'
+}
+
+// attemptView: one line of the attempt history, ending in what it led to.
+export function attemptView(a: Attempt, last: boolean, r: Recipient): AttemptView {
+  const outcome = a.outcome ?? 'none'
+  const next: AttemptView['next'] = !last || r.group === 'retrying' || r.group === 'pending' ? 'retry' : r.group
+  const tone = outcome === 'accepted' ? 'ok' : next === 'retry' ? 'retry' : next === 'uncertain' ? 'unknown' : 'fail'
+  return { code: outcome !== 'accepted' && a.http_status ? `HTTP ${a.http_status}` : null, outcome, next, tone }
+}

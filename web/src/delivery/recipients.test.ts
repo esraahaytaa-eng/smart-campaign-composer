@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LocationQuery } from 'vue-router'
-import { pageInfo, readQuery, recipientsPath, tabCounts, writeQuery, type RecipientsQuery } from './recipients'
+import { attemptView, pageInfo, readQuery, recipientsPath, rowDetail, tabCounts, writeQuery, type Attempt, type Recipient, type RecipientsQuery } from './recipients'
 
 const base: RecipientsQuery = { group: 'failed', channel: 'all', q: '', page: 1 }
 
@@ -71,5 +71,46 @@ describe('pageInfo', () => {
 
   it('offers a way back from a page past the end', () => {
     expect(pageInfo({ total: 10, page: 4, page_size: 50 }, 0)).toEqual({ from: 0, to: 0, total: 10, hasPrev: true, hasNext: false })
+  })
+})
+
+const attempt = (a: Partial<Attempt>): Attempt => ({ attempt_no: 1, started_at: '2026-10-23T10:00:00Z', finished_at: null, outcome: 'accepted', http_status: 200, ...a })
+const recipient = (r: Partial<Recipient>): Recipient => ({
+  id: 1, name: 'Ayşe Demir', contact: '+90 555 ••• •• 17', channel: 'sms', group: 'sent', reason: null, detail: null, next_attempt_at: null, attempts: [], ...r,
+})
+
+describe('rowDetail', () => {
+  it.each([
+    [{ group: 'sent' }, { key: 'detail.sent' }],
+    [{ group: 'pending' }, { key: 'detail.pending' }],
+    [{ group: 'cancelled' }, { key: 'detail.cancelled' }],
+    [{ group: 'failed', reason: 'provider_rejected' }, { key: 'detail.provider_rejected' }],
+    [{ group: 'failed', reason: 'retries_exhausted', attempts: [attempt({}), attempt({ attempt_no: 2 })] }, { key: 'detail.retries_exhausted', count: 2 }],
+    [{ group: 'skipped', reason: 'no_consent' }, { key: 'detail.no_consent' }],
+    [{ group: 'skipped', reason: 'character_limit_exceeded', detail: { part: 'sms', length: 165, limit: 160 } }, { key: 'detail.length.sms', length: 165, limit: 160 }],
+    [{ group: 'skipped', reason: 'character_limit_exceeded', detail: { part: 'subject', length: 85, limit: 80 } }, { key: 'detail.length.subject', length: 85, limit: 80 }],
+    [{ group: 'skipped', reason: 'character_limit_exceeded' }, { key: 'detail.lengthUnknown' }], // names changed since the skip
+    [{ group: 'uncertain', reason: 'timeout' }, { key: 'detail.uncertain' }],
+    [{ group: 'retrying', reason: 'rate_limited', next_attempt_at: '2026-10-23T10:00:05Z' }, { key: 'detail.nextAttempt', at: '2026-10-23T10:00:05Z' }],
+  ] as const)('%j → %j', (r, want) => {
+    expect(rowDetail(recipient(r as Partial<Recipient>))).toEqual(want)
+  })
+})
+
+describe('attemptView', () => {
+  it('names the answer and what followed', () => {
+    const r = recipient({ group: 'failed', reason: 'retries_exhausted' })
+    expect(attemptView(attempt({ outcome: 'rate_limited', http_status: 429 }), false, r)).toEqual({ code: 'HTTP 429', outcome: 'rate_limited', next: 'retry', tone: 'retry' })
+    expect(attemptView(attempt({ outcome: 'server_error', http_status: 503 }), true, r)).toEqual({ code: 'HTTP 503', outcome: 'server_error', next: 'failed', tone: 'fail' })
+  })
+
+  it('shows acceptance and missing answers in words', () => {
+    expect(attemptView(attempt({}), true, recipient({}))).toEqual({ code: null, outcome: 'accepted', next: 'sent', tone: 'ok' })
+    expect(attemptView(attempt({ outcome: 'timeout', http_status: null }), true, recipient({ group: 'uncertain' }))).toEqual({ code: null, outcome: 'timeout', next: 'uncertain', tone: 'unknown' })
+    expect(attemptView(attempt({ outcome: null, http_status: null }), true, recipient({ group: 'uncertain' }))).toEqual({ code: null, outcome: 'none', next: 'uncertain', tone: 'unknown' })
+  })
+
+  it('a retrying message ends its history with a scheduled retry', () => {
+    expect(attemptView(attempt({ outcome: 'server_error', http_status: 500 }), true, recipient({ group: 'retrying' })).next).toBe('retry')
   })
 })

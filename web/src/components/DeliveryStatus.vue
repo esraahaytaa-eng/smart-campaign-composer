@@ -5,10 +5,12 @@ import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Channel } from '../campaign/types'
 import { channelRows, deliveryPhase, deliverySummary, type Group, type Snapshot } from '../delivery/status'
+import { writeQuery } from '../delivery/recipients'
 import { watchStatus } from '../delivery/stream'
 import { formatDateTime, formatNumber, formatPercent, formatTime, isKey, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 import CancelDialog from './CancelDialog.vue'
+import RecipientsDrawer from './RecipientsDrawer.vue'
 
 // A campaign after approval (boards 4 and B): scheduled, live delivery, or
 // read-only results. Everything comes from the status stream (D36).
@@ -87,6 +89,8 @@ const delta = computed(() => {
   return d === 0 ? '' : `(${d > 0 ? '+' : '−'}${formatNumber(Math.abs(d))})`
 })
 const rules = computed(() => (props.campaign.rules ?? []).map(ruleLabel))
+// Each count opens recipient details for its group (board 5).
+const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, q: '', page: 1 }) })
 </script>
 
 <template>
@@ -179,26 +183,26 @@ const rules = computed(() => (props.campaign.rules ?? []).map(ruleLabel))
             <div class="progress" aria-hidden="true"><div :style="{ width: `${summary.finishedPct}%` }" /></div>
             <span class="muted">{{ t('delivery.finished', { count: formatNumber(summary.finished), pct: pct(summary.finishedPct) }) }}</span>
           </div>
-          <div class="card stat">
+          <RouterLink :to="open('sent')" class="card stat">
             <span class="kicker"><span class="dot sent" aria-hidden="true" />{{ t('delivery.sent') }}</span>
             <span class="value">{{ formatNumber(summary.sent) }}</span>
             <span class="muted">{{ t('delivery.sentPct', { pct: pct(summary.total ? (summary.sent / summary.total) * 100 : 0) }) }}</span>
             <span class="muted small">{{ t('delivery.sentNote') }}</span>
-          </div>
+          </RouterLink>
           <div class="card stat">
             <span class="kicker">{{ t('delivery.exceptions') }}</span>
             <span class="value">{{ formatNumber(summary.notSent + summary.uncertain) }}</span>
-            <span class="pair"><span><span class="dot failed" aria-hidden="true" />{{ t('delivery.notSent') }} <span class="muted">· {{ t('delivery.notSentSub') }}</span></span><strong>{{ formatNumber(summary.notSent) }}</strong></span>
-            <span class="pair"><span><span class="dot uncertain" aria-hidden="true" />{{ t('delivery.unknown') }} <span class="muted">· {{ t('delivery.unknownSub') }}</span></span><strong>{{ formatNumber(summary.uncertain) }}</strong></span>
+            <RouterLink :to="open('failed')" class="pair"><span><span class="dot failed" aria-hidden="true" />{{ t('delivery.notSent') }} <span class="muted">· {{ t('delivery.notSentSub') }}</span></span><strong>{{ formatNumber(summary.notSent) }}</strong></RouterLink>
+            <RouterLink :to="open('uncertain')" class="pair"><span><span class="dot uncertain" aria-hidden="true" />{{ t('delivery.unknown') }} <span class="muted">· {{ t('delivery.unknownSub') }}</span></span><strong>{{ formatNumber(summary.uncertain) }}</strong></RouterLink>
           </div>
-          <div class="card stat">
+          <RouterLink :to="open('pending')" class="card stat">
             <span class="kicker"><span class="dot retrying" aria-hidden="true" />{{ t('delivery.inProgress') }}</span>
             <span class="value">{{ formatNumber(summary.inProgress) }}</span>
             <span class="muted">
               {{ t('delivery.inProgressSub', { pending: formatNumber(summary.pending), retrying: formatNumber(summary.retrying) }) }}
             </span>
             <span class="muted small">{{ t('delivery.inProgressNote') }}</span>
-          </div>
+          </RouterLink>
         </div>
 
         <div class="channels">
@@ -215,11 +219,18 @@ const rules = computed(() => (props.campaign.rules ?? []).map(ruleLabel))
               <div v-for="s in c.segments" :key="s.group" :class="['seg', s.group]" :style="{ width: `${(s.count / (c.status.audience || 1)) * 100}%` }" />
             </div>
             <div class="rows">
-              <div v-for="(r, i) in channelRows(c.status)" :key="r.group" class="channel-row" :class="{ first: i === 0 || channelRows(c.status)[i - 1]!.section !== r.section }">
+              <RouterLink
+                v-for="(r, i) in channelRows(c.status)"
+                :key="r.group"
+                :to="open(r.group, c.channel)"
+                class="channel-row"
+                :class="{ first: i === 0 || channelRows(c.status)[i - 1]!.section !== r.section }"
+                :aria-label="t('delivery.openGroup', { channel: channelName(c.channel), group: t(`group.${r.group}`), count: formatNumber(r.count) })"
+              >
                 <span class="section-name">{{ i === 0 || channelRows(c.status)[i - 1]!.section !== r.section ? t(`section.${r.section}`) : '' }}</span>
                 <span class="label"><span :class="['dot', r.group]" aria-hidden="true" />{{ t(`group.${r.group}`) }} <span class="muted">{{ groupSub(r.group, r.reasons) }}</span></span>
                 <strong>{{ formatNumber(r.count) }}</strong>
-              </div>
+              </RouterLink>
             </div>
             <p class="muted small">
               {{ t(`delivery.rate.${c.channel}`, { count: c.status.rate_limited_recent }) }}
@@ -236,6 +247,7 @@ const rules = computed(() => (props.campaign.rules ?? []).map(ruleLabel))
     </template>
 
     <CancelDialog :campaign="cancelling" @confirm="cancel" @close="cancelling = null" />
+    <RecipientsDrawer v-if="snap && phase !== 'scheduled'" :campaign="campaign" />
   </div>
 </template>
 
@@ -463,6 +475,17 @@ h2 {
 .rows {
   display: flex;
   flex-direction: column;
+}
+.channel-row,
+a.stat,
+a.pair {
+  color: inherit;
+  text-decoration: none;
+}
+.channel-row:hover .label,
+a.pair:hover,
+a.stat:hover .kicker {
+  text-decoration: underline;
 }
 .channel-row {
   display: grid;

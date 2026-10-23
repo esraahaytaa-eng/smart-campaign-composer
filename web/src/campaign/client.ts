@@ -1,5 +1,6 @@
 import { api, ApiError, responseError } from '../api'
 import { createSSEParser, type SSEEvent } from '../content/sse'
+import { recipientsPath, type RecipientsPage, type RecipientsQuery } from '../delivery/recipients'
 import type { Campaign, Catalog, Channel, Content, Rule } from './types'
 
 export type Estimate = { audience: { total: number; sms: number; email: number }; over_limit: { sms: number; email: number } | null; calculated_at: string }
@@ -21,6 +22,7 @@ export const campaigns = {
   setContent: (id: number, version: number, content: Content) =>
     api<Campaign>(path(id, '/content'), { method: 'PUT', body: { version, content } }),
   estimate: (id: number) => api<Estimate>(path(id, '/estimate')),
+  recipients: (id: number, q: RecipientsQuery) => api<RecipientsPage>(recipientsPath(id, q)),
   // send is required: "now" or { at } (D29). Nothing is sent without it.
   approve: (id: number, version: number, send: 'now' | { at: string }) =>
     api<Campaign>(path(id, '/approve'), { method: 'POST', body: { version, send } }),
