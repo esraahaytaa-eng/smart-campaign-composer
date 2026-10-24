@@ -222,3 +222,40 @@ The first run found a 500 in recipient details: a finished campaign with no lang
 | P5 recipient details | p95 78.9 ms (T20: 51–73 ms) | no, back-to-back only, as before; each request now also reads version B's text for the over-limit detail (one more small query). One run, so the 6 ms over T20's last run isn't shown to be more than noise |
 | P6 live screens | 13 ms/s of database time, slowest update 1.13 s behind | yes |
 | P7 first load | 96.8 / 104.1 / 110.2 kB gzipped (sign-in / dashboard / list), about 0.3 kB more than T20 (the A/B text) | unchanged |
+
+## Audit remediation (D69), 2026-10-24
+
+Measured before and after each change, on the same schema and data. The queue numbers come from `BenchmarkQueue` (`internal/worker/queue_bench_test.go`): 3,000 customers, 60,000 finished messages of history, and a due backlog. It runs the worker's real database path per message: claim, two loads, complete (7 statements).
+
+| Queue | Before | After |
+|---|---|---|
+| Claim, 6,000 due (`EXPLAIN ANALYZE`) | 1.69 ms: Bitmap scan of 3,000 rows, then a sort | 0.056 ms: Index Scan, 1 row |
+| Claim, 30,000 due | 7.55 ms: 15,000 rows sorted | 0.057 ms |
+| One message at a time, 6,000 / 30,000 due | 4.73 / 8.92 ms | 3.68 / 3.65 ms |
+| 20 senders per channel, 6,000 / 30,000 due | 1,127 / 524 msgs/s | 1,481 / 1,523 msgs/s |
+
+The claim's cost no longer grows with the backlog. The database ceiling is about 7× the 200 msgs/s the two channels need. What remains per message are its 7 round trips; `Complete` alone is 4 (begin, attempt insert, update, commit). One statement could do it, but it isn't needed at this rate.
+
+Recipient details (`BenchmarkRecipients`, the old and new code on the same data, two runs each):
+
+| Case | Before | After | Statements |
+|---|---|---|---|
+| sent, first page | 23.1 ms | 8.8 ms | 9 → 6 |
+| sent, last page | 23.1 ms | 8.3 ms | 8 → 5 |
+| sent, name search | 26.3 ms | 22.2 ms | 9 → 7 |
+| failed (SMS) | 15.9 ms | 12.0 ms | 10 → 7 |
+| skipped, with detail | 17.7 ms | 14.2 ms | 10 → 9 |
+| status snapshot (unchanged) | 24.6 ms | 24.6 ms | — |
+
+The page statement went from 19.0 ms to 5.1 ms of execution (planning from 6.6 to 1.5 ms): it sorts on the stored `last_attempt_at` instead of looking up 5,100 attempts. An index on that column would save about 3 ms more but add a write to every result, so it was not added.
+
+`make perf` (the Go checks only; the frontend is unchanged), run twice. The first run's recipient fixture had no `last_attempt_at` and the host was busier (P4, whose code is unchanged, measured 97.7 ms). The second run is representative:
+
+| Target | Measured | Met |
+|---|---|---|
+| P1 full send | 4,191 messages: 95% at 24.2 s, all at 42.1 s | yes |
+| P2 rate | peaks 100 per channel | yes |
+| P3 10 marketers back to back | reads p95 51.2 ms, writes 24.7 ms, 31,278 requests (first run: 26,741), 0 server errors | yes |
+| P4 list search | p95 72.4 ms | yes |
+| P5 recipient details | p95 55.4 ms (T21: 78.9 ms) | no, back to back only, as before. The page statement now averages 8.9 ms under that load. The campaign list's three statements now use the most database time (about 200 s of the phase), so the next gain is there, not in recipient details |
+| P6 live screens | 13 ms/s of database time, slowest update 1.86 s behind | yes |
