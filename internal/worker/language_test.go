@@ -57,6 +57,39 @@ func TestBuild_NoMessagesForExcludedChannel(t *testing.T) {
 	}
 }
 
+// A resend fixes its recipients' languages from its own languages and their
+// current preference, not from the original's messages; it then sends that.
+func TestBuild_ResendResolvesItsOwnLanguages(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	p := &fakeProvider{}
+	w := f.newWorker(p.serve(t))
+	parent := f.approved(cartAbandoners, "{sms}", now)
+	f.exec(`UPDATE campaigns SET status = 'completed' WHERE id = $1`, parent)
+	f.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason, language) VALUES
+		($1, 1, 'sms', 'skipped', 'character_limit_exceeded', 'tr'), ($1, 2, 'sms', 'skipped', 'character_limit_exceeded', 'tr')`, parent)
+	f.exec(`UPDATE users SET language = 'en' WHERE id = 2`) // changed after the original was sent
+	var resend int64
+	f.pool.QueryRow(context.Background(), `INSERT INTO campaigns (request_text, channels, status, send_at, time_zone, created_by, parent_campaign_id)
+		VALUES ('brief', '{sms}', 'approved', $1, 'Europe/Istanbul', 1, $2) RETURNING id`, now, parent).Scan(&resend)
+	f.addLanguage(resend, "en") // the default
+	f.addLanguage(resend, "tr")
+	f.exec(`INSERT INTO campaign_content (campaign_id, channel, language, body) VALUES
+		($1, 'sms', 'en', 'Hi {{first_name}}'), ($1, 'sms', 'tr', 'Selam {{first_name}}')`, resend)
+
+	f.build(now)
+
+	if got := f.languages(resend); got != "1:sms:tr 2:sms:en" {
+		t.Fatalf("want each recipient's current language from the resend's own, got %s", got)
+	}
+	if err := w.Process(context.Background(), f.claimOne("sms", 2)); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sentBodies(p); got != "Hi B" {
+		t.Fatalf("want the resend's English text, got %s", got)
+	}
+}
+
 func (f *fixture) sentBodies(p *fakeProvider) string {
 	var b []string
 	for _, r := range p.requests {

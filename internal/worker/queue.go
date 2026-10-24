@@ -84,7 +84,8 @@ func (q *Queue) buildOne(ctx context.Context, now time.Time) (bool, error) {
 			return false, fmt.Errorf("campaign %d: audience: %w", id, err)
 		}
 		// Each recipient's language is fixed now (D64): their own if the
-		// campaign has it, else the default; retries and resends keep it.
+		// campaign has it, else the default. Retries reuse it; a resend is a
+		// campaign of its own and fixes its recipients' languages here too.
 		n := len(args)
 		tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO messages (campaign_id, user_id, channel, next_attempt_at, language)
 			SELECT $%d, u.id, $%d, $%d, CASE WHEN u.language = ANY($%d) THEN u.language ELSE $%d END FROM users u WHERE %s
