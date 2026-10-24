@@ -119,6 +119,9 @@ export const en = {
   'campaign.resendAudience': 'A resend goes to the recipients of the original campaign who were skipped because the {channel} was too long. Its audience and channel are fixed.',
   'campaign.next': { one: 'Next: the AI writes the {channels} message.', other: 'Next: the AI writes the {channels} messages.' },
   'campaign.generate': 'Write the messages →',
+  'campaign.writeWithAI': 'Write the messages with AI →',
+  'campaign.writeMyself': 'Write them myself →',
+  'campaign.pickLanguage': 'Tick at least one language for the AI to write.',
   'notice.channelsSaved': 'Channels saved.',
   'notice.channelTextKept': 'The {channels} text is kept, not sent. It comes back for your review if you add the channel again.',
   'notice.rulesSaved': 'Audience rules saved.',
@@ -141,6 +144,7 @@ export const en = {
   'audience.resendNote': 'The recipients of the original campaign who were skipped for the character limit, minus anyone who may already have it.',
   'audience.recalculated': 'The final audience is recalculated when sending starts.',
   'audience.byLanguage': 'By language',
+  'audience.languagesPick': 'Suggested from the audience: tick the languages to write. Anyone without text in their language gets the default.',
   'audience.languagesNote': 'A suggestion from the audience. You choose the languages on the content step; anyone without text in their language gets the default.',
 
   'rules.and': 'AND',

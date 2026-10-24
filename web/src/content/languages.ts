@@ -1,4 +1,4 @@
-import type { Catalog, Channel, Counts, Lang } from '../campaign/types'
+import type { Campaign, Catalog, Channel, Counts, Lang } from '../campaign/types'
 import { LEGACY } from '../campaign/types'
 import { t } from '../i18n'
 
@@ -46,4 +46,29 @@ export function startingDefault(saved: Lang | null | undefined, suggested: Lang 
 export function toWrite(tabs: Lang[], saved: Partial<Record<Lang, unknown>> | null | undefined): Lang[] {
   if (tabs.includes(LEGACY)) return []
   return tabs.filter((l) => !saved?.[l])
+}
+
+// One-step creation (D71): the languages chosen on the audience step, from
+// the URL: catalog codes only, once each, in catalog order.
+export function chosenLanguages(raw: unknown, catalog: Catalog['languages']): Lang[] {
+  if (typeof raw !== 'string') return []
+  const codes = raw.split(',')
+  return catalog.map((l) => l.code).filter((l) => codes.includes(l))
+}
+
+// Only a new draft with no text at all may have the AI write it first.
+export function writesFirst(c: Pick<Campaign, 'status' | 'content' | 'parent_campaign_id' | 'content_b'>): boolean {
+  return c.status === 'draft' && !c.parent_campaign_id && !Object.keys(c.content ?? {}).length && !Object.keys(c.content_b ?? {}).length
+}
+
+// What the content step writes by itself on arrival: nothing unless asked
+// with write=ai, for such a draft, with at least one chosen language.
+export function autoWrite(query: Record<string, unknown>, c: Parameters<typeof writesFirst>[0], catalog: Catalog['languages']): Lang[] {
+  if (query.write !== 'ai' || !writesFirst(c)) return []
+  return chosenLanguages(query.languages, catalog)
+}
+
+// The default among the chosen languages: the suggested one if chosen.
+export function chosenDefault(chosen: Lang[], suggested: Lang | undefined): Lang | undefined {
+  return !chosen.length || (suggested && chosen.includes(suggested)) ? suggested : chosen[0]
 }

@@ -7,8 +7,9 @@ import { campaigns, loadCatalog } from '../campaign/client'
 import { defaultForm, fromForm, ruleErrors, ruleKey, toForm, withoutRule, withRule, type RuleForm } from '../campaign/rules'
 import { createSaver } from '../campaign/saver'
 import { briefTitle } from '../campaign/title'
+import { writesFirst } from '../content/languages'
 import { outdatedLanguages } from '../content/stale'
-import type { Campaign, Catalog, Channel, FieldError, Rule } from '../campaign/types'
+import type { Campaign, Catalog, Channel, FieldError, Lang, Rule } from '../campaign/types'
 import AudiencePanel from '../components/AudiencePanel.vue'
 import ChannelPicker from '../components/ChannelPicker.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -53,6 +54,24 @@ const id = Number(route.params.id)
 const isDraft = computed(() => campaign.value?.status === 'draft')
 const isResend = computed(() => campaign.value?.parent_campaign_id != null)
 const locked = computed(() => saver.state.value === 'conflict')
+
+// One-step creation (D71): a new draft's languages are ticked here, the
+// suggestion until the marketer changes it; only languages its audience speaks.
+const firstWrite = computed(() => !!campaign.value && writesFirst(campaign.value))
+const picked = ref<Lang[] | null>(null)
+const chosen = computed(() =>
+  (picked.value ?? campaign.value?.recommendation?.languages ?? []).filter((l) => (campaign.value?.counts?.by_language?.[l]?.total ?? 0) > 0),
+)
+function pick(l: Lang, on: boolean) {
+  const codes = catalog.value?.languages.map((c) => c.code) ?? []
+  picked.value = codes.filter((c) => (c === l ? on : chosen.value.includes(c)))
+}
+// write=ai asks the content step to start the AI once; it removes it from the URL.
+const contentLink = (ai: boolean) => ({
+  name: 'campaign-content',
+  params: { id },
+  query: { languages: chosen.value.join(','), ...(ai ? { write: 'ai' } : {}) },
+})
 
 async function load() {
   loadError.value = null
@@ -321,6 +340,8 @@ function reload() {
               :resend="isResend"
               :languages="catalog.languages"
               :recommended="campaign.recommendation?.languages"
+              :selected="firstWrite ? chosen : undefined"
+              @toggle="pick"
             />
           </aside>
         </div>
@@ -328,7 +349,14 @@ function reload() {
         <div class="footer">
           <span class="help">{{ t('campaign.next', { channels: channelList(campaign.channels), count: campaign.channels.length }) }}</span>
           <span class="next">
-            <RouterLink :to="{ name: 'campaign-content', params: { id } }" class="btn btn-primary btn-lg">{{ t('campaign.generate') }}</RouterLink>
+            <template v-if="firstWrite">
+              <button type="button" class="btn btn-primary btn-lg" :aria-disabled="!chosen.length" @click="chosen.length && router.push(contentLink(true))">
+                {{ t('campaign.writeWithAI') }}
+              </button>
+              <span v-if="!chosen.length" class="help" role="status">{{ t('campaign.pickLanguage') }}</span>
+              <RouterLink :to="contentLink(false)" class="btn btn-lg">{{ t('campaign.writeMyself') }}</RouterLink>
+            </template>
+            <RouterLink v-else :to="{ name: 'campaign-content', params: { id } }" class="btn btn-primary btn-lg">{{ t('campaign.generate') }}</RouterLink>
           </span>
         </div>
       </template>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { audienceByLanguage, languageName, orderLanguages, startingDefault, toWrite } from './languages'
+import { audienceByLanguage, autoWrite, chosenDefault, chosenLanguages, languageName, orderLanguages, startingDefault, toWrite, writesFirst } from './languages'
 
 const catalog = [
   { code: 'tr', name: 'Türkçe' },
@@ -78,5 +78,55 @@ describe('toWrite', () => {
 
   it('writes nothing until legacy text has its language set (D64)', () => {
     expect(toWrite(['und', 'en'], { und: {} })).toEqual([])
+  })
+})
+
+// One-step creation (D71): the audience step's choice, carried in the URL.
+describe('chosenLanguages', () => {
+  it('keeps catalog codes once, in catalog order', () => {
+    expect(chosenLanguages('en,tr,en', catalog)).toEqual(['tr', 'en'])
+  })
+
+  it('drops unknown codes, legacy text and anything not a single string', () => {
+    expect(chosenLanguages('xx,und,,en', catalog)).toEqual(['en'])
+    expect(chosenLanguages(['tr'], catalog)).toEqual([])
+    expect(chosenLanguages(undefined, catalog)).toEqual([])
+  })
+})
+
+describe('writesFirst', () => {
+  const draft = { status: 'draft', content: null, parent_campaign_id: null } as const
+  it('is a new draft without text', () => {
+    expect(writesFirst(draft)).toBe(true)
+  })
+
+  it('never for saved text, version B text, a resend or a non-draft', () => {
+    expect(writesFirst({ ...draft, content: { tr: { sms: { body: 'x' } } } })).toBe(false)
+    expect(writesFirst({ ...draft, content_b: { tr: { sms: { body: 'x' } } } })).toBe(false)
+    expect(writesFirst({ ...draft, parent_campaign_id: 7 })).toBe(false)
+    expect(writesFirst({ ...draft, status: 'approved' })).toBe(false)
+  })
+})
+
+describe('autoWrite', () => {
+  const draft = { status: 'draft', content: null, parent_campaign_id: null } as const
+  it('writes the chosen languages when asked', () => {
+    expect(autoWrite({ write: 'ai', languages: 'en,tr' }, draft, catalog)).toEqual(['tr', 'en'])
+  })
+
+  it('never without the signal, without languages, or with text already there', () => {
+    expect(autoWrite({ languages: 'tr' }, draft, catalog)).toEqual([])
+    expect(autoWrite({ write: 'yes', languages: 'tr' }, draft, catalog)).toEqual([])
+    expect(autoWrite({ write: 'ai', languages: 'xx' }, draft, catalog)).toEqual([])
+    expect(autoWrite({ write: 'ai', languages: 'tr' }, { ...draft, content: { tr: { sms: { body: 'x' } } } }, catalog)).toEqual([])
+    expect(autoWrite({ write: 'ai', languages: 'tr' }, { ...draft, parent_campaign_id: 7 }, catalog)).toEqual([])
+  })
+})
+
+describe('chosenDefault', () => {
+  it('keeps the suggested default if chosen, else the first chosen', () => {
+    expect(chosenDefault(['tr', 'en'], 'tr')).toBe('tr')
+    expect(chosenDefault(['en'], 'tr')).toBe('en')
+    expect(chosenDefault([], 'tr')).toBe('tr')
   })
 })
