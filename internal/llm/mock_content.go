@@ -3,29 +3,25 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"regexp"
 	"slices"
 	"time"
 )
-
-// turkish detects a Turkish brief by its letters or common words (D32).
-var turkish = regexp.MustCompile(`(?i)[çğıöşüÇĞİÖŞÜ]|\b(?:gonder|sepet|yarin|indirim|kampanya)\b`)
 
 type mockMessage struct {
 	Subject string `json:"subject,omitempty"`
 	Body    string `json:"body"`
 }
 
-// mockTexts are the mock's fixed templates per language.
+// mockTexts are the mock's fixed templates per catalog language.
 type mockText struct{ sms, subject, body string }
 
-var mockTexts = map[bool]mockText{
-	true: { // Turkish
+var mockTexts = map[string]mockText{
+	"tr": {
 		sms:     "Merhaba {{first_name}}! Sana özel bir fırsat seni bekliyor. Kaçırmadan hemen göz at!",
 		subject: "{{first_name}}, sana özel bir fırsat var",
 		body:    "Merhaba {{first_name}},\n\n{{city}} için hazırladığımız özel fırsatı kaçırma!\n\nSevgiler,\nSmart Campaign Composer",
 	},
-	false: {
+	"en": {
 		sms:     "Hi {{first_name}}! A special offer is waiting for you. Take a look before it's gone!",
 		subject: "{{first_name}}, a special offer is waiting for you",
 		body:    "Hi {{first_name}},\n\nWe have prepared a special offer for you in {{city}}. Don't miss it!\n\nBest regards,\nSmart Campaign Composer",
@@ -33,26 +29,28 @@ var mockTexts = map[bool]mockText{
 }
 
 // mockResendTexts are shorter, for recipients the first text was too long for (D31).
-var mockResendTexts = map[bool]mockText{
-	true:  {sms: "{{first_name}}, fırsatın seni bekliyor!", subject: "Fırsatın seni bekliyor"},
-	false: {sms: "{{first_name}}, your offer is waiting!", subject: "Your offer is waiting"},
+var mockResendTexts = map[string]mockText{
+	"tr": {sms: "{{first_name}}, fırsatın seni bekliyor!", subject: "Fırsatın seni bekliyor"},
+	"en": {sms: "{{first_name}}, your offer is waiting!", subject: "Your offer is waiting"},
 }
 
-// StreamContent returns fixed, valid templates in the brief's language and
+// StreamContent returns fixed, valid templates in each selected language and
 // streams them in small chunks, ChunkDelay apart, like a real model would.
 func (m *Mock) StreamContent(ctx context.Context, in ContentInput, onText func(string)) (json.RawMessage, error) {
-	isTurkish := turkish.MatchString(in.Text)
-	texts := mockTexts[isTurkish]
-	if in.Resend {
-		short := mockResendTexts[isTurkish]
-		texts.sms, texts.subject = short.sms, short.subject
-	}
-	out := map[string]mockMessage{}
-	if slices.Contains(in.Channels, "sms") {
-		out["sms"] = mockMessage{Body: texts.sms}
-	}
-	if slices.Contains(in.Channels, "email") {
-		out["email"] = mockMessage{Subject: texts.subject, Body: texts.body}
+	out := map[string]map[string]mockMessage{}
+	for _, lang := range in.Languages {
+		texts := mockTexts[lang]
+		if in.Resend {
+			short := mockResendTexts[lang]
+			texts.sms, texts.subject = short.sms, short.subject
+		}
+		out[lang] = map[string]mockMessage{}
+		if slices.Contains(in.Channels, "sms") {
+			out[lang]["sms"] = mockMessage{Body: texts.sms}
+		}
+		if slices.Contains(in.Channels, "email") {
+			out[lang]["email"] = mockMessage{Subject: texts.subject, Body: texts.body}
+		}
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {

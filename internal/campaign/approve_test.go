@@ -323,7 +323,7 @@ func TestResend_Conflicts(t *testing.T) {
 
 func TestGenerate_ResendAsksForShorterContent(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{`{"sms":{"body":"Merhaba {{first_name}}!"}}`, validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", `{"sms":{"body":"Merhaba {{first_name}}!"}}`), aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	parent := a.parentWithSkips()
 	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(parent)+"/resend", `{"channel":"sms"}`)

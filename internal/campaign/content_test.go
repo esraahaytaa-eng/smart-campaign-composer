@@ -47,6 +47,9 @@ const (
 	invalidContent = `{"sms":{"body":"Hi {{email}}"},"email":{"subject":"S","body":"B"}}`
 )
 
+// aiAnswer is the model's answer: content keyed by language (D64).
+func aiAnswer(lang, content string) string { return `{"` + lang + `":` + content + `}` }
+
 type event struct {
 	Name string
 	Data map[string]any
@@ -107,7 +110,7 @@ func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
 	done := evs[len(evs)-1].Data
 	c := done["content"].(map[string]any)["tr"].(map[string]any)
 	sms, email := c["sms"].(map[string]any), c["email"].(map[string]any)
-	if streamed["sms.body"] != sms["body"] || streamed["email.subject"] != email["subject"] || streamed["email.body"] != email["body"] {
+	if streamed["tr.sms.body"] != sms["body"] || streamed["tr.email.subject"] != email["subject"] || streamed["tr.email.body"] != email["body"] {
 		t.Fatalf("deltas do not add up to the saved content:\n%q\n%v", streamed, c)
 	}
 	if done["version"] != float64(2) || a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1`, d.ID) != 2 {
@@ -122,7 +125,7 @@ func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
 
 func TestGenerate_InvalidThenValid_RetryThenDone(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	d := a.newDraft()
 
@@ -131,7 +134,7 @@ func TestGenerate_InvalidThenValid_RetryThenDone(t *testing.T) {
 	if got := names(evs); got != "delta,retry,delta,done" {
 		t.Fatalf("want delta,retry,delta,done, got %s", got)
 	}
-	if len(model.calls) != 2 || !strings.Contains(strings.Join(model.calls[1].Errors, ";"), "sms.body") {
+	if len(model.calls) != 2 || !strings.Contains(strings.Join(model.calls[1].Errors, ";"), "tr.sms.body") {
 		t.Fatalf("the retry must carry the validation errors, got %+v", model.calls)
 	}
 	if a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1 AND body LIKE '%sepetin%'`, d.ID) != 1 {
@@ -151,7 +154,7 @@ func (a *app) unchanged(id int64) {
 
 func TestGenerate_InvalidTwice_ErrorNothingSaved(t *testing.T) {
 	t.Parallel()
-	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, invalidContent}})
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", invalidContent)}})
 	d := a.newDraft()
 
 	evs := a.generate(d.ID, 1)
@@ -185,7 +188,7 @@ func TestGenerate_AIFailure_ErrorNothingSaved(t *testing.T) {
 func TestGenerate_ClientDisconnect_NothingSaved(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
-	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{validContent}, between: cancel})
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", validContent)}, between: cancel})
 	d := a.newDraft()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", strings.NewReader(`{"version":1,"languages":["tr"]}`)).WithContext(ctx)
@@ -257,7 +260,7 @@ func TestUpdateContent(t *testing.T) {
 
 func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	d := a.newDraft()
 
@@ -274,7 +277,7 @@ func TestGenerate_RecordsCallMetrics(t *testing.T) {
 	}
 	ok, invalid, failed := value("ok"), value("invalid"), value("error")
 
-	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}})
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}})
 	a.generate(a.newDraft().ID, 1)
 	b := newApp(t, &contentLLM{Mock: llm.NewMock(), err: errors.New("503 overloaded")})
 	b.generate(b.newDraft().ID, 1)

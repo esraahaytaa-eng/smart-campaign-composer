@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,42 +22,69 @@ import (
 
 var errStale = errors.New("the campaign changed since you loaded it; reload and try again")
 
-// generateContent streams AI-written content as server-sent events (D21,
-// D34): "delta" {field, text} while the model writes, "retry" {errors} when
-// the first answer is invalid, then "done" {content, version} or "error"
-// {message}. Only a valid answer is saved, and only while the client is
-// still connected (D15).
+// generateContent streams AI-written content for the selected languages as
+// server-sent events (D21, D34): "delta" {field, text} while the model
+// writes ("en.sms.body"), "retry" {errors} when the first answer is invalid,
+// then "done" {content, version} or "error" {message}. Only a valid answer
+// is saved, and only while the client is still connected (D15). It writes
+// only the selected languages and keeps the others as they are; a language
+// that already has text is rewritten only with replace (D66).
 func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	var in struct {
-		Version   *int           `json:"version"`
-		Languages []content.Lang `json:"languages"`
+		Version         *int           `json:"version"`
+		Languages       []content.Lang `json:"languages"`
+		DefaultLanguage content.Lang   `json:"default_language"` // optional: the default to set
+		Replace         bool           `json:"replace"`          // rewrite languages that have text
 	}
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
 		return
 	}
-	// shortcut: one language per call until the AI writes several in one (T20 Task 5).
-	if len(in.Languages) != 1 || !content.IsLanguage(in.Languages[0]) {
-		writeError(w, http.StatusUnprocessableEntity, "choose one supported language to write")
+	if msg := checkLanguages(in.Languages); msg != "" {
+		writeError(w, http.StatusUnprocessableEntity, msg)
 		return
 	}
-	lang := in.Languages[0]
 	var brief string
 	var channels []string
 	var version int
 	var isResend bool
 	var def *string
-	if err := h.Pool.QueryRow(r.Context(), `SELECT request_text, channels, version, parent_campaign_id IS NOT NULL, default_language
-		FROM campaigns WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend, &def); err != nil {
+	var written []content.Lang
+	if err := h.Pool.QueryRow(r.Context(), `SELECT request_text, channels, version, parent_campaign_id IS NOT NULL, default_language,
+			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id)
+		FROM campaigns c WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend, &def, &written); err != nil {
 		serverError(w, "load campaign", err)
 		return
 	}
 	if version != *in.Version {
 		writeError(w, http.StatusConflict, errStale.Error())
 		return
+	}
+	// Checked before any AI call, so a refusal costs nothing (D63).
+	if !in.Replace {
+		var existing []string
+		for _, l := range in.Languages {
+			if slices.Contains(written, l) {
+				existing = append(existing, content.LanguageName(l))
+			}
+		}
+		if len(existing) > 0 {
+			writeError(w, http.StatusConflict, "this would replace the existing text in "+strings.Join(existing, ", ")+"; confirm to replace it")
+			return
+		}
+	}
+	switch {
+	case in.DefaultLanguage != "":
+		if !slices.Contains(in.Languages, in.DefaultLanguage) && !slices.Contains(written, in.DefaultLanguage) {
+			writeError(w, http.StatusUnprocessableEntity, "the default language must be one of the campaign's languages")
+			return
+		}
+		def = &in.DefaultLanguage
+	case def == nil:
+		def = &in.Languages[0] // until the marketer picks another
 	}
 
 	// The stream can't answer 429 once started, so the limit is checked first (D63).
@@ -68,17 +96,23 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	}
 	send := startSSE(w)
 
-	input := llm.ContentInput{Text: brief, Channels: channels, Resend: isResend}
+	input := llm.ContentInput{Text: brief, Channels: channels, Languages: in.Languages, Resend: isResend}
+	var fields []string
+	for _, l := range in.Languages {
+		for _, f := range contentFields {
+			fields = append(fields, l+"."+f)
+		}
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(r.Context(), h.Timeout)
-		streamer := llm.NewFieldStreamer(contentFields, func(d llm.Delta) { send("delta", d) })
+		streamer := llm.NewFieldStreamer(fields, func(d llm.Delta) { send("delta", d) })
 		raw, err := h.model().StreamContent(ctx, input, streamer.Write)
 		cancel()
 		if r.Context().Err() != nil {
 			llmCalls.WithLabelValues("content", "cancelled").Inc()
 			return // the client left: nothing is saved
 		}
-		var c content.Content
+		var v content.Variants
 		var problems []string
 		switch {
 		case errors.Is(err, llm.ErrTruncated):
@@ -88,7 +122,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			send("error", map[string]string{"message": aiErrorMessage(err)})
 			return
 		default:
-			c, problems = parseContent(raw, channels)
+			v, problems = parseContent(raw, channels, in.Languages)
 		}
 		if len(problems) > 0 {
 			llmCalls.WithLabelValues("content", "invalid").Inc()
@@ -102,11 +136,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		llmCalls.WithLabelValues("content", "ok").Inc()
-		if def == nil {
-			def = &lang // the first language written is the default until the marketer picks another
-		}
-		v := content.Variants{lang: c}
-		newVersion, err := h.saveContent(r.Context(), id, *in.Version, v, *def, false)
+		newVersion, err := h.saveContent(r.Context(), id, *in.Version, v, *def, true)
 		switch {
 		case r.Context().Err() != nil:
 			return
@@ -124,22 +154,60 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 
 var contentFields = []string{"sms.body", "email.subject", "email.body"}
 
-// parseContent decodes the model's answer strictly and validates it (T7).
-func parseContent(raw json.RawMessage, channels []string) (content.Content, []string) {
-	var c content.Content
+// checkLanguages accepts one or more distinct catalog languages; the legacy
+// label is never written by the AI (D64).
+func checkLanguages(langs []content.Lang) string {
+	if len(langs) == 0 {
+		return "choose at least one language to write"
+	}
+	for i, l := range langs {
+		if !content.IsLanguage(l) {
+			return "unsupported language: " + l
+		}
+		if slices.Contains(langs[:i], l) {
+			return "a language is listed twice: " + l
+		}
+	}
+	return ""
+}
+
+// parseContent decodes the model's answer strictly and validates it (T7):
+// exactly the requested languages, each complete for the chosen channels.
+func parseContent(raw json.RawMessage, channels []string, langs []content.Lang) (content.Variants, []string) {
+	var answer map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
-		return c, []string{"answer is not valid JSON for the schema: " + err.Error()}
+	if err := dec.Decode(&answer); err != nil {
+		return nil, []string{"answer is not valid JSON for the schema: " + err.Error()}
 	}
 	if dec.Decode(&struct{}{}) != io.EOF {
-		return c, []string{"answer has data after the JSON object"}
+		return nil, []string{"answer has data after the JSON object"}
 	}
 	var problems []string
-	for _, e := range content.ValidateDraft(c, channels) {
-		problems = append(problems, e.Field+": "+e.Message)
+	v := content.Variants{}
+	for key, msg := range answer {
+		if !slices.Contains(langs, key) {
+			problems = append(problems, key+": a language that was not asked for")
+			continue
+		}
+		var c content.Content
+		dec := json.NewDecoder(bytes.NewReader(msg))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&c); err != nil {
+			problems = append(problems, key+": not valid JSON for the schema: "+err.Error())
+			continue
+		}
+		for _, e := range content.ValidateDraft(c, channels) {
+			problems = append(problems, key+"."+e.Field+": "+e.Message)
+		}
+		v[key] = c
 	}
-	return c, problems
+	for _, l := range langs {
+		if _, ok := answer[l]; !ok {
+			problems = append(problems, l+": the version in this language is missing")
+		}
+	}
+	slices.Sort(problems)
+	return v, problems
 }
 
 func aiErrorMessage(err error) string {
@@ -188,7 +256,7 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}
-	_, err := h.saveContent(r.Context(), id, *in.Version, in.Content, in.DefaultLanguage, true)
+	_, err := h.saveContent(r.Context(), id, *in.Version, in.Content, in.DefaultLanguage, false)
 	if errors.Is(err, errStale) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -202,10 +270,14 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 
 // saveContent writes the text of the given languages for the chosen channels
 // if the draft still has the expected version, and returns the new version.
-// With all set, languages not given are removed. Text of channels that aren't
-// chosen is kept as it is (D67). A language whose text changed needs review
-// again; one saved unchanged keeps its approval (D66).
-func (h *Handler) saveContent(ctx context.Context, id int64, version int, v content.Variants, def content.Lang, all bool) (int, error) {
+// Text of channels that aren't chosen is kept as it is (D67).
+//   - Hand edits (generated false) replace the whole set: languages not given
+//     are removed, and a language whose text changed needs review again,
+//     while one saved unchanged keeps its approval (D66).
+//   - AI text (generated true) is merged: other languages stay exactly as
+//     they were, and each written language needs review, now for the
+//     current brief.
+func (h *Handler) saveContent(ctx context.Context, id int64, version int, v content.Variants, def content.Lang, generated bool) (int, error) {
 	tx, err := h.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -222,7 +294,7 @@ func (h *Handler) saveContent(ctx context.Context, id int64, version int, v cont
 	if err != nil {
 		return 0, err
 	}
-	if all {
+	if !generated {
 		if _, err := tx.Exec(ctx, `DELETE FROM campaign_languages WHERE campaign_id = $1 AND NOT language = ANY($2)`,
 			id, slices.Collect(maps.Keys(v))); err != nil {
 			return 0, err
@@ -250,7 +322,12 @@ func (h *Handler) saveContent(ctx context.Context, id int64, version int, v cont
 			}
 			changed = changed || tag.RowsAffected() > 0
 		}
-		if changed {
+		if generated {
+			if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL, outdated = false
+				WHERE campaign_id = $1 AND language = $2`, id, lang); err != nil {
+				return 0, err
+			}
+		} else if changed {
 			if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL
 				WHERE campaign_id = $1 AND language = $2`, id, lang); err != nil {
 				return 0, err
