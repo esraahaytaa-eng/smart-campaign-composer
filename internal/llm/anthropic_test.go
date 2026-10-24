@@ -486,6 +486,16 @@ func TestContentPrompt(t *testing.T) {
 	}
 }
 
+// D72: the AI greets each recipient by name, naturally, and never labels
+// recipients by their segment or leans on last names that may be missing.
+func TestContentSystemPrompt_Personalization(t *testing.T) {
+	for _, want := range []string{"Merhaba {{first_name}},", "Hi {{first_name}},", "never as a label", "loyal customers", "Do not use {{last_name}}", `reads "Hi,"`} {
+		if !strings.Contains(contentSystemPrompt, want) {
+			t.Errorf("system prompt is missing %q", want)
+		}
+	}
+}
+
 // One closed object per selected language, each with the chosen channels only.
 func TestContentSchema_PerLanguage(t *testing.T) {
 	schema := contentSchema([]string{"email"}, []string{"tr", "en"})

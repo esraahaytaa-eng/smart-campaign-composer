@@ -199,6 +199,19 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// greetsByName asks the AI's SMS and email body to address the recipient
+// with {{first_name}} (D72). Only AI text: the marketer's own text is free.
+func greetsByName(lang content.Lang, c content.Content) []string {
+	var problems []string
+	for field, m := range map[string]*content.Message{"sms.body": c.SMS, "email.body": c.Email} {
+		if m != nil && !strings.Contains(m.Body, "{{"+string(content.FirstName)+"}}") {
+			problems = append(problems, lang+"."+field+": greet the recipient by name with {{first_name}}")
+		}
+	}
+	slices.Sort(problems)
+	return problems
+}
+
 var contentFields = []string{"sms.body", "email.subject", "email.body"}
 
 // checkLanguages accepts one or more distinct catalog languages; the legacy
@@ -246,6 +259,7 @@ func parseContent(raw json.RawMessage, channels []string, langs []content.Lang) 
 		for _, e := range content.ValidateDraft(c, channels) {
 			problems = append(problems, key+"."+e.Field+": "+e.Message)
 		}
+		problems = append(problems, greetsByName(key, c)...)
 		v[key] = c
 	}
 	for _, l := range langs {
