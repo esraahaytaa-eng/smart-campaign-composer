@@ -97,7 +97,7 @@ Comparisons: "at least", "or more", "minimum" are gte; "at most", "or less", "ma
 
 Each field and operator pair may appear at most once (one city rule listing several cities; never two ordered_category rules). If the brief needs the same pair twice with different values, the audience is unsupported.
 
-A window is {"last_days": N} (1-365, counted back from when the campaign is sent), {"last_months": N} (1-12 calendar months, counted back from when the campaign is sent) or {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD" or null} in the campaign's time zone. Use from/to when the brief names a date or a cutoff ("since 1 October", "Black Friday 24-28 November"), last_months when it counts in months ("in the last 12 months"), otherwise last_days.
+A window has "last_days", "last_months", "from" and "to"; set exactly one form and the other keys to null: "last_days": N (1-365, counted back from when the campaign is sent), "last_months": N (1-12 calendar months, counted back from when the campaign is sent), or "from": "YYYY-MM-DD" with "to": "YYYY-MM-DD" or null, in the campaign's time zone. Use from/to when the brief names a date or a cutoff ("since 1 October", "Black Friday 24-28 November"), last_months when it counts in months ("in the last 12 months"), otherwise last_days.
 
 Never guess. If any part of the requested audience cannot be expressed exactly with these rules (an attribute that is not listed such as age, gender or interests, an OR between conditions, an unknown city or category, an unclear time span), set "unsupported" to true, explain briefly in "reason" what cannot be expressed, and return no rules. Do not drop, approximate, broaden or add conditions. Off-topic or harmful requests are also unsupported.
 
@@ -116,17 +116,13 @@ var (
 	countWin    = withWindow(map[string]any{"count": integer})
 )
 
-// withWindow is the three window forms, each with the extra properties.
+// withWindow is a window plus the extra properties: one object whose unused
+// forms are null (validation requires exactly one). A choice of shapes per
+// window made the compiled grammar too large for the API.
 func withWindow(extra map[string]any) map[string]any {
-	form := func(props map[string]any) map[string]any {
-		maps.Copy(props, extra)
-		return object(props)
-	}
-	return map[string]any{"anyOf": []any{
-		form(map[string]any{"last_days": integer}),
-		form(map[string]any{"last_months": integer}),
-		form(map[string]any{"from": dateSchema, "to": nullable(dateSchema)}),
-	}}
+	props := map[string]any{"last_days": nullable(integer), "last_months": nullable(integer), "from": nullable(dateSchema), "to": nullable(dateSchema)}
+	maps.Copy(props, extra)
+	return object(props)
 }
 
 // interpretSchema constrains Claude's answer. Cities and categories stay free

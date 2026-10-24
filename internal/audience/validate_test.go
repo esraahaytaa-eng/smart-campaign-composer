@@ -44,6 +44,8 @@ func TestValidate_AcceptsEveryCatalogRule(t *testing.T) {
 		rule("spend_in_window", "lte", `{"amount": 500.5, "from": "2026-01-01", "to": "2026-06-30"}`),
 		rule("orders_in_window", "gte", `{"count": 4, "last_days": 365}`),
 		rule("orders_in_window", "lt", `{"count": 2, "last_months": 1}`),
+		// The AI's schema sends every window form, the unused ones null.
+		rule("no_order", "within", `{"last_days": 45, "last_months": null, "from": null, "to": null}`),
 	}
 
 	for _, part := range [][]audience.Rule{rules[:13], rules[13:]} { // at most 20 rules per audience

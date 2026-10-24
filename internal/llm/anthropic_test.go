@@ -131,6 +131,23 @@ func TestInterpretPrompt_ContainsContextNotUserData(t *testing.T) {
 	}
 }
 
+// A window is one object with nullable forms, not a choice of shapes: the
+// alternatives multiply across rules, and the API refused the compiled
+// grammar as too large (400, 2026-10-24).
+func TestInterpretSchema_WindowIsOneObject(t *testing.T) {
+	for name, w := range map[string]map[string]any{"window": window, "categories": categoryWin, "amount": amountWin, "count": countWin} {
+		props, _ := w["properties"].(map[string]any)
+		if w["type"] != "object" || w["anyOf"] != nil || len(props) < 4 {
+			t.Errorf("%s: want one object with last_days, last_months, from and to, got %v", name, w)
+		}
+	}
+	for _, key := range []string{"last_days", "last_months", "from", "to"} {
+		if _, ok := window["properties"].(map[string]any)[key]; !ok {
+			t.Errorf("window lacks %s", key)
+		}
+	}
+}
+
 // The answer schema offers every catalog field and operator (D70), and only those.
 func TestInterpretSchema_CoversCatalog(t *testing.T) {
 	b, _ := json.Marshal(interpretSchema["properties"].(map[string]any)["rules"])
