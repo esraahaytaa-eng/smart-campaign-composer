@@ -355,6 +355,31 @@ func TestRun_RateLimitNoWindowOver100(t *testing.T) {
 	}
 }
 
+// A worker that died mid-attempt leaves its message "sending"; the running
+// worker takes it back once the lease expires, flagged uncertain, and sends it.
+func TestRun_ReclaimsExpiredLease(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	f.exec(`UPDATE messages SET status = 'sending', lease_token = gen_random_uuid(), lease_expires_at = $1, attempt_count = 1`, time.Now().Add(-time.Second))
+	p := &fakeProvider{}
+	w := f.newWorker(p.serve(t))
+	w.Now, w.Poll = time.Now, 20*time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- w.Run(ctx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for f.count(`SELECT count(*) FROM messages WHERE status <> 'sent' OR NOT delivery_uncertain`) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the expired leases were not reclaimed and sent")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}
+
 // mostInOneSecond is the largest number of times in any 1 s window.
 func mostInOneSecond(times []time.Time) int {
 	slices.SortFunc(times, func(a, b time.Time) int { return a.Compare(b) })

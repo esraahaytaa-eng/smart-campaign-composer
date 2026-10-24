@@ -313,6 +313,16 @@ func TestClaim_ExpiredLeaseIsReclaimedAndStaleCompleteIsRefused(t *testing.T) {
 	if again, _ := f.q.Claim(ctx, "email", 1, now.Add(29*time.Second), 30*time.Second); len(again) != 0 {
 		t.Fatal("a leased message must not be claimed again before the lease expires")
 	}
+	// A claim takes only due messages; expired leases come back through ReclaimExpired.
+	if early, _ := f.q.Claim(ctx, "email", 1, now.Add(31*time.Second), 30*time.Second); len(early) != 0 {
+		t.Fatal("a claim must not take an expired lease itself")
+	}
+	if n, err := f.q.ReclaimExpired(ctx, now.Add(29*time.Second)); err != nil || n != 0 {
+		t.Fatalf("a live lease is not reclaimed, got %d, %v", n, err)
+	}
+	if n, err := f.q.ReclaimExpired(ctx, now.Add(31*time.Second)); err != nil || n != 1 {
+		t.Fatalf("want the expired lease reclaimed, got %d, %v", n, err)
+	}
 	reclaimed, _ := f.q.Claim(ctx, "email", 1, now.Add(31*time.Second), 30*time.Second)
 
 	if len(first) != 1 || len(reclaimed) != 1 || reclaimed[0].MessageID != first[0].MessageID ||
@@ -438,7 +448,7 @@ func TestBuildAudience_ResendSkipsUncertainDeliveries(t *testing.T) {
 	}
 }
 
-func TestClaim_ExpiredLeaseMarksDeliveryUncertain(t *testing.T) {
+func TestReclaimExpired_MarksDeliveryUncertain(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	f.sending()
@@ -448,7 +458,7 @@ func TestClaim_ExpiredLeaseMarksDeliveryUncertain(t *testing.T) {
 		t.Fatal("a first claim is not uncertain")
 	}
 
-	f.q.Claim(ctx, "sms", 1, now.Add(31*time.Second), 30*time.Second) // reclaim: the first worker may have sent it
+	f.q.ReclaimExpired(ctx, now.Add(31*time.Second)) // the first worker may have sent it
 
 	if f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, first[0].MessageID) != "true" {
 		t.Fatal("reclaiming an expired lease must mark the delivery uncertain")

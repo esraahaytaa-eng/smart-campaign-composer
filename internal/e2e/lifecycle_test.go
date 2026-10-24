@@ -172,6 +172,9 @@ func (l *life) claim(messageID int64, at time.Time) worker.Job {
 	l.t.Helper()
 	// Claim everything due on the channel at once, keep the wanted message and
 	// put the others back exactly as they were.
+	if _, err := l.q.ReclaimExpired(context.Background(), at); err != nil {
+		l.t.Fatal(err)
+	}
 	jobs, err := l.q.Claim(context.Background(), l.str(`SELECT channel FROM messages WHERE id = $1`, messageID), 1000, at, 30*time.Second)
 	if err != nil {
 		l.t.Fatal(err)

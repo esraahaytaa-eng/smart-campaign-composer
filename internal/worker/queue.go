@@ -131,17 +131,13 @@ type Job struct {
 	LeaseToken string
 }
 
-// Claim leases up to n messages of a channel that are due: pending or
-// waiting for a retry whose time has come, or still "sending" under an
-// expired lease. That last case means a worker died mid-attempt, so the
-// message may have been delivered: it is marked uncertain (D5 history).
+// Claim leases up to n due messages of a channel: pending, or waiting for a
+// retry whose time has come. Expired leases come back through ReclaimExpired.
 func (q *Queue) Claim(ctx context.Context, channel string, n int, now time.Time, lease time.Duration) ([]Job, error) {
 	rows, _ := q.Pool.Query(ctx, `UPDATE messages SET status = 'sending', lease_token = gen_random_uuid(),
-			lease_expires_at = $3, attempt_count = attempt_count + 1, updated_at = now(),
-			delivery_uncertain = delivery_uncertain OR status = 'sending'
+			lease_expires_at = $3, attempt_count = attempt_count + 1, updated_at = now()
 		WHERE id IN (SELECT id FROM messages WHERE channel = $1
-				AND ((status IN ('pending', 'retry_scheduled') AND next_attempt_at <= $2)
-					OR (status = 'sending' AND lease_expires_at < $2))
+				AND status IN ('pending', 'retry_scheduled') AND next_attempt_at <= $2
 			ORDER BY next_attempt_at, id LIMIT $4 FOR UPDATE SKIP LOCKED)
 		RETURNING id, campaign_id, user_id, channel, attempt_count, lease_token::text`, channel, now, now.Add(lease), n)
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Job, error) {
@@ -149,6 +145,17 @@ func (q *Queue) Claim(ctx context.Context, channel string, n int, now time.Time,
 		err := r.Scan(&j.MessageID, &j.CampaignID, &j.UserID, &j.Channel, &j.Attempt, &j.LeaseToken)
 		return j, err
 	})
+}
+
+// ReclaimExpired hands back messages still "sending" under an expired lease,
+// due at once. A worker died mid-attempt, so the message may have been
+// delivered: it is marked uncertain (D5 history). Clearing the lease makes a
+// late Complete from that worker a lost lease. It returns how many it took back.
+func (q *Queue) ReclaimExpired(ctx context.Context, now time.Time) (int, error) {
+	tag, err := q.Pool.Exec(ctx, `UPDATE messages SET status = 'retry_scheduled', next_attempt_at = $1,
+			delivery_uncertain = true, lease_token = NULL, lease_expires_at = NULL, updated_at = now()
+		WHERE status = 'sending' AND lease_expires_at < $1`, now)
+	return int(tag.RowsAffected()), err
 }
 
 // Attempt is one provider request, recorded for retry and 429 counts (D16).

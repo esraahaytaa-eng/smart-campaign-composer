@@ -137,8 +137,8 @@ func (w *Worker) defaults() {
 }
 
 // Run starts due campaigns, sends their messages and completes them, until
-// ctx ends. A message interrupted by shutdown keeps its lease and is picked
-// up again after it expires (D5).
+// ctx ends. A message interrupted by shutdown keeps its lease and is taken
+// back by ReclaimExpired after it expires (D5).
 func (w *Worker) Run(ctx context.Context) error {
 	w.defaults()
 	var wg sync.WaitGroup
@@ -146,6 +146,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	go func() {
 		defer wg.Done()
 		for ctx.Err() == nil {
+			if _, err := w.Queue.ReclaimExpired(ctx, w.Now()); err != nil && ctx.Err() == nil {
+				slog.Error("worker: reclaim expired leases", "err", err)
+			}
 			if _, err := w.Queue.BuildAudience(ctx, w.Now()); err != nil && ctx.Err() == nil {
 				slog.Error("worker: start campaigns", "err", err)
 			}
