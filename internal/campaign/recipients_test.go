@@ -160,6 +160,7 @@ func TestRecipients_PagesSortedByLastAttempt(t *testing.T) {
 	a.exec(`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, outcome, http_status)
 		SELECT m.id, 1, $2::timestamptz - (m.user_id - 99) * interval '1 second', 'accepted', 200
 		FROM messages m WHERE m.campaign_id = $1 AND m.user_id >= 100`, id, fixedNow)
+	a.claimCounts(id)
 
 	p1, _ := a.recipients(id, "group=sent&channel=sms")
 	p3, _ := a.recipients(id, "group=sent&channel=sms&page=3")

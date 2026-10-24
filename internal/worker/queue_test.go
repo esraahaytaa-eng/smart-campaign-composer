@@ -313,6 +313,16 @@ func TestClaim_ExpiredLeaseIsReclaimedAndStaleCompleteIsRefused(t *testing.T) {
 	if again, _ := f.q.Claim(ctx, "email", 1, now.Add(29*time.Second), 30*time.Second); len(again) != 0 {
 		t.Fatal("a leased message must not be claimed again before the lease expires")
 	}
+	// A claim takes only due messages; expired leases come back through ReclaimExpired.
+	if early, _ := f.q.Claim(ctx, "email", 1, now.Add(31*time.Second), 30*time.Second); len(early) != 0 {
+		t.Fatal("a claim must not take an expired lease itself")
+	}
+	if n, err := f.q.ReclaimExpired(ctx, now.Add(29*time.Second)); err != nil || n != 0 {
+		t.Fatalf("a live lease is not reclaimed, got %d, %v", n, err)
+	}
+	if n, err := f.q.ReclaimExpired(ctx, now.Add(31*time.Second)); err != nil || n != 1 {
+		t.Fatalf("want the expired lease reclaimed, got %d, %v", n, err)
+	}
 	reclaimed, _ := f.q.Claim(ctx, "email", 1, now.Add(31*time.Second), 30*time.Second)
 
 	if len(first) != 1 || len(reclaimed) != 1 || reclaimed[0].MessageID != first[0].MessageID ||
@@ -359,6 +369,36 @@ func TestComplete_RecordsAttemptAndOutcome(t *testing.T) {
 	}
 	if f.count(`SELECT count(*) FROM delivery_attempts WHERE outcome = 'rate_limited' AND http_status = 429 AND finished_at > started_at`) != 1 {
 		t.Fatal("attempt not recorded with outcome, status and timings")
+	}
+}
+
+// Audit F3: the message keeps its latest attempt's start, for sorting the
+// recipient list, even when that attempt's lease was lost meanwhile.
+func TestComplete_RecordsLastAttemptTime(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sending()
+	ctx := context.Background()
+	jobs, _ := f.q.Claim(ctx, "sms", 2, now, 30*time.Second)
+	at := now.Add(time.Second)
+	f.q.Complete(ctx, jobs[0], worker.Result{Status: "sent", Attempt: &worker.Attempt{StartedAt: at, FinishedAt: at, Outcome: "accepted", HTTPStatus: 200}})
+	f.q.Complete(ctx, jobs[1], worker.Result{Status: "skipped", SkipReason: "no_consent"})
+
+	if f.count(`SELECT count(*) FROM messages WHERE id = $1 AND last_attempt_at = $2`, jobs[0].MessageID, at) != 1 ||
+		f.count(`SELECT count(*) FROM messages WHERE id = $1 AND last_attempt_at IS NULL`, jobs[1].MessageID) != 1 {
+		t.Fatal("want the attempt's start on the sent message and none on the skip")
+	}
+
+	// A stale worker's late attempt still happened: it moves the time on, never back.
+	f.exec(`UPDATE messages SET status = 'sending', lease_token = gen_random_uuid() WHERE id = $1`, jobs[0].MessageID)
+	later := now.Add(time.Minute)
+	stale := jobs[0]
+	stale.Attempt = 9
+	if err := f.q.Complete(ctx, stale, worker.Result{Status: "sent", Attempt: &worker.Attempt{StartedAt: later, FinishedAt: later, Outcome: "accepted", HTTPStatus: 200}}); !errors.Is(err, worker.ErrLeaseLost) {
+		t.Fatalf("want a lost lease, got %v", err)
+	}
+	if f.count(`SELECT count(*) FROM messages WHERE id = $1 AND last_attempt_at = $2`, jobs[0].MessageID, later) != 1 {
+		t.Fatal("the late attempt must still be the latest")
 	}
 }
 
@@ -438,7 +478,7 @@ func TestBuildAudience_ResendSkipsUncertainDeliveries(t *testing.T) {
 	}
 }
 
-func TestClaim_ExpiredLeaseMarksDeliveryUncertain(t *testing.T) {
+func TestReclaimExpired_MarksDeliveryUncertain(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	f.sending()
@@ -448,7 +488,7 @@ func TestClaim_ExpiredLeaseMarksDeliveryUncertain(t *testing.T) {
 		t.Fatal("a first claim is not uncertain")
 	}
 
-	f.q.Claim(ctx, "sms", 1, now.Add(31*time.Second), 30*time.Second) // reclaim: the first worker may have sent it
+	f.q.ReclaimExpired(ctx, now.Add(31*time.Second)) // the first worker may have sent it
 
 	if f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, first[0].MessageID) != "true" {
 		t.Fatal("reclaiming an expired lease must mark the delivery uncertain")

@@ -257,6 +257,9 @@ func marketers(t *testing.T, ctx context.Context, pool *pgxpool.Pool, cities []s
 			FROM messages m CROSS JOIN LATERAL generate_series(1, m.attempt_count) n
 			CROSS JOIN LATERAL (SELECT now() - (m.id % 3600) * interval '1 second' + n * interval '2 seconds' t) x
 			WHERE m.campaign_id = $1`,
+		// As the worker records it with each result (D69).
+		`UPDATE messages m SET last_attempt_at = (SELECT max(started_at) FROM delivery_attempts WHERE message_id = m.id)
+			WHERE campaign_id = $1`,
 	} {
 		if _, err := pool.Exec(ctx, sql, big); err != nil {
 			t.Fatal(err)

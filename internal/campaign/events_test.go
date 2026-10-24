@@ -86,10 +86,12 @@ func (s *liveStream) quiet(t *testing.T, d time.Duration) {
 	}
 }
 
-// claimCounts sets attempt_count as the worker would: one claim per attempt.
+// claimCounts sets attempt_count and last_attempt_at as the worker would:
+// one claim per attempt, and the latest attempt's start.
 func (a *app) claimCounts(id int64) {
 	a.t.Helper()
-	a.exec(`UPDATE messages m SET attempt_count = (SELECT count(*) FROM delivery_attempts WHERE message_id = m.id) WHERE campaign_id = $1`, id)
+	a.exec(`UPDATE messages m SET attempt_count = (SELECT count(*) FROM delivery_attempts WHERE message_id = m.id),
+		last_attempt_at = (SELECT max(started_at) FROM delivery_attempts WHERE message_id = m.id) WHERE campaign_id = $1`, id)
 }
 
 // sendingCampaign approves the case-example draft and gives it messages and

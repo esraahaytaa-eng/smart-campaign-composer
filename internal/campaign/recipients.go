@@ -128,13 +128,16 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q, lang, variant string, page int) (recipientsResponse, error) {
 	out := recipientsResponse{AsOf: h.Now(), Groups: map[string]map[string]int{}, Reasons: map[string]int{},
 		Page: page, PageSize: recipientsPageSize, Recipients: []recipientJSON{}}
-	v, err := h.loadContent(ctx, id, "a") // fixed after approval (D11)
-	if err != nil {
-		return out, err
-	}
-	vb, err := h.loadContent(ctx, id, "b")
-	if err != nil {
-		return out, err
+	// The text is only needed to explain a skip over the length limit.
+	var v, vb content.Variants
+	if group == "skipped" {
+		var err error
+		if v, err = h.loadContent(ctx, id, "a"); err != nil { // fixed after approval (D11)
+			return out, err
+		}
+		if vb, err = h.loadContent(ctx, id, "b"); err != nil {
+			return out, err
+		}
 	}
 	// One point in time for counts and rows, as in snapshot.
 	tx, err := h.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
@@ -201,12 +204,18 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 		args = append(args, variant)
 		where += ` AND m.variant = $` + strconv.Itoa(len(args))
 	}
-	if err := tx.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&out.Total); err != nil {
+	if len(args) == 3 { // no name, language or version filter: the group counts are the total
+		for c, groups := range out.Groups {
+			if channel == "" || channel == c {
+				out.Total += groups[group]
+			}
+		}
+	} else if err := tx.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
 
 	rows, err = tx.Query(ctx, `WITH page AS (
-			SELECT m.id, (SELECT max(started_at) FROM delivery_attempts WHERE message_id = m.id) AS last_at`+from+where+`
+			SELECT m.id, m.last_attempt_at AS last_at`+from+where+`
 			ORDER BY last_at DESC NULLS LAST, m.id DESC
 			LIMIT `+strconv.Itoa(recipientsPageSize)+` OFFSET `+strconv.Itoa((page-1)*recipientsPageSize)+`)
 		SELECT m.id, concat_ws(' ', u.first_name, u.last_name), u.first_name, coalesce(u.last_name, ''), u.city,
