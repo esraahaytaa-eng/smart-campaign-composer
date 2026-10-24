@@ -162,8 +162,11 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 }
 
-// send runs the campaign loop and the senders until ctx ends.
+// send runs the campaign loop and the senders until ctx ends. It first waits
+// one cap window: a worker that just stopped may have sent up to 100 requests
+// in its last second, and this one's limiter and cap start empty.
 func (w *Worker) send(ctx context.Context) {
+	sleep(ctx, capWindow)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

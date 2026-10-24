@@ -101,3 +101,29 @@ func TestRun_LostLockIsTakenAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Review: a worker that takes over waits one rate window before its first
+// send, so the previous worker's last second and its first can't add up to
+// more than 100 requests in a second at the provider.
+func TestRun_FirstSendWaitsAWindowAfterTakingTheLock(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	p := &fakeProvider{}
+	w := f.newWorker(p.serve(t))
+	w.Now, w.Poll = time.Now, 20*time.Millisecond
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan error)
+	start := time.Now()
+	go func() { done <- w.Run(ctx) }()
+	waitFor(t, 10*time.Second, "a request", func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(p.requests) > 0 })
+	stop()
+	<-done
+
+	p.mu.Lock()
+	first := p.requests[0].at
+	p.mu.Unlock()
+	if gap := first.Sub(start); gap < time.Second {
+		t.Fatalf("the first request left %v after the worker started; want at least one rate window", gap)
+	}
+}
