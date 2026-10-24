@@ -210,3 +210,38 @@ func seedBilingual(t *testing.T, pool *pgxpool.Pool) {
 		}
 	}
 }
+
+// Audit F3: messages sent before the column existed get their latest attempt's time.
+func TestMigrate_LastAttemptBackfilled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := dbtest.FreshDB(t)
+	if err := db.MigrateTo(ctx, pool, 9); err != nil {
+		t.Fatal(err)
+	}
+	seedBilingual(t, pool)
+	for _, sql := range []string{
+		`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
+		 VALUES (1, 'A', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now()),
+		        (2, 'B', 'b@example.com', '+905000000002', 'Ankara', 'tr', true, true, now())`,
+		`INSERT INTO messages (id, campaign_id, user_id, channel, status) VALUES (1, 1, 1, 'sms', 'sent'), (2, 1, 2, 'sms', 'pending')`,
+		`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, outcome) VALUES
+		 (1, 1, '2026-10-01 10:00:00Z', 'rate_limited'), (1, 2, '2026-10-01 10:00:05Z', 'accepted')`,
+	} {
+		if _, err := pool.Exec(ctx, sql); err != nil {
+			t.Fatalf("%v: %s", err, sql)
+		}
+	}
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM messages WHERE id = 1 AND last_attempt_at = '2026-10-01 10:00:05Z'`); n != 1 {
+		t.Fatal("want the latest attempt's start time")
+	}
+	if n := count(t, pool, `SELECT count(*) FROM messages WHERE id = 2 AND last_attempt_at IS NULL`); n != 1 {
+		t.Fatal("a message never attempted has none")
+	}
+	if err := db.MigrateDownTo(ctx, pool, 9); err != nil {
+		t.Fatal(err)
+	}
+}

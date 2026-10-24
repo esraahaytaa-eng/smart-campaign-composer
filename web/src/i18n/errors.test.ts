@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { ApiError } from '../api'
 import { setLocale } from './index'
-import { aiReason, errorText, sessionLoadError } from './errors'
+import { aiReason, contentAIError, errorText, sessionLoadError } from './errors'
 
 afterEach(() => setLocale('en'))
 
@@ -46,6 +46,18 @@ describe('errorText', () => {
     expect(errorText(err)).toBe('Bu saatlik yapay zekâ sınırına ulaştınız. 21 dakika sonra yeniden deneyin ya da elle düzenleyin.')
   })
 
+  // A provider failure (bad key, outage) is not the brief's fault: it must not
+  // read like an unusable answer.
+  it('tells an unavailable AI apart from an invalid answer', async () => {
+    const unavailable = new ApiError('The AI service is unavailable.', 502, { code: 'ai_unavailable' })
+    const invalid = new ApiError('The AI returned an invalid answer twice.', 502, { code: 'ai_invalid' })
+    expect(errorText(unavailable)).toBe('The AI service is unavailable right now. Try again later, or build the rules by hand.')
+    expect(errorText(invalid)).toBe('The AI couldn’t produce a usable answer. Try again, or rephrase the brief.')
+    await setLocale('tr')
+    expect(errorText(unavailable)).toBe('Yapay zekâ hizmetine şu anda ulaşılamıyor. Daha sonra tekrar deneyin ya da kuralları elle oluşturun.')
+    expect(errorText(invalid)).toBe('Yapay zekâ kullanılabilir bir yanıt üretemedi. Tekrar deneyin ya da açıklamayı yeniden yazın.')
+  })
+
   it('explains a session that could not be loaded after signing in', () => {
     expect(errorText(sessionLoadError())).toBe('Signed in, but the session could not be loaded. Try again.')
   })
@@ -53,6 +65,22 @@ describe('errorText', () => {
   it('speaks Turkish when the UI does', async () => {
     await setLocale('tr')
     expect(errorText(new ApiError('', 0))).toBe('Sunucuya ulaşılamıyor. Çalıştığından emin olun.')
+  })
+})
+
+// The content stream's "error" event carries the same codes.
+describe('contentAIError', () => {
+  it('names the failure of a generation by its code', async () => {
+    expect(contentAIError('ai_unavailable')).toBe('The AI service is unavailable right now. Try again later, or write the messages yourself.')
+    expect(contentAIError('ai_invalid')).toBe('The AI wrote unusable messages twice. Try again, or write them yourself.')
+    await setLocale('tr')
+    expect(contentAIError('ai_unavailable')).toBe('Yapay zekâ hizmetine şu anda ulaşılamıyor. Daha sonra tekrar deneyin ya da mesajları kendiniz yazın.')
+    expect(contentAIError('ai_invalid')).toBe('Yapay zekâ iki kez kullanılamaz mesajlar yazdı. Tekrar deneyin ya da mesajları kendiniz yazın.')
+  })
+
+  it('is null for a failure without a code, which keeps the server details', () => {
+    expect(contentAIError(undefined)).toBeNull()
+    expect(contentAIError('other')).toBeNull()
   })
 })
 

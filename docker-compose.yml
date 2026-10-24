@@ -49,8 +49,9 @@ services:
       timeout: 3s
       retries: 10
 
-  # Sends approved campaigns through the provider (D18, D19). Exactly one
-  # replica: the 100/s per-channel limit lives in this process.
+  # Sends approved campaigns through the provider (D18, D19). One sends at a
+  # time: the 100/s per-channel limit lives in this process, so a second
+  # replica waits on a database lock and takes over if this one stops.
   worker:
     build: .
     command: ["worker"]

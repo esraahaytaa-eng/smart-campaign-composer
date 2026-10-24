@@ -17,7 +17,7 @@ import MessagePreview from '../components/MessagePreview.vue'
 import StepBar from '../components/StepBar.vue'
 import { formatNumber, t, type Key } from '../i18n'
 import { session } from '../session'
-import { errorText } from '../i18n/errors'
+import { contentAIError, errorText } from '../i18n/errors'
 
 const LIMITS = { sms: 160, subject: 80, body: 2000 } // after personalization (D2)
 
@@ -296,6 +296,8 @@ const retrying = ref(false)
 const writing = ref<Lang[]>([])
 const live = ref<Record<string, string>>({}) // by field, e.g. "en.sms.body"
 const aiProblem = ref<string | null>(null) // the stream's own error text (English) as details
+const aiProblemCode = ref<unknown>(null) // the error's code: ai_unavailable or ai_invalid
+const aiProblemText = computed(() => contentAIError(aiProblemCode.value))
 let stop: AbortController | null = null
 const regenerateConfirm = ref<Lang[] | null>(null)
 
@@ -320,6 +322,7 @@ async function write(langs: Lang[], replace: boolean) {
   // Other languages' edits are saved first, so they survive the AI's save.
   await commit(true)
   aiProblem.value = null
+  aiProblemCode.value = null
   saveError.value = null
   notice.value = null
   live.value = {}
@@ -347,7 +350,10 @@ async function write(langs: Lang[], replace: boolean) {
               retrying.value = true
               live.value = {}
             } else if (e.event === 'done') finished = true
-            else if (e.event === 'error') aiProblem.value = String(data.message ?? '')
+            else if (e.event === 'error') {
+              aiProblem.value = String(data.message ?? '')
+              aiProblemCode.value = data.code
+            }
           },
           signal,
         )
@@ -412,7 +418,7 @@ const original = computed(() => parent.value?.content?.[active.value] ?? parent.
 const names = (langs: Lang[]) => langs.map(name).join(', ')
 const statusText = computed(() => {
   if (streaming.value) return t(retrying.value ? 'content.retrying' : 'content.writing')
-  if (aiProblem.value) return t('content.aiError')
+  if (aiProblem.value) return aiProblemText.value ?? t('content.aiError')
   return notice.value ? t(notice.value.key, { name: notice.value.name ?? '' }) : ''
 })
 </script>
@@ -485,7 +491,8 @@ const statusText = computed(() => {
             <strong>{{ t(retrying ? 'content.retrying' : 'content.writing') }}</strong> {{ t('content.writingHint') }}
           </span>
           <span v-else-if="aiProblem" class="problem">
-            {{ t('content.aiError') }} {{ t('error.details', { message: aiProblem }) }}
+            <template v-if="aiProblemText">{{ aiProblemText }}</template>
+            <template v-else>{{ t('content.aiError') }} {{ t('error.details', { message: aiProblem }) }}</template>
           </span>
           <span v-else-if="notice?.key === 'content.stopped' || notice?.key === 'content.done'">{{ t(notice.key) }}</span>
           <span v-else-if="missing.length && editingB">{{ t('ab.writesB', { names: names(missing) }) }}</span>

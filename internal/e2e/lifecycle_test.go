@@ -172,6 +172,9 @@ func (l *life) claim(messageID int64, at time.Time) worker.Job {
 	l.t.Helper()
 	// Claim everything due on the channel at once, keep the wanted message and
 	// put the others back exactly as they were.
+	if _, err := l.q.ReclaimExpired(context.Background(), at); err != nil {
+		l.t.Fatal(err)
+	}
 	jobs, err := l.q.Claim(context.Background(), l.str(`SELECT channel FROM messages WHERE id = $1`, messageID), 1000, at, 30*time.Second)
 	if err != nil {
 		l.t.Fatal(err)
@@ -461,7 +464,8 @@ func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
 }
 
 // L9: two workers on one queue (a misconfigured second replica) with a flaky
-// provider: still no message is really sent twice.
+// provider: still no message is really sent twice. The sender lock (audit F5)
+// keeps the second one waiting; concurrent claimers are covered in worker.
 func TestLifecycle_TwoWorkers_NoDoubleSend(t *testing.T) {
 	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)

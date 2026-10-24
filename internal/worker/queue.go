@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -131,17 +132,13 @@ type Job struct {
 	LeaseToken string
 }
 
-// Claim leases up to n messages of a channel that are due: pending or
-// waiting for a retry whose time has come, or still "sending" under an
-// expired lease. That last case means a worker died mid-attempt, so the
-// message may have been delivered: it is marked uncertain (D5 history).
+// Claim leases up to n due messages of a channel: pending, or waiting for a
+// retry whose time has come. Expired leases come back through ReclaimExpired.
 func (q *Queue) Claim(ctx context.Context, channel string, n int, now time.Time, lease time.Duration) ([]Job, error) {
 	rows, _ := q.Pool.Query(ctx, `UPDATE messages SET status = 'sending', lease_token = gen_random_uuid(),
-			lease_expires_at = $3, attempt_count = attempt_count + 1, updated_at = now(),
-			delivery_uncertain = delivery_uncertain OR status = 'sending'
+			lease_expires_at = $3, attempt_count = attempt_count + 1, updated_at = now()
 		WHERE id IN (SELECT id FROM messages WHERE channel = $1
-				AND ((status IN ('pending', 'retry_scheduled') AND next_attempt_at <= $2)
-					OR (status = 'sending' AND lease_expires_at < $2))
+				AND status IN ('pending', 'retry_scheduled') AND next_attempt_at <= $2
 			ORDER BY next_attempt_at, id LIMIT $4 FOR UPDATE SKIP LOCKED)
 		RETURNING id, campaign_id, user_id, channel, attempt_count, lease_token::text`, channel, now, now.Add(lease), n)
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Job, error) {
@@ -149,6 +146,17 @@ func (q *Queue) Claim(ctx context.Context, channel string, n int, now time.Time,
 		err := r.Scan(&j.MessageID, &j.CampaignID, &j.UserID, &j.Channel, &j.Attempt, &j.LeaseToken)
 		return j, err
 	})
+}
+
+// ReclaimExpired hands back messages still "sending" under an expired lease,
+// due at once. A worker died mid-attempt, so the message may have been
+// delivered: it is marked uncertain (D5 history). Clearing the lease makes a
+// late Complete from that worker a lost lease. It returns how many it took back.
+func (q *Queue) ReclaimExpired(ctx context.Context, now time.Time) (int, error) {
+	tag, err := q.Pool.Exec(ctx, `UPDATE messages SET status = 'retry_scheduled', next_attempt_at = $1,
+			delivery_uncertain = true, lease_token = NULL, lease_expires_at = NULL, updated_at = now()
+		WHERE status = 'sending' AND lease_expires_at < $1`, now)
+	return int(tag.RowsAffected()), err
 }
 
 // Attempt is one provider request, recorded for retry and 429 counts (D16).
@@ -183,10 +191,10 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var sentAt, nextAt *time.Time
+	var sentAt, nextAt, startedAt *time.Time
 	outcome := ""
 	if a := r.Attempt; a != nil {
-		outcome = a.Outcome
+		outcome, startedAt = a.Outcome, &a.StartedAt
 		// Recorded even if the lease was lost: the provider request did happen.
 		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (message_id, attempt_no, started_at, finished_at, outcome, http_status, error)
 			VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), NULLIF($7, ''))`,
@@ -205,11 +213,18 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 			-- No clear answer: the provider may have sent it (D5 history).
 			delivery_uncertain = delivery_uncertain OR $8 IN ('timeout', 'network_error', 'interrupted'),
 			sent_at = CASE WHEN $2 = 'sent' THEN coalesce($6, now()) ELSE sent_at END,
+			last_attempt_at = greatest(last_attempt_at, $9),
 			lease_token = NULL, lease_expires_at = NULL, updated_at = now()
 		WHERE id = $1 AND lease_token = $7::uuid AND status = 'sending'`,
-		j.MessageID, r.Status, r.SkipReason, r.LastError, nextAt, sentAt, j.LeaseToken, outcome)
+		j.MessageID, r.Status, r.SkipReason, r.LastError, nextAt, sentAt, j.LeaseToken, outcome, startedAt)
 	if err != nil {
 		return fmt.Errorf("complete message: %w", err)
+	}
+	if tag.RowsAffected() == 0 && startedAt != nil {
+		// The lease was lost, but the attempt happened: it still counts as the latest.
+		if _, err := tx.Exec(ctx, `UPDATE messages SET last_attempt_at = greatest(last_attempt_at, $2) WHERE id = $1`, j.MessageID, startedAt); err != nil {
+			return fmt.Errorf("record last attempt: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
@@ -218,6 +233,86 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 		return ErrLeaseLost
 	}
 	return nil
+}
+
+// senderLockKey is the advisory lock held by the one worker that sends (D19).
+const senderLockKey = 0x5cc5e4d
+
+// lockCheck is how often the sending worker checks its lock's connection.
+const lockCheck = time.Second
+
+var errLockLost = errors.New("sender lock lost")
+
+// senderLockConfig is the pool's connection settings for the lock's own
+// connection, with server keepalives: if this worker's host vanishes without
+// closing it, the server drops the session and frees the lock in about 25 s,
+// instead of after the OS default of about two hours.
+func (q *Queue) senderLockConfig() *pgx.ConnConfig {
+	cfg := q.Pool.Config().ConnConfig.Copy()
+	cfg.RuntimeParams["tcp_keepalives_idle"] = "10"
+	cfg.RuntimeParams["tcp_keepalives_interval"] = "5"
+	cfg.RuntimeParams["tcp_keepalives_count"] = "3"
+	return cfg
+}
+
+// holdSenderLock waits until this process holds the sender lock, taken on a
+// connection of its own outside the pool. The returned context ends when ctx
+// does or when that connection fails, since the lock may then be gone and
+// another worker may take it. release closes the connection, which frees the
+// lock, and returns errLockLost if the connection failed. The error is ctx's
+// when it ended while waiting.
+func (q *Queue) holdSenderLock(ctx context.Context, poll time.Duration) (context.Context, func() error, error) {
+	cfg := q.senderLockConfig()
+	var conn *pgx.Conn
+	waiting := false
+	for conn == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		c, err := pgx.ConnectConfig(ctx, cfg)
+		if err == nil {
+			var held bool
+			if err = c.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, senderLockKey).Scan(&held); err == nil && held {
+				conn = c
+				break
+			}
+			c.Close(context.Background())
+		}
+		switch {
+		case err != nil && ctx.Err() == nil:
+			slog.Error("worker: sender lock", "err", err)
+		case err == nil && !waiting:
+			slog.Warn("worker: another worker is sending; waiting to take over")
+			waiting = true
+		}
+		sleep(ctx, poll)
+	}
+	slog.Info("worker: holds the sender lock")
+
+	lctx, cancel := context.WithCancelCause(ctx)
+	checked := make(chan struct{})
+	go func() {
+		defer close(checked)
+		for lctx.Err() == nil {
+			sleep(lctx, lockCheck)
+			pctx, done := context.WithTimeout(lctx, 2*lockCheck)
+			err := conn.Ping(pctx)
+			done()
+			if err != nil && lctx.Err() == nil {
+				cancel(fmt.Errorf("%w: %v", errLockLost, err))
+			}
+		}
+	}()
+	return lctx, func() error {
+		cause := context.Cause(lctx)
+		cancel(nil)
+		<-checked
+		conn.Close(context.Background())
+		if errors.Is(cause, errLockLost) {
+			return cause
+		}
+		return nil
+	}, nil
 }
 
 // FinishCampaigns marks sending campaigns completed once every message is

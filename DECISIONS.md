@@ -350,6 +350,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** The lease, attempt count and next-attempt time (D5, D7) already live in this table. No dual write between a database and a broker, no outbox, no extra service. At most 200 messages/s is light load for Postgres.
 - **Rejected:** *Redis + asynq:* extra service and dual writes. *RabbitMQ or NATS JetStream:* extra service, dual writes, awkward delayed retries. *River:* its job table duplicates our message state machine.
 - **Trade-offs:** The worker polls when idle. A reviewer may expect a broker, so the reason is documented here.
+- **History:** 2026-10-24 (audit): a claim takes due messages only, in index order; expired leases are handed back by the worker's 1 s loop (D69).
 
 ### D19 — One worker with an in-process rate limiter per channel
 - **Status:** Accepted · 2026-10-21
@@ -357,7 +358,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** The simplest way to enforce the limit exactly and test it.
 - **Rejected:** *Shared token bucket in Postgres:* a database round-trip per message and more code. *Static split (100/N per replica):* the config must match the replica count, and capacity is wasted when a replica is idle.
 - **Trade-offs:** The worker cannot scale out without a shared limiter.
-- **History:** 2026-10-22. Pool size (20 per channel), lease (30 s) and provider timeout (5 s) approved; they were open questions. 2026-10-22 (T12): the limiter alone allowed up to 110 requests in some 1 s windows, because goroutines woke late after their reservation; a hard cap now allows at most 100 departures in any window of just over 1 s, counted when each request leaves, and the provider client reuses connections. Approved by the engineer.
+- **History:** 2026-10-22. Pool size (20 per channel), lease (30 s) and provider timeout (5 s) approved; they were open questions. 2026-10-22 (T12): the limiter alone allowed up to 110 requests in some 1 s windows, because goroutines woke late after their reservation; a hard cap now allows at most 100 departures in any window of just over 1 s, counted when each request leaves, and the provider client reuses connections. Approved by the engineer. 2026-10-24 (audit): one replica is now enforced by a database lock, and a departure is recorded after the last check (D69).
 
 ### D20 — Component boundaries
 - **Status:** Accepted · 2026-10-21
@@ -597,6 +598,19 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Every create, brief edit and message generation can cost up to two paid calls, with nothing capping them (security review, step 4).
 - **Rejected:** *Counting operations instead of calls:* retries would go uncounted. *A token bucket:* allows more than N in an hour after a quiet spell. *Limits stored in Postgres:* one api replica; a restart needs operator access.
 - **Trade-offs:** Resets on restart; a refused retry ends the operation with 429 although its first call was spent. The Anthropic console's spend limit remains the real ceiling.
+
+### D69 — Audit remediation: one sender, a cheap claim, a stored last attempt
+- **Status:** Accepted · 2026-10-24
+- **Decision:** From the independent audit (`docs/audit/`), approved items F1, F3–F6 and F17:
+  - **One sender (F5):** `Run` sends only while it holds a Postgres advisory lock on a connection of its own; a second worker waits and takes over when the first stops. If that connection fails, sending stops and the lock is taken again first. Makes D19's single replica enforced, not a convention.
+  - **Claim (F1):** a claim reads due messages only, from a `(channel, next_attempt_at, id)` partial index; expired leases (D5) are handed back by the worker's 1 s loop, flagged uncertain.
+  - **Departure (F4):** the hard cap records a departure after the last cancel and consent check, right before the request; a full window means wait and check again.
+  - **Load failures (F6):** nothing was sent, so the message is handed back with backoff, not left to expire into "uncertain"; a missing text or customer fails it.
+  - **Recipient pages (F3):** sort on `messages.last_attempt_at`, written by the worker with the result; texts read only for the skipped group; the group count is the total when nothing filters it.
+- **Why:** Measured: a claim cost grew with the due backlog (1.7 ms at 6,000, 7.6 ms at 30,000; now 0.06 ms at both), and recipient pages looked up 5,100 attempts per request (23 ms; now 9 ms). The rest closes correctness gaps the tests didn't catch.
+- **Rejected:** *A shared rate limiter (Redis or Postgres):* a round trip per message for a limit one process already enforces. *Exiting when the lock is lost:* relies on a restart policy. *Re-checking before the cap wait:* a cancel during that wait would be missed. *Sorting recipients by `updated_at`:* changes the order of skipped and pending rows (D47). *An index on `last_attempt_at`:* an extra write per result for ~3 ms.
+- **Trade-offs:** A failed lock connection is noticed within about 1–3 s; until then, if the database already freed the lock, a second worker could send at the same time. A worker that takes the lock waits one cap window (about 1 s) before sending, so a handover can't put 200 requests in a second. A vanished host keeps the lock until the server's keepalives drop its session (about 25 s), and sending pauses meanwhile. A message failed for missing text shows the reason "retries exhausted". `last_attempt_at` duplicates `delivery_attempts`; only the worker writes attempts, and it keeps both.
+- **History:** 2026-10-24: approved by the engineer. 2026-10-24 (branch review): the handover wait and the lock connection's keepalives were added.
 
 ## Open Questions
 
