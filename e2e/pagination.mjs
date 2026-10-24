@@ -99,6 +99,17 @@ export default () =>
     await page.goto(`${BASE}/campaigns?q=${tag}&page=9`)
     check(await shows('Showing 26–30 of 30'), 'a page past the end opens the last page')
 
+    // the sidebar link drops the search, and the box follows
+    await page.goto(`${BASE}/campaigns?q=${tag}`)
+    await shows('Showing 1–25 of 30')
+    await page.locator('nav.sidebar').getByRole('link', { name: 'Campaigns', exact: true }).click()
+    await page.waitForURL((u) => !u.searchParams.has('q'))
+    const searchBox = page.getByRole('searchbox', { name: 'Search campaigns' })
+    check(await searchBox.inputValue().then((v) => v === ''), 'the sidebar link clears the search box')
+    await page.goBack()
+    await page.waitForURL((u) => u.searchParams.get('q') === tag)
+    check((await searchBox.inputValue()) === tag, 'Back brings the search back into the box')
+
     // the pager is reachable and usable with the keyboard
     await page.goto(`${BASE}/campaigns?q=${tag}`)
     await shows('Showing 1–25 of 30')

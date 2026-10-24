@@ -34,8 +34,9 @@ async function load() {
     const page = await campaigns.list(query.value)
     if (mine !== seq) return
     // Past the end (e.g. the last row of the last page was deleted): go to the last page.
-    if (!page.campaigns.length && page.total > 0 && query.value.page > 1) {
-      set({ page: Math.ceil(page.total / (page.page_size ?? 25)) }, false)
+    const last = Math.ceil(page.total / (page.page_size ?? 25))
+    if (!page.campaigns.length && page.total > 0 && query.value.page > last) {
+      set({ page: last }, false)
       return
     }
     data.value = page
@@ -58,6 +59,15 @@ function onSearch() {
   timer = setTimeout(() => set({ q: search.value.trim() }), 300)
 }
 onBeforeUnmount(() => clearTimeout(timer))
+// The address can change the search too (the sidebar link, Back): the box follows.
+watch(
+  () => query.value.q,
+  (q) => {
+    if (q === search.value.trim()) return
+    clearTimeout(timer)
+    search.value = q
+  },
+)
 function clearFilters() {
   clearTimeout(timer)
   search.value = ''
@@ -120,7 +130,7 @@ async function cancel(c: Campaign) {
           <path d="M20 20l-4-4" />
         </svg>
         <span class="sr-only">{{ t('campaigns.search') }}</span>
-        <input v-model="search" type="search" :placeholder="t('campaigns.searchPlaceholder')" @input="onSearch" />
+        <input v-model="search" type="search" maxlength="50" :placeholder="t('campaigns.searchPlaceholder')" @input="onSearch" />
       </label>
       <div role="group" class="filters" :aria-label="t('campaigns.filter')">
         <button v-for="f in FILTERS" :key="f" type="button" class="filter" :aria-pressed="query.status === f" @click="set({ status: f })">
