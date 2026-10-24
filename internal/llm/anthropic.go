@@ -55,7 +55,47 @@ func (a *Anthropic) InterpretRequest(ctx context.Context, in InterpretInput) (js
 			text.WriteString(t.Text)
 		}
 	}
-	return json.RawMessage(text.String()), nil
+	return normalizeWindows(json.RawMessage(text.String())), nil
+}
+
+// windowKeys are the window forms the answer schema always sends (option A
+// of D70): unused ones come as 0 or "".
+var windowKeys = []string{"last_days", "last_months", "from", "to"}
+
+// normalizeWindows drops exactly the unused window values, 0 and "", from
+// each rule value, so the answer reaches strict validation in the rule
+// language's own shape. Nothing else changes: conflicting or invalid windows
+// stay and are rejected there. An answer it cannot read is returned as is.
+func normalizeWindows(raw json.RawMessage) json.RawMessage {
+	var answer map[string]json.RawMessage
+	var rules []map[string]json.RawMessage
+	if json.Unmarshal(raw, &answer) != nil || json.Unmarshal(answer["rules"], &rules) != nil {
+		return raw
+	}
+	changed := false
+	for _, r := range rules {
+		var value map[string]json.RawMessage
+		if json.Unmarshal(r["value"], &value) != nil {
+			continue // not an object: no window
+		}
+		dropped := false
+		for _, k := range windowKeys {
+			if v, ok := value[k]; ok && (string(v) == "0" || string(v) == `""`) {
+				delete(value, k)
+				dropped = true
+			}
+		}
+		if dropped {
+			r["value"], _ = json.Marshal(value)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	answer["rules"], _ = json.Marshal(rules)
+	out, _ := json.Marshal(answer)
+	return out
 }
 
 // interpretPrompt is the user turn: the clock, catalog and brief. The brief
@@ -97,7 +137,7 @@ Comparisons: "at least", "or more", "minimum" are gte; "at most", "or less", "ma
 
 Each field and operator pair may appear at most once (one city rule listing several cities; never two ordered_category rules). If the brief needs the same pair twice with different values, the audience is unsupported.
 
-A window has "last_days", "last_months", "from" and "to"; set exactly one form and the other keys to null: "last_days": N (1-365, counted back from when the campaign is sent), "last_months": N (1-12 calendar months, counted back from when the campaign is sent), or "from": "YYYY-MM-DD" with "to": "YYYY-MM-DD" or null, in the campaign's time zone. Use from/to when the brief names a date or a cutoff ("since 1 October", "Black Friday 24-28 November"), last_months when it counts in months ("in the last 12 months"), otherwise last_days.
+A window always has "last_days", "last_months", "from" and "to". Use exactly one form and mark the unused keys with 0 (numbers) or "" (dates): "last_days": N (1-365, counted back from when the campaign is sent), "last_months": N (1-12 calendar months, counted back from when the campaign is sent), or "from": "YYYY-MM-DD" with "to": "YYYY-MM-DD" or "" for no end date, in the campaign's time zone. Use from/to when the brief names a date or a cutoff ("since 1 October", "Black Friday 24-28 November"), last_months when it counts in months ("in the last 12 months"), otherwise last_days.
 
 Never guess. If any part of the requested audience cannot be expressed exactly with these rules (an attribute that is not listed such as age, gender or interests, an OR between conditions, an unknown city or category, an unclear time span), set "unsupported" to true, explain briefly in "reason" what cannot be expressed, and return no rules. Do not drop, approximate, broaden or add conditions. Off-topic or harmful requests are also unsupported.
 
@@ -108,7 +148,7 @@ Write "reason" in the language of the brief.`
 var (
 	integer     = map[string]any{"type": "integer"}
 	number      = map[string]any{"type": "number"}
-	dateSchema  = map[string]any{"type": "string", "format": "date"}
+	text        = map[string]any{"type": "string"} // a date, or "" when unused: validation checks YYYY-MM-DD
 	stringList  = map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	window      = withWindow(nil)
 	categoryWin = withWindow(map[string]any{"categories": stringList})
@@ -116,11 +156,12 @@ var (
 	countWin    = withWindow(map[string]any{"count": integer})
 )
 
-// withWindow is a window plus the extra properties: one object whose unused
-// forms are null (validation requires exactly one). A choice of shapes per
-// window made the compiled grammar too large for the API.
+// withWindow is a window plus the extra properties: one object with every
+// form, the unused ones 0 or "" (normalizeWindows drops them; validation
+// requires exactly one). The API refused a choice of shapes (grammar too
+// large) and nullable forms (too many union-typed parameters).
 func withWindow(extra map[string]any) map[string]any {
-	props := map[string]any{"last_days": nullable(integer), "last_months": nullable(integer), "from": nullable(dateSchema), "to": nullable(dateSchema)}
+	props := map[string]any{"last_days": integer, "last_months": integer, "from": text, "to": text}
 	maps.Copy(props, extra)
 	return object(props)
 }

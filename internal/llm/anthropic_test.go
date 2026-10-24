@@ -131,20 +131,119 @@ func TestInterpretPrompt_ContainsContextNotUserData(t *testing.T) {
 	}
 }
 
-// A window is one object with nullable forms, not a choice of shapes: the
-// alternatives multiply across rules, and the API refused the compiled
-// grammar as too large (400, 2026-10-24).
-func TestInterpretSchema_WindowIsOneObject(t *testing.T) {
+// A window is one object with every form and no unions (option A,
+// 2026-10-24): the API refused a choice of shapes ("compiled grammar is too
+// large") and nullable forms ("too many parameters with union types",
+// limit 16).
+func TestInterpretSchema_WindowIsOneObjectWithoutUnions(t *testing.T) {
 	for name, w := range map[string]map[string]any{"window": window, "categories": categoryWin, "amount": amountWin, "count": countWin} {
 		props, _ := w["properties"].(map[string]any)
-		if w["type"] != "object" || w["anyOf"] != nil || len(props) < 4 {
-			t.Errorf("%s: want one object with last_days, last_months, from and to, got %v", name, w)
+		if w["type"] != "object" || w["anyOf"] != nil {
+			t.Errorf("%s: want one object, got %v", name, w)
+		}
+		for _, key := range []string{"last_days", "last_months", "from", "to"} {
+			if p, ok := props[key].(map[string]any); !ok || p["anyOf"] != nil {
+				t.Errorf("%s.%s: want a plain, required property, got %v", name, key, props[key])
+			}
 		}
 	}
-	for _, key := range []string{"last_days", "last_months", "from", "to"} {
-		if _, ok := window["properties"].(map[string]any)[key]; !ok {
-			t.Errorf("window lacks %s", key)
+}
+
+// The whole answer schema stays as small as before D70: the rules list's
+// choice of rule types, suggested_send_at and schedule_note.
+func TestInterpretSchema_UnionCount(t *testing.T) {
+	var unions func(v any) int
+	unions = func(v any) int {
+		n := 0
+		switch x := v.(type) {
+		case map[string]any:
+			if _, ok := x["anyOf"]; ok {
+				n++
+			}
+			if _, ok := x["type"].([]any); ok {
+				n++
+			}
+			for _, c := range x {
+				n += unions(c)
+			}
+		case []any:
+			for _, c := range x {
+				n += unions(c)
+			}
 		}
+		return n
+	}
+	b, _ := json.Marshal(interpretSchema)
+	var schema any
+	json.Unmarshal(b, &schema)
+	if n := unions(schema); n > 3 {
+		t.Fatalf("schema has %d union-typed parameters, want at most 3 (the API's limit is 16)", n)
+	}
+}
+
+// normalizeWindows drops only the documented unused window values (0 days or
+// months, "" dates) before strict validation; everything else is kept, so
+// validation still rejects conflicting or invalid windows.
+func TestNormalizeWindows(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"days", `{"field":"no_order","op":"within","value":{"last_days":45,"last_months":0,"from":"","to":""}}`,
+			`{"field":"no_order","op":"within","value":{"last_days":45}}`},
+		{"months with amount", `{"field":"spend_in_window","op":"gt","value":{"amount":10000,"last_days":0,"last_months":12,"from":"","to":""}}`,
+			`{"field":"spend_in_window","op":"gt","value":{"amount":10000,"last_months":12}}`},
+		{"open-ended dates", `{"field":"cart_added","op":"within","value":{"last_days":0,"last_months":0,"from":"2026-10-01","to":""}}`,
+			`{"field":"cart_added","op":"within","value":{"from":"2026-10-01"}}`},
+		{"zero amount and count kept", `{"field":"orders_in_window","op":"lte","value":{"count":0,"last_days":30,"last_months":0,"from":"","to":""}}`,
+			`{"field":"orders_in_window","op":"lte","value":{"count":0,"last_days":30}}`},
+		{"conflict kept", `{"field":"cart_added","op":"within","value":{"last_days":30,"last_months":1,"from":"","to":""}}`,
+			`{"field":"cart_added","op":"within","value":{"last_days":30,"last_months":1}}`},
+		{"invalid kept", `{"field":"cart_added","op":"within","value":{"last_days":-1,"last_months":0,"from":"x","to":""}}`,
+			`{"field":"cart_added","op":"within","value":{"last_days":-1,"from":"x"}}`},
+		{"not a window", `{"field":"total_spend","op":"gt","value":0}`, `{"field":"total_spend","op":"gt","value":0}`},
+		{"cities", `{"field":"city","op":"in","value":[""]}`, `{"field":"city","op":"in","value":[""]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeWindows(json.RawMessage(`{"unsupported":false,"reason":"","rules":[` + tc.in + `],"suggested_send_at":null,"schedule_note":null}`))
+			want := `{"unsupported":false,"reason":"","rules":[` + tc.want + `],"suggested_send_at":null,"schedule_note":null}`
+			if !sameJSON(t, string(got), want) {
+				t.Fatalf("\n got: %s\nwant: %s", got, want)
+			}
+		})
+	}
+	for _, raw := range []string{`not json`, `{"unsupported":true,"reason":"no","rules":[]}`} {
+		if got := normalizeWindows(json.RawMessage(raw)); string(got) != raw {
+			t.Errorf("%s: changed to %s", raw, got)
+		}
+	}
+}
+
+// After normalization, strict validation still refuses what is not exactly
+// one valid window form.
+func TestNormalizeWindows_ValidationStillRejects(t *testing.T) {
+	for name, value := range map[string]string{
+		"no form":        `{"last_days":0,"last_months":0,"from":"","to":""}`,
+		"two forms":      `{"last_days":30,"last_months":1,"from":"","to":""}`,
+		"days and dates": `{"last_days":30,"last_months":0,"from":"2026-10-01","to":""}`,
+		"end only":       `{"last_days":0,"last_months":0,"from":"","to":"2026-10-01"}`,
+		"bad date":       `{"last_days":0,"last_months":0,"from":"1 Oct","to":""}`,
+		"13 months":      `{"last_days":0,"last_months":13,"from":"","to":""}`,
+	} {
+		raw := normalizeWindows(json.RawMessage(`{"rules":[{"field":"cart_added","op":"within","value":` + value + `}]}`))
+		var out struct{ Rules []audience.Rule }
+		json.Unmarshal(raw, &out)
+		if _, errs := audience.Validate(out.Rules, testCatalog); len(errs) != 1 {
+			t.Errorf("%s: want one validation error, got %v (%s)", name, errs, raw)
+		}
+	}
+}
+
+// The real client hands the normalized answer on.
+func TestAnthropic_NormalizesWindows(t *testing.T) {
+	_, url := fakeAPI(t, http.StatusOK, "end_turn",
+		`{"unsupported":false,"reason":"","rules":[{"field":"no_order","op":"within","value":{"last_days":45,"last_months":0,"from":"","to":""}}],"suggested_send_at":null,"schedule_note":null}`)
+	raw, err := interpretVia(t, url, "claude-opus-5-5", testInput())
+	if err != nil || !strings.Contains(string(raw), `"value":{"last_days":45}`) {
+		t.Fatalf("want the normalized window, got %s (%v)", raw, err)
 	}
 }
 
