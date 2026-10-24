@@ -20,5 +20,5 @@ export const samplesFor = (lang: string): Sample[] => (lang === 'en' ? SAMPLES_E
 export function render(template: string, vars: Vars): string {
   let s = template
   for (const v of ['first_name', 'last_name', 'city'] as const) s = s.split(`{{${v}}}`).join(vars[v]) // backend order
-  return s.replace(/ {2,}/g, ' ').replace(/^ +| +$/g, '')
+  return s.replace(/ {2,}/g, ' ').replace(/ +([,.!?])/g, '$1').replace(/^ +| +$/g, '') // the backend's tidying (D72)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -18,6 +19,8 @@ var ErrRefused = errors.New("claude declined the request")
 
 // StreamContent streams Claude's JSON answer piece by piece (D21, D34).
 func (a *Anthropic) StreamContent(ctx context.Context, in ContentInput, onText func(string)) (json.RawMessage, error) {
+	start := time.Now()
+	var firstText time.Duration
 	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 		Model:     a.model,
 		MaxTokens: 16000,
@@ -41,12 +44,17 @@ func (a *Anthropic) StreamContent(ctx context.Context, in ContentInput, onText f
 		}
 		if delta, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
 			if t, ok := delta.Delta.AsAny().(anthropic.TextDelta); ok {
+				if text.Len() == 0 {
+					firstText = time.Since(start)
+				}
 				text.WriteString(t.Text)
 				onText(t.Text)
 			}
 		}
 	}
-	if err := stream.Err(); err != nil {
+	err := stream.Err()
+	logCall("content", start, firstText, msg, text.Len(), err)
+	if err != nil {
 		return nil, fmt.Errorf("claude: %w", err)
 	}
 	switch msg.StopReason {
@@ -84,7 +92,7 @@ const contentSystemPrompt = `You write SMS and email marketing messages for a ca
 
 Write one version for each listed language, keyed by its code, whatever language the brief is in. Write each version natively, as a copywriter in that language would, not translated word for word; keep the tone the brief asks for. Write only for the listed channels.
 
-Personalize only with these variables, written exactly like this: {{first_name}}, {{last_name}}, {{city}}. A value can be empty for some recipients, so the text must still read well without it. Use no other curly braces or placeholders: no links, codes, prices, dates or names in brackets. Do not invent facts the brief does not give.
+Write to one recipient, by name. Start the SMS and the email body by greeting the recipient with {{first_name}}, the way a native speaker greets a customer, e.g. "Merhaba {{first_name}}," or "Hi {{first_name}},"; the subject may use it too. {{first_name}} is a person's first name: use it only where a name fits, never as a label or adjective (not "{{first_name}} müşterilerimize"). Speak to the recipient as "you" ("siz" or "sen", as the brief's tone suggests) and never describe them by their segment, such as "our loyal customers" or "değerli müşterilerimiz". {{city}} is the recipient's city and may be used where a city fits. Do not use {{last_name}}: it is missing for some recipients. Put {{first_name}} after a greeting word, never as the first word of a message: a name can be empty, and "Hi {{first_name}}," then reads "Hi,". Never attach a suffix or apostrophe to a variable: Turkish endings depend on the word, so write "{{city}} için" rather than "{{city}}'da", and "Merhaba {{first_name}}," rather than "{{first_name}}'e özel". Write the variables exactly like this; use no other curly braces or placeholders: no links, codes, prices, dates or names in brackets. Do not invent facts the brief does not give.
 
 Limits, counted in characters after the variables are filled in:
 - SMS body: at most 160. Keep it under 130 so long names still fit.

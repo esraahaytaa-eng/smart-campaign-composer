@@ -262,6 +262,26 @@ func TestUpdateContent(t *testing.T) {
 	}
 }
 
+// The AI must greet each recipient by name in the SMS and the email body
+// (D72); an answer without {{first_name}} there is retried once with the reason.
+func TestGenerate_RequiresFirstNameInAIText(t *testing.T) {
+	t.Parallel()
+	generic := `{"sms":{"body":"Değerli müşterilerimize özel %25 indirim!"},"email":{"subject":"Size özel","body":"Değerli müşterimiz,\n\nİndirim sizi bekliyor."}}`
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", generic), aiAnswer("tr", validContent)}}
+	a := newApp(t, model)
+	d := a.newDraft()
+
+	evs := a.generate(d.ID, 1)
+
+	if got := names(evs); !strings.HasPrefix(got, "delta") || !strings.HasSuffix(got, "retry,delta,done") || len(model.calls) != 2 {
+		t.Fatalf("want a retry then done after 2 calls, got %s after %d", got, len(model.calls))
+	}
+	problems := strings.Join(model.calls[1].Errors, "; ")
+	if !strings.Contains(problems, "tr.sms.body") || !strings.Contains(problems, "tr.email.body") || !strings.Contains(problems, "{{first_name}}") || strings.Contains(problems, "subject") {
+		t.Fatalf("want the SMS and email body named, not the subject: %s", problems)
+	}
+}
+
 func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
 	t.Parallel()
 	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", aiAnswer("tr", validContent)}}
@@ -272,6 +292,23 @@ func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
 
 	if got := names(evs); got != "retry,delta,done" || len(model.calls) != 2 {
 		t.Fatalf("want retry,delta,done after 2 calls, got %s after %d", got, len(model.calls))
+	}
+}
+
+// Each AI call's duration and its wait for the first text are recorded, so
+// slow generations can be split into waiting and writing (D72).
+func TestGenerate_RecordsCallDurations(t *testing.T) {
+	calls := func() float64 { return obstest.Value(t, "scc_llm_call_duration_seconds", "operation", "content") }
+	first := func() float64 { return obstest.Value(t, "scc_llm_first_text_seconds", "operation", "content") }
+	c, f := calls(), first()
+
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}})
+	a.generate(a.newDraft().ID, 1)
+	b := newApp(t, &contentLLM{Mock: llm.NewMock(), err: errors.New("503 overloaded")})
+	b.generate(b.newDraft().ID, 1)
+
+	if calls()-c != 3 || first()-f != 2 {
+		t.Fatalf("want 3 call durations (failed calls too) and 2 first-text waits, got +%v, +%v", calls()-c, first()-f)
 	}
 }
 

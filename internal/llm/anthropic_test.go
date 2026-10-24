@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -421,6 +422,36 @@ func TestAnthropicContent_StreamsTextAndRequestShape(t *testing.T) {
 	}
 }
 
+// Each real call logs its timing and token use, never the prompt or the
+// answer, so a slow generation can be split into waiting and writing (D72).
+func TestAnthropicContent_LogsTimingAndTokens(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	_, url := fakeStream(t, []string{`{"tr":{"sms":{"body":"Merhaba {{first_name}}"}}}`}, "end_turn")
+
+	if _, _, err := streamVia(t, url, ContentInput{Text: "gizli brief", Channels: []string{"sms"}, Languages: []string{"tr"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var line map[string]any
+	if err := json.Unmarshal([]byte(logs.String()), &line); err != nil {
+		t.Fatalf("want one JSON log line, got %q", logs.String())
+	}
+	for _, k := range []string{"seconds", "first_text_seconds", "input_tokens", "output_tokens", "text_chars"} {
+		if _, ok := line[k].(float64); !ok {
+			t.Errorf("log is missing number %s: %v", k, line)
+		}
+	}
+	if line["msg"] != "claude call" || line["operation"] != "content" || line["output_tokens"] != 5.0 || line["stop_reason"] != "end_turn" {
+		t.Errorf("log: %v", line)
+	}
+	if strings.Contains(logs.String(), "gizli") || strings.Contains(logs.String(), "Merhaba") {
+		t.Errorf("the log must not contain the brief or the answer: %s", logs.String())
+	}
+}
+
 func TestAnthropicContent_RefusalAndTruncationAreErrors(t *testing.T) {
 	_, url := fakeStream(t, nil, "refusal")
 	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}, Languages: []string{"tr"}}); !errors.Is(err, ErrRefused) {
@@ -452,6 +483,30 @@ func TestContentPrompt(t *testing.T) {
 	}
 	if strings.Contains(prompt, "@") || strings.Contains(prompt, "+90") {
 		t.Errorf("prompt looks like it contains user records:\n%s", prompt)
+	}
+}
+
+// D72: the AI greets each recipient by name, naturally, and never labels
+// recipients by their segment or leans on last names that may be missing.
+func TestContentSystemPrompt_Personalization(t *testing.T) {
+	for _, want := range []string{"Merhaba {{first_name}},", "Hi {{first_name}},", "never as a label", "loyal customers", "Do not use {{last_name}}", `reads "Hi,"`, "never as the first word", "Never attach a suffix or apostrophe"} {
+		if !strings.Contains(contentSystemPrompt, want) {
+			t.Errorf("system prompt is missing %q", want)
+		}
+	}
+}
+
+// D72: the mock writes like the prompt asks: a greeting word before the name,
+// so an empty name never leaves a leading comma.
+func TestMockTexts_GreetBeforeTheName(t *testing.T) {
+	for name, texts := range map[string]map[string]mockText{"first": mockTexts, "resend": mockResendTexts, "version B": mockVersionBTexts} {
+		for lang, m := range texts {
+			for field, body := range map[string]string{"sms": m.sms, "email body": m.body} {
+				if body != "" && (!strings.Contains(body, "{{first_name}}") || strings.HasPrefix(body, "{{first_name}}")) {
+					t.Errorf("%s %s %s: want a greeting word before {{first_name}}: %q", name, lang, field, body)
+				}
+			}
+		}
 	}
 }
 

@@ -15,6 +15,11 @@ describe('render', () => {
     expect(render('  {{last_name}} hi  ', { ...ayse, last_name: '' })).toBe('hi')
   })
 
+  it('leaves no space before punctuation when a value is empty, like the backend (D72)', () => {
+    expect(render('Merhaba {{first_name}} {{last_name}}, hoş geldin!', { ...ayse, last_name: '' })).toBe('Merhaba Ayşe, hoş geldin!')
+    expect(render('Hi {{last_name}}. Ready {{last_name}}?', { ...ayse, last_name: '' })).toBe('Hi. Ready?')
+  })
+
   it('keeps line breaks', () => {
     expect(render('Merhaba {{first_name}},\n\nİndirim', ayse)).toBe('Merhaba Ayşe,\n\nİndirim')
   })
