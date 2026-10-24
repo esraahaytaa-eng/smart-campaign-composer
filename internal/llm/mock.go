@@ -43,7 +43,7 @@ var MockExamples = []MockExample{
 		`[{"field":"cart_value","op":"gte","value":5000}]`},
 	{"Send a welcome discount to users who signed up in the last 7 days.",
 		`[{"field":"signed_up","op":"within","value":{"last_days":7}}]`},
-	{"Send a loyalty reward to customers who spent more than 10,000 TL in the last 12 months with at least 4 orders, no orders in the last 45 days, and who did not sign up in the last 7 days.",
+	{"Send a loyalty reward to customers who spent more than 10,000 TL in the last 12 months with at least 4 orders in that period, no orders in the last 45 days, and who did not sign up in the last 7 days.",
 		loyalRules},
 	{"Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00.",
 		`[{"field":"city","op":"in","value":["Ankara"]}]`},
@@ -114,7 +114,7 @@ var patterns = []pattern{
 	p(`{city}{'}(?:daki|deki|taki|teki) (?:tüm )?(?:kullanıcılara|müşterilere) {offer} gönder`, cityOnly),
 	p(`send (?:a |an )?{offer} to (?:users|customers) who added (?:products|items) to their (?:cart|basket) since {date} but did not buy anything`, cartSince),
 	p(`{date} tarihinden beri sepetine ürün ekleyip satın almayan (?:kullanıcılara|müşterilere) {offer} gönder`, cartSince),
-	p(`send (?:a |an )?{offer} to customers who spent more than {amount} (?:tl|try|lira) in the last {months} months with at least {count} orders, no orders in the last {n} days,? and who did not sign up in the last {days} days`, loyal),
+	p(`send (?:a |an )?{offer} to customers who spent more than {amount} (?:tl|try|lira) in the last {months} months with at least {count} orders in that period, no orders in the last {n} days,? and who did not sign up in the last {days} days`, loyal),
 	p(`son {months} ayda {amount} (?:tl|lira){'}den fazla harcayan, bu sürede en az {count} sipariş veren, son {n} gündür sipariş vermeyen ve son {days} günde üye olmamış müşterilere {offer} gönder`, loyal),
 }
 

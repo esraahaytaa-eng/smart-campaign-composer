@@ -93,7 +93,7 @@ Audience rules form a flat list; a user must match all of them. Use only these r
 - cart_value / gte or gt: current cart value in TL (number).
 - ordered_category / in, carted_category / in: {"categories": [...], plus a window}: ordered or carted an item of these categories in the window. Only categories from the known list.
 
-Comparisons: "at least", "or more", "minimum" are gte; "at most", "or less", "maximum" are lte; "more than", "over", "above" are gt; "less than", "fewer than", "under", "below" are lt. A spend or order count limited to a period ("in the last 12 months") uses spend_in_window or orders_in_window; total_spend and order_count are for all time.
+Comparisons: "at least", "or more", "minimum" are gte; "at most", "or less", "maximum" are lte; "more than", "over", "above" are gt; "less than", "fewer than", "under", "below" are lt. A spend or order count limited to a period ("in the last 12 months") uses spend_in_window or orders_in_window; total_spend and order_count are for all time. lt and lte on spend or order counts also match users with no orders in that period (they spent 0); if the brief does not make clear whether such users belong in the audience, it is unsupported.
 
 Each field and operator pair may appear at most once (one city rule listing several cities; never two ordered_category rules). If the brief needs the same pair twice with different values, the audience is unsupported.
 

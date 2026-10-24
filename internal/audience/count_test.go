@@ -192,6 +192,27 @@ func TestCount_MatchesHandComputed(t *testing.T) {
 	}
 }
 
+// Validate's canonical output is what gets stored and built: it must select
+// the same users as the rules it came from (D70's rebuilt values included).
+func TestBuild_ValidatedRulesSelectTheSame(t *testing.T) {
+	pool := fixtureDB(t)
+	rules := []audience.Rule{
+		rule("spend_in_window", "gt", `{"last_months": 12, "amount": 10000.0}`),
+		rule("orders_in_window", "gte", `{"last_months": 12, "count": 4}`),
+		rule("signed_up", "before", `{"last_days": 7}`),
+	}
+	valid, errs := audience.Validate(rules, audience.Catalog{})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if string(valid[0].Value) != `{"amount":10000,"last_months":12}` || string(valid[1].Value) != `{"count":4,"last_months":12}` {
+		t.Fatalf("canonical values: %s %s", valid[0].Value, valid[1].Value)
+	}
+	if got, want := matching(t, pool, valid, "sms", now), matching(t, pool, rules, "sms", now); !slices.Equal(got, want) || !slices.Equal(got, []string{"loyal"}) {
+		t.Fatalf("validated rules select %v, raw rules %v, want [loyal]", got, want)
+	}
+}
+
 func TestCount_RelativeWindowMovesWithNow(t *testing.T) {
 	pool := fixtureDB(t)
 	rules := []audience.Rule{rule("cart_added", "within", `{"last_days": 3}`)}

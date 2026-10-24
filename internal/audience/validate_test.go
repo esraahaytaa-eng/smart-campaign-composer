@@ -94,6 +94,8 @@ func TestValidate_Rejects(t *testing.T) {
 		{"orders window without count", rule("orders_in_window", "gte", `{"last_days": 30}`), "count"},
 		{"orders window count not integer", rule("orders_in_window", "gte", `{"count": 4.5, "last_days": 30}`), "value"},
 		{"orders window count too big", rule("orders_in_window", "gte", `{"count": 10001, "last_days": 30}`), "between 0 and 10000"},
+		{"spend window null amount", rule("spend_in_window", "gte", `{"amount": null, "last_days": 30}`), "amount"},
+		{"months and from", rule("cart_added", "within", `{"last_months": 1, "from": "2026-10-01"}`), "either"},
 		{"orders window unknown key", rule("orders_in_window", "gte", `{"count": 1, "amount": 5, "last_days": 30}`), "value"},
 	}
 	for _, tc := range cases {
@@ -166,6 +168,9 @@ func TestFixedWindowStarts(t *testing.T) {
 		rule("ordered_category", "in", `{"categories": ["books"], "from": "2026-10-01", "to": "2026-10-05"}`),
 		rule("spend_in_window", "gte", `{"amount": 100, "from": "2026-09-01"}`),
 		rule("orders_in_window", "gte", `{"count": 1, "last_months": 3}`),
+		// "before" a future date is everyone so far, not an empty window.
+		rule("signed_up", "before", `{"from": "2026-12-01"}`),
+		rule("last_order", "before", `{"from": "2026-12-01"}`),
 	}
 
 	starts, err := audience.FixedWindowStarts(rules, istanbul)

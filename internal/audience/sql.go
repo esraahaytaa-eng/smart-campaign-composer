@@ -261,7 +261,8 @@ func (c windowTotal) sql(b *builder) string {
 
 // FixedWindowStarts returns the start of every fixed-date window in the rules,
 // resolved in loc. A campaign sent before such a start would evaluate an
-// empty window (T9 rejects that at approval).
+// empty window (T9 rejects that at approval). "before" a date is left out:
+// before a future date is everyone so far, not an empty window.
 func FixedWindowStarts(rules []Rule, loc *time.Location) ([]time.Time, error) {
 	var starts []time.Time
 	for i, r := range rules {
@@ -272,8 +273,14 @@ func FixedWindowStarts(rules []Rule, loc *time.Location) ([]time.Time, error) {
 		var w window
 		switch v := c.(type) {
 		case timeRule:
+			if v.op == "before" {
+				continue
+			}
 			w = v.w
 		case lastOrder:
+			if v.op == "before" {
+				continue
+			}
 			w = v.w
 		case categoryRule:
 			w = v.v.window

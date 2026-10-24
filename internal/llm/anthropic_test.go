@@ -124,7 +124,7 @@ func TestInterpretPrompt_ContainsContextNotUserData(t *testing.T) {
 			t.Errorf("system prompt does not describe %s", f.Field)
 		}
 	}
-	for _, want := range []string{"last_months", "gt", "lt", "signed_up / before"} { // D70
+	for _, want := range []string{"last_months", "gt", "lt", "signed_up / before", "users with no orders"} { // D70
 		if !strings.Contains(interpretSystemPrompt, want) {
 			t.Errorf("system prompt does not describe %s", want)
 		}
