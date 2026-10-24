@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/time/rate"
 
 	"smart-campaign-composer/internal/obstest"
@@ -51,6 +52,13 @@ func (p *fakeProvider) serve(t *testing.T) string {
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
+}
+
+// count is how many requests arrived so far; safe while the server runs.
+func (p *fakeProvider) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.requests)
 }
 
 func status(code int, header ...string) func(http.ResponseWriter, *http.Request) {
@@ -327,32 +335,96 @@ func TestRun_RateLimitNoWindowOver100(t *testing.T) {
 	if sent := f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status = 'sent'`, id); sent != 1003 {
 		t.Fatalf("want all 1,003 messages sent, got %d", sent)
 	}
-	// Checked on both sides: the worker's recorded departures (the guarantee)
-	// and what the provider received.
+	// Checked on both sides: what the cap counted and what the provider received.
 	for _, ch := range []string{"sms", "email"} {
 		rows, _ := f.pool.Query(context.Background(), `SELECT a.started_at FROM delivery_attempts a
 			JOIN messages m ON m.id = a.message_id WHERE m.channel = $1`, ch)
-		var departures []time.Time
-		for rows.Next() {
-			var at time.Time
-			rows.Scan(&at)
-			departures = append(departures, at)
+		departures, err := pgx.CollectRows(rows, pgx.RowTo[time.Time])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var arrivals []time.Time
+		for _, r := range p.requests {
+			if r.channel == ch {
+				arrivals = append(arrivals, r.at)
+			}
+		}
+		if len(departures) != len(arrivals) || len(arrivals) < 500 {
+			t.Fatalf("%s: %d recorded departures for %d requests", ch, len(departures), len(arrivals))
 		}
 		if got := mostInOneSecond(departures); got > 100 {
 			t.Fatalf("%s: %d recorded departures in one second, limit is 100", ch, got)
 		}
-	}
-	for _, ch := range []string{"sms", "email"} {
-		var times []time.Time
-		for _, r := range p.requests {
-			if r.channel == ch {
-				times = append(times, r.at)
-			}
+		if got := mostInOneSecond(arrivals); got > 100 {
+			t.Fatalf("%s: the provider received %d requests in one second, limit is 100", ch, got)
 		}
-		// Logged, not asserted: arrival times also carry network and scheduling
-		// jitter outside the worker; the departure check above is the guarantee.
-		t.Logf("%s: %d requests (incl. retries), at most %d arrived in any 1 s window", ch, len(times), mostInOneSecond(times))
 	}
+}
+
+// Audit F6: a message whose text is gone can't be sent: it fails at once
+// instead of being reclaimed every 30 s, and nothing says it may have been delivered.
+func TestProcess_MissingTextFailsWithoutSending(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	f.exec(`DELETE FROM campaign_content WHERE channel = 'sms'`) // only a direct database edit can do this
+	p := &fakeProvider{}
+	job := f.claimOne("sms", 1)
+
+	f.newWorker(p.serve(t)).Process(context.Background(), job)
+
+	m := f.message(job.MessageID)
+	if m.Status != "failed" || m.Attempts != 0 || len(p.requests) != 0 ||
+		f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, job.MessageID) != "false" {
+		t.Fatalf("want failed, unsent and not uncertain; got %+v, %d requests", m, len(p.requests))
+	}
+}
+
+// Audit F6: when the message can't be read (a database error, or shutdown
+// mid-read), nothing was sent: it goes back to the queue, not flagged uncertain.
+func TestProcess_LoadErrorHandsTheMessageBack(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	p := &fakeProvider{}
+	job := f.claimOne("sms", 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := f.newWorker(p.serve(t)).Process(ctx, job); err == nil {
+		t.Fatal("the read error is still reported")
+	}
+
+	m := f.message(job.MessageID)
+	if m.Status != "retry_scheduled" || m.Attempts != 0 || len(p.requests) != 0 ||
+		f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, job.MessageID) != "false" {
+		t.Fatalf("want it back in the queue, unsent and not uncertain; got %+v, %d requests", m, len(p.requests))
+	}
+}
+
+// A worker that died mid-attempt leaves its message "sending"; the running
+// worker takes it back once the lease expires, flagged uncertain, and sends it.
+func TestRun_ReclaimsExpiredLease(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	f.exec(`UPDATE messages SET status = 'sending', lease_token = gen_random_uuid(), lease_expires_at = $1, attempt_count = 1`, time.Now().Add(-time.Second))
+	p := &fakeProvider{}
+	w := f.newWorker(p.serve(t))
+	w.Now, w.Poll = time.Now, 20*time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- w.Run(ctx) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for f.count(`SELECT count(*) FROM messages WHERE status <> 'sent' OR NOT delivery_uncertain`) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the expired leases were not reclaimed and sent")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
 }
 
 // mostInOneSecond is the largest number of times in any 1 s window.

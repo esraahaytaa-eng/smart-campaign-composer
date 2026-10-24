@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"golang.org/x/time/rate"
@@ -137,15 +138,43 @@ func (w *Worker) defaults() {
 }
 
 // Run starts due campaigns, sends their messages and completes them, until
-// ctx ends. A message interrupted by shutdown keeps its lease and is picked
-// up again after it expires (D5).
+// ctx ends. A message interrupted by shutdown keeps its lease and is taken
+// back by ReclaimExpired after it expires (D5).
+//
+// The 100/s limit lives in this process, so only the worker holding the
+// sender lock sends (D19, audit F5): another one waits and takes over when it
+// stops. If the lock's connection fails, sending stops and the lock is taken
+// again before it continues.
 func (w *Worker) Run(ctx context.Context) error {
 	w.defaults()
+	for {
+		lctx, release, err := w.Queue.holdSenderLock(ctx, w.Poll)
+		if err != nil {
+			return nil // ctx ended while waiting
+		}
+		w.send(lctx)
+		if err := release(); err != nil {
+			slog.Error("worker: stopped sending", "err", err)
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
+}
+
+// send runs the campaign loop and the senders until ctx ends. It first waits
+// one cap window: a worker that just stopped may have sent up to 100 requests
+// in its last second, and this one's limiter and cap start empty.
+func (w *Worker) send(ctx context.Context) {
+	sleep(ctx, capWindow)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for ctx.Err() == nil {
+			if _, err := w.Queue.ReclaimExpired(ctx, w.Now()); err != nil && ctx.Err() == nil {
+				slog.Error("worker: reclaim expired leases", "err", err)
+			}
 			if _, err := w.Queue.BuildAudience(ctx, w.Now()); err != nil && ctx.Err() == nil {
 				slog.Error("worker: start campaigns", "err", err)
 			}
@@ -165,7 +194,6 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 	}
 	wg.Wait()
-	return nil
 }
 
 func (w *Worker) sendLoop(ctx context.Context, channel string) {
@@ -221,9 +249,23 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 		return err
 	}
 
+	// A failed load means nothing was sent (audit F6). A message whose text or
+	// customer is gone can never be sent, so it fails; any other error (the
+	// database, shutdown) hands it back, without the uncertain flag that
+	// waiting for its lease to expire would give it.
+	notLoaded := func(err error) error {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.Join(err, done(Result{Status: "failed", LastError: "not sent: its campaign text or customer is missing"}))
+		}
+		w.mu.Lock()
+		next := w.Now().Add(Backoff(j.Attempt, 0, w.BackoffMax, w.Rand))
+		w.mu.Unlock()
+		return errors.Join(err, done(Result{Status: "retry_scheduled", NextAttemptAt: next, LastError: "not sent: the message could not be read, retrying"}))
+	}
+
 	rc, err := w.load(ctx, j)
 	if err != nil {
-		return err
+		return notLoaded(err)
 	}
 	if r, stop := skip(rc); stop {
 		return done(r) // no token taken, no provider call
@@ -239,17 +281,27 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 	if err := w.Limiters[j.Channel].Wait(ctx); err != nil {
 		return errors.Join(err, done(release))
 	}
-	departure, err := w.caps[j.Channel].wait(ctx) // hard cap: ≤100 departures in any second
-	if err != nil {
-		return errors.Join(err, done(release))
-	}
 	// The waits can be long; a cancel or opt-out meanwhile must still stop the
-	// send. This is the last check before the request leaves.
-	if rc, err = w.load(ctx, j); err != nil {
-		return err
-	}
-	if r, stop := skip(rc); stop {
-		return done(r)
+	// send. The departure is recorded only after the last check, right before
+	// the request leaves, so the hard cap (≤100 in any second) counts real
+	// departures, not ones still waiting for the database (audit F4).
+	var departure time.Time
+	for {
+		if rc, err = w.load(ctx, j); err != nil {
+			return notLoaded(err)
+		}
+		if r, stop := skip(rc); stop {
+			return done(r)
+		}
+		var delay time.Duration
+		if departure, delay = w.caps[j.Channel].reserve(); delay == 0 {
+			break
+		}
+		select { // the window is full: wait, then check again
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), done(release))
+		case <-time.After(delay):
+		}
 	}
 
 	attempt := w.call(ctx, j, departure, rc.to, subject, body)
