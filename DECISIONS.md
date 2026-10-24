@@ -304,7 +304,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - **Split:** fixed when the audience is built, 50/50 per language: each language's unique recipients are ordered by `md5(campaign:user)` and alternated A, B. One version per recipient on every channel. Stored on the message; retries reuse it.
   - **Approval:** per language (D66), covering both versions. Editing either version, a new brief (D66) or re-adding a channel with kept text (D67) sets the language to needs review. Turning A/B on sets languages with kept B text to needs review; turning it off keeps B's text, not sent (as D67).
   - **AI cost:** B is written only on request ("Write version B with AI", selected languages only, never touching A), by hand, or copied from A (no AI call). Rewriting B asks first (D66).
-  - **Report:** per version and channel, real delivery data only: recipients, sent, failed, skipped by reason, waiting or retrying, SMS segments. It states that the app records no opens, clicks or orders, and names no winner.
+  - **Report:** per version and channel, real delivery data only: recipients, sent, uncertain, failed, skipped (too-long skips shown separately; every reason in the API), cancelled, waiting or retrying, so each row adds up to its recipients. It states that the app records no opens, clicks or orders, and names no winner.
 - **Why:** Gives CASE.md's optional A/B testing an honest, fair split that real outcomes can join later (orders after sending, then clicks), without an analytics system now.
 - **Rejected:**
   - *Simulated clicks or conversions:* the "result" would be the simulator's settings; looks real, means nothing.
@@ -318,6 +318,9 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - The report can't say which version works better.
   - The split is exact per language; per channel it can differ slightly, as consent and contact details differ.
   - An A/B campaign roughly doubles the AI's content cost for the languages it writes B in, and doubles the text to review.
+  - Before sending, version B's over-limit estimate (`over_limit_b`) measures B's text over the whole audience, though only about half gets it: an upper bound, not a forecast.
+  - P5 (recipient details p95 ≤ 50 ms) is still missed back to back (78.9 ms, one run; T20: 51–73 ms); each request also reads B's text. Met with realistic pauses, as before.
+- **History:** 2026-10-24 (T21 review): the report's metrics corrected to what was built (no SMS segments; uncertain and cancelled added); the B estimate and P5 limitations recorded.
 
 ## Architecture & Technical Decisions
 

@@ -300,6 +300,7 @@ The security review (T19) with its evidence is in `docs/security-review.md`. In 
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
 - A/B report: delivery data only, so it can't show which version works better (D68). The split is exact per language over unique recipients; per channel it can differ slightly, since consent and contact details differ. Content is fixed by the API once approved; a direct database edit would change what retries send.
+- A/B estimate: version B's over-limit count before sending covers the whole audience, though about half gets B, so it is an upper bound. Recipient details (P5) stay over 50 ms p95 back to back (78.9 ms with A/B, one run); met with realistic pauses.
 - Recipient details page by offset (D47): while a campaign sends, rows can move between pages, and the panel shows a snapshot with its time. Sorting by last attempt costs about 15 ms for a 5,000-message group; see `docs/performance.md` for the upgrade path.
 - After a campaign's status stream has ended, a resend created in another tab is noticed when the page is opened again or a resend fails (D36).
 - The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.
