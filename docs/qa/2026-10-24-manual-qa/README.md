@@ -19,7 +19,7 @@
 - **Actual:** "The server didn't accept this change. Details from the server (in English): invalid value for total_spend gte: json: cannot unmarshal string into Go …". No bad data is saved; the server rejects it.
 - **Cause:** an emptied number input holds `''`, and `'' >= 0` is true in JavaScript, so `formProblems` in `web/src/campaign/rules.ts` lets it through. Count and day fields are not affected because they use `Number.isInteger`.
 - **Evidence:** [S4-empty-amount.png](shots/S4-empty-amount.png)
-- **Status:** fixed on branch `fix/rule-amount-validation` (a `Number.isFinite` guard plus 4 test cases; the new tests failed first and pass with the fix; web tests 429/429, lint and build passed).
+- **Status:** fixed in PR #15, merged into `main` (a `Number.isFinite` guard plus 4 test cases; the new tests failed first and pass with the fix; web tests 429/429, lint and build passed).
 
 ## Observations (not bugs; for your decision)
 1. The browser console logs a 401 for `GET /api/me` on the sign-in page. This is the normal "am I signed in?" check, but it shows up as noise in the console.
