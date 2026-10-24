@@ -42,6 +42,10 @@ const active = ref<Lang>('')
 const fieldErrors = ref<Record<string, string[]>>({})
 const incomplete = ref(false)
 let chosen: Lang[] = [] // ticked on the audience step (D71), from the URL
+// This page's own query: route is the current route, which changes if the marketer leaves while it loads.
+const query = { ...route.query }
+let gone = false
+onBeforeUnmount(() => (gone = true))
 
 const saver = createSaver<Campaign>(
   () => campaign.value?.version ?? 0,
@@ -94,16 +98,17 @@ async function load() {
     const [c, cat] = await Promise.all([campaigns.get(id), loadCatalog()])
     catalog.value = cat.languages
     campaign.value = c
-    chosen = chosenLanguages(route.query.languages, cat.languages)
+    chosen = chosenLanguages(query.languages, cat.languages)
     fromCampaign(c)
-    // The AI starts by itself at most once (D71): the signal leaves the URL
-    // first, so reload, Back or Forward never start it again.
-    const langs = autoWrite(route.query, c, cat.languages)
-    if (route.query.write !== undefined) await router.replace({ query: { ...route.query, write: undefined } })
-    if (langs.length) write(langs, false)
     // A resend shows its original message for reference (D48).
     if (c.parent_campaign_id) campaigns.get(c.parent_campaign_id).then((p) => (parent.value = p), () => {})
     await refreshEstimate()
+    // The AI starts by itself at most once (D71): the signal leaves the URL
+    // first, so reload, Back or Forward never start it again.
+    if (gone || query.write === undefined) return
+    const langs = autoWrite(query, c, cat.languages)
+    await router.replace({ name: 'campaign-content', params: { id }, query: { ...query, write: undefined } })
+    if (langs.length && !gone) write(langs, false)
   } catch (err) {
     loadError.value = err
   }
