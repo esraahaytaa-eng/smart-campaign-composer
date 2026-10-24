@@ -140,8 +140,30 @@ func (w *Worker) defaults() {
 // Run starts due campaigns, sends their messages and completes them, until
 // ctx ends. A message interrupted by shutdown keeps its lease and is taken
 // back by ReclaimExpired after it expires (D5).
+//
+// The 100/s limit lives in this process, so only the worker holding the
+// sender lock sends (D19, audit F5): another one waits and takes over when it
+// stops. If the lock's connection fails, sending stops and the lock is taken
+// again before it continues.
 func (w *Worker) Run(ctx context.Context) error {
 	w.defaults()
+	for {
+		lctx, release, err := w.Queue.holdSenderLock(ctx, w.Poll)
+		if err != nil {
+			return nil // ctx ended while waiting
+		}
+		w.send(lctx)
+		if err := release(); err != nil {
+			slog.Error("worker: stopped sending", "err", err)
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
+}
+
+// send runs the campaign loop and the senders until ctx ends.
+func (w *Worker) send(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -169,7 +191,6 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 	}
 	wg.Wait()
-	return nil
 }
 
 func (w *Worker) sendLoop(ctx context.Context, channel string) {

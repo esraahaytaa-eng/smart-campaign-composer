@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -225,6 +226,74 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 		return ErrLeaseLost
 	}
 	return nil
+}
+
+// senderLockKey is the advisory lock held by the one worker that sends (D19).
+const senderLockKey = 0x5cc5e4d
+
+// lockCheck is how often the sending worker checks its lock's connection.
+const lockCheck = time.Second
+
+var errLockLost = errors.New("sender lock lost")
+
+// holdSenderLock waits until this process holds the sender lock, taken on a
+// connection of its own outside the pool. The returned context ends when ctx
+// does or when that connection fails, since the lock may then be gone and
+// another worker may take it. release closes the connection, which frees the
+// lock, and returns errLockLost if the connection failed. The error is ctx's
+// when it ended while waiting.
+func (q *Queue) holdSenderLock(ctx context.Context, poll time.Duration) (context.Context, func() error, error) {
+	cfg := q.Pool.Config().ConnConfig.Copy()
+	var conn *pgx.Conn
+	waiting := false
+	for conn == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		c, err := pgx.ConnectConfig(ctx, cfg)
+		if err == nil {
+			var held bool
+			if err = c.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, senderLockKey).Scan(&held); err == nil && held {
+				conn = c
+				break
+			}
+			c.Close(context.Background())
+		}
+		switch {
+		case err != nil && ctx.Err() == nil:
+			slog.Error("worker: sender lock", "err", err)
+		case err == nil && !waiting:
+			slog.Warn("worker: another worker is sending; waiting to take over")
+			waiting = true
+		}
+		sleep(ctx, poll)
+	}
+	slog.Info("worker: holds the sender lock")
+
+	lctx, cancel := context.WithCancelCause(ctx)
+	checked := make(chan struct{})
+	go func() {
+		defer close(checked)
+		for lctx.Err() == nil {
+			sleep(lctx, lockCheck)
+			pctx, done := context.WithTimeout(lctx, 2*lockCheck)
+			err := conn.Ping(pctx)
+			done()
+			if err != nil && lctx.Err() == nil {
+				cancel(fmt.Errorf("%w: %v", errLockLost, err))
+			}
+		}
+	}()
+	return lctx, func() error {
+		cause := context.Cause(lctx)
+		cancel(nil)
+		<-checked
+		conn.Close(context.Background())
+		if errors.Is(cause, errLockLost) {
+			return cause
+		}
+		return nil
+	}, nil
 }
 
 // FinishCampaigns marks sending campaigns completed once every message is

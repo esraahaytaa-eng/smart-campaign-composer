@@ -464,7 +464,8 @@ func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
 }
 
 // L9: two workers on one queue (a misconfigured second replica) with a flaky
-// provider: still no message is really sent twice.
+// provider: still no message is really sent twice. The sender lock (audit F5)
+// keeps the second one waiting; concurrent claimers are covered in worker.
 func TestLifecycle_TwoWorkers_NoDoubleSend(t *testing.T) {
 	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
