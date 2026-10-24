@@ -257,5 +257,7 @@ The page statement went from 19.0 ms to 5.1 ms of execution (planning from 6.6 t
 | P2 rate | peaks 100 per channel | yes |
 | P3 10 marketers back to back | reads p95 51.2 ms, writes 24.7 ms, 31,278 requests (first run: 26,741), 0 server errors | yes |
 | P4 list search | p95 72.4 ms | yes |
-| P5 recipient details | p95 55.4 ms (T21: 78.9 ms) | no, back to back only, as before. The page statement now averages 8.9 ms under that load. The campaign list's three statements now use the most database time (about 200 s of the phase), so the next gain is there, not in recipient details |
+| P5 recipient details | p95 55.4 ms (T21: 78.9 ms) | no: 5.4 ms over the target, back to back |
 | P6 live screens | 13 ms/s of database time, slowest update 1.86 s behind | yes |
+
+**P5, read accurately.** The miss is 55.4 ms against 50 ms, from one representative run with 10 marketers back to back on one 8-core host, which saturates it (load average above 20 during the phase). One request's own cost is now about 9 ms (`BenchmarkRecipients`, and 8.9 ms mean for the page statement under that load), so the p95 is mostly time spent waiting for CPU behind the whole request mix. The campaign list's three statements use the most database time in that phase (about 200 s, against about 100 s for recipient details). Run-to-run variance on this host is large: the first run measured 77.2 ms while P4, whose code is unchanged, also rose from 72 to 98 ms. With a 1 s pause per request, P5 was last measured at 45 ms in T19, before T20, T21 and D69; it has not been re-measured. No further optimization was made: nothing measured points to a remaining bottleneck in recipient details itself, and how P3–P5 are read (back to back or with pauses) is still Q6.
