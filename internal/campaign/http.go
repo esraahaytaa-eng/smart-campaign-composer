@@ -56,6 +56,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
+	mux.HandleFunc("POST /api/campaigns/{id}/languages/{lang}/approve", h.approveLanguage)
 	mux.HandleFunc("POST /api/campaigns/{id}/approve", h.approve)
 	mux.HandleFunc("POST /api/campaigns/{id}/cancel", h.cancel)
 	mux.HandleFunc("GET /api/campaigns/{id}/estimate", h.estimate)
@@ -300,7 +301,13 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 		note = &got.ScheduleNote
 	}
 	rulesJSON, _ := json.Marshal(got.Rules)
-	tag, err := h.Pool.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
 		version = version + 1, updated_at = now() WHERE id = $1 AND version = $2 AND status = 'draft'`,
 		id, *in.Version, strings.TrimSpace(in.Request), rulesJSON, got.SuggestedSendAt, note)
 	if err != nil {
@@ -309,6 +316,17 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if tag.RowsAffected() == 0 {
 		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	// The text is kept as it is, but was written for the old brief: every
+	// language needs review again (D66).
+	if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL, outdated = true
+		WHERE campaign_id = $1`, id); err != nil {
+		serverError(w, "mark content outdated", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
 		return
 	}
 	h.respond(w, ctx, http.StatusOK, id)

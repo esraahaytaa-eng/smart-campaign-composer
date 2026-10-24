@@ -233,6 +233,7 @@ func TestEndToEnd(t *testing.T) {
 		if !strings.Contains(gen.Body.String(), "event: done") {
 			t.Fatalf("content generation did not finish: %s", gen.Body)
 		}
+		s.json(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/languages/tr/approve", `{"version":2}`, 200)
 		approved := s.json(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/approve", `{"version":2,"send":"now"}`, 200)
 		est := approved["approval_estimate"].(map[string]any)
 
@@ -262,6 +263,7 @@ func TestEndToEnd(t *testing.T) {
 		path := "/api/campaigns/" + strconv.FormatInt(cid, 10)
 		s.json(http.MethodPut, path+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}}`, 200)
 		sendAt := time.Now().Add(4 * time.Second)
+		s.json(http.MethodPost, path+"/languages/tr/approve", `{"version":2}`, 200)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":{"at":"`+sendAt.Format(time.RFC3339Nano)+`"}}`, 200)
 
 		time.Sleep(time.Until(sendAt.Add(-2 * time.Second)))
@@ -294,6 +296,7 @@ func TestEndToEnd(t *testing.T) {
 		// roughly half the recipients go over 160.
 		long := "Merhaba {{first_name}} {{last_name}}, " + strings.Repeat("ş", 123) + " {{city}}'da %30!"
 		s.json(http.MethodPut, path+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":`+strconv.Quote(long)+`}}}}`, 200)
+		s.json(http.MethodPost, path+"/languages/tr/approve", `{"version":2}`, 200)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":"now"}`, 200)
 		s.waitStatus(cid, "completed", 90*time.Second)
 		s.checkDelivery(cid)
@@ -307,6 +310,7 @@ func TestEndToEnd(t *testing.T) {
 		rid := id(r)
 		rpath := "/api/campaigns/" + strconv.FormatInt(rid, 10)
 		s.json(http.MethodPut, rpath+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"{{first_name}}, %30 indirim seni bekliyor!"}}}}`, 200)
+		s.json(http.MethodPost, rpath+"/languages/tr/approve", `{"version":2}`, 200)
 		s.json(http.MethodPost, rpath+"/approve", `{"version":2,"send":"now"}`, 200)
 		s.waitStatus(rid, "completed", 90*time.Second)
 		s.checkDelivery(rid)

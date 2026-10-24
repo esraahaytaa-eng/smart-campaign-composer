@@ -11,13 +11,14 @@ import (
 )
 
 // readyDraft is the case-example draft (1 recipient on each channel) with
-// valid content; it is at version 2.
+// valid Turkish content, approved by the marketer; it is at version 2.
 func (a *app) readyDraft() draft {
 	a.t.Helper()
 	d := a.newDraft()
 	if rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":1,"default_language":"tr","content":{"tr":`+validContent+`}}`); rec.Code != http.StatusOK {
 		a.t.Fatalf("content: %d %s", rec.Code, rec.Body)
 	}
+	a.approveLanguages(d.ID, 2, "tr")
 	return d
 }
 

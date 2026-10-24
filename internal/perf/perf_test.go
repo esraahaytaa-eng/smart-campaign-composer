@@ -136,6 +136,7 @@ func fullSend(t *testing.T, ctx context.Context, pool *pgxpool.Pool, c *client, 
 		t.Fatal(err)
 	}
 	statsFrom := time.Now()
+	c.must(http.MethodPost, fmt.Sprintf("/api/campaigns/%d/languages/tr/approve", draft.ID), map[string]any{"version": draft.Version}, 200)
 	c.must(http.MethodPost, fmt.Sprintf("/api/campaigns/%d/approve", draft.ID), map[string]any{"version": draft.Version, "send": "now"}, 200)
 	select {
 	case <-polled:

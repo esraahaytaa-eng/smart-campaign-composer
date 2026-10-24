@@ -203,7 +203,8 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 // saveContent writes the text of the given languages for the chosen channels
 // if the draft still has the expected version, and returns the new version.
 // With all set, languages not given are removed. Text of channels that aren't
-// chosen is kept as it is (D67).
+// chosen is kept as it is (D67). A language whose text changed needs review
+// again; one saved unchanged keeps its approval (D66).
 func (h *Handler) saveContent(ctx context.Context, id int64, version int, v content.Variants, def content.Lang, all bool) (int, error) {
 	tx, err := h.Pool.Begin(ctx)
 	if err != nil {
@@ -231,6 +232,7 @@ func (h *Handler) saveContent(ctx context.Context, id int64, version int, v cont
 		if _, err := tx.Exec(ctx, `INSERT INTO campaign_languages (campaign_id, language) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, lang); err != nil {
 			return 0, err
 		}
+		changed := false
 		for ch, m := range map[string]*content.Message{"sms": c.SMS, "email": c.Email} {
 			if m == nil || !slices.Contains(channels, ch) {
 				continue
@@ -239,9 +241,18 @@ func (h *Handler) saveContent(ctx context.Context, id int64, version int, v cont
 			if ch == "email" {
 				subject = &m.Subject
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES ($1, $2, $3, $4, $5)
-				ON CONFLICT (campaign_id, channel, language) DO UPDATE SET subject = excluded.subject, body = excluded.body`,
-				id, ch, lang, subject, m.Body); err != nil {
+			tag, err := tx.Exec(ctx, `INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES ($1, $2, $3, $4, $5)
+				ON CONFLICT (campaign_id, channel, language) DO UPDATE SET subject = excluded.subject, body = excluded.body
+				WHERE (campaign_content.subject, campaign_content.body) IS DISTINCT FROM (excluded.subject, excluded.body)`,
+				id, ch, lang, subject, m.Body)
+			if err != nil {
+				return 0, err
+			}
+			changed = changed || tag.RowsAffected() > 0
+		}
+		if changed {
+			if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL
+				WHERE campaign_id = $1 AND language = $2`, id, lang); err != nil {
 				return 0, err
 			}
 		}

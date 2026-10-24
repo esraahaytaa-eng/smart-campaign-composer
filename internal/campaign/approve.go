@@ -151,6 +151,13 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}
+	if names, err := unapprovedLanguages(ctx, tx, id); err != nil {
+		serverError(w, "load languages", err)
+		return
+	} else if names != "" {
+		writeError(w, http.StatusUnprocessableEntity, "review and approve every language first: "+names)
+		return
+	}
 	if msg, err := checkWindowsStartBefore(c, sendAt); err != nil {
 		serverError(w, "check windows", err)
 		return

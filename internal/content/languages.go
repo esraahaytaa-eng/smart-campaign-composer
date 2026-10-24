@@ -28,6 +28,16 @@ func IsLanguage(l Lang) bool {
 	return slices.ContainsFunc(Languages, func(x Language) bool { return x.Code == l })
 }
 
+// LanguageName is a language's own name; the legacy label has none.
+func LanguageName(l Lang) string {
+	for _, x := range Languages {
+		if x.Code == l {
+			return x.Name
+		}
+	}
+	return "language not recorded"
+}
+
 // Variants holds a campaign's content per language.
 type Variants map[Lang]Content
 
