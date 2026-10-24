@@ -65,7 +65,7 @@ watch(
     if (JSON.stringify(q) !== JSON.stringify(old)) {
       openRow.value = null
       // Another tab or channel: show nothing rather than the last one's rows.
-      if (old && (q.group !== old.group || q.channel !== old.channel || q.language !== old.language)) data.value = null
+      if (old && (q.group !== old.group || q.channel !== old.channel || q.language !== old.language || q.variant !== old.variant)) data.value = null
       load(q)
     }
   },
@@ -112,6 +112,9 @@ const languages = computed<Lang[]>(() => {
   const all = orderLanguages(Object.keys(props.campaign.content ?? {}), props.campaign.default_language, catalog.value)
   return all.length > 1 ? ['', ...all] : []
 })
+// An A/B test's versions (D68); the filter shows only for a test.
+const VERSIONS = [undefined, 'a', 'b'] as const
+const versionName = (v: 'a' | 'b') => t('ab.version', { v: v.toUpperCase() })
 
 // The reason box: each reason with its count and what it means; groups
 // without reasons get one line for the whole group.
@@ -200,6 +203,11 @@ function resend(ch: Channel) {
                 {{ l ? langName(l) : t('recipients.allLanguages') }}
               </button>
             </div>
+            <div v-if="campaign.ab_test" role="group" class="segmented" :aria-label="t('ab.report.version')">
+              <button v-for="v in VERSIONS" :key="v ?? 'all'" type="button" :aria-pressed="query.variant === v" @click="set({ variant: v })">
+                {{ v ? versionName(v) : t('ab.recipients.all') }}
+              </button>
+            </div>
           </div>
 
           <div v-if="loadError" role="alert" class="alert alert-error">{{ errorText(loadError) }}</div>
@@ -229,7 +237,7 @@ function resend(ch: Channel) {
                   <div role="row" class="row" :class="{ open: openRow === r.id }">
                     <span role="cell" class="who"><strong class="name">{{ r.name }}</strong><span class="contact">{{ r.contact }}</span></span>
                     <span role="cell">{{ t(`channel.${r.channel}`) }}</span>
-                    <span role="cell">{{ langName(r.language) }}</span>
+                    <span role="cell">{{ langName(r.language) }}<template v-if="r.variant"> · {{ versionName(r.variant) }}</template></span>
                     <span role="cell"><span :class="['badge', r.group]">{{ groupLabel(r.group) }}</span></span>
                     <span role="cell" class="why">
                       <span>{{ r.reason ? label('reasonName', r.reason) : label('infoName', r.group) }}</span>

@@ -55,6 +55,13 @@ const reasonSQL = `CASE ` + groupSQL + `
 // recentWindow is how far back rate_limited_recent counts 429s.
 const recentWindow = 5 * time.Minute
 
+// variantStatus is one version's delivery on one channel.
+type variantStatus struct {
+	Audience    int            `json:"audience"`
+	Groups      map[string]int `json:"groups"`
+	SkipReasons map[string]int `json:"skip_reasons"`
+}
+
 // statusSnapshot is what the dashboard shows live (D16). Counts come from the
 // database; the approval estimate is kept next to the actual audience.
 type statusSnapshot struct {
@@ -76,8 +83,10 @@ type channelStatus struct {
 	RateLimited       int                       `json:"rate_limited"`
 	RateLimitedRecent int                       `json:"rate_limited_recent"` // in the last recentWindow
 	SkipReasons       map[string]int            `json:"skip_reasons"`
-	Resendable        int                       `json:"resendable"` // who a resend would reach now (D31)
-	ActiveResendID    *int64                    `json:"active_resend_id"`
+	// An A/B test's delivery per version (D68): real outcomes only, never a winner.
+	ByVariant      map[string]*variantStatus `json:"by_variant,omitempty"`
+	Resendable     int                       `json:"resendable"` // who a resend would reach now (D31)
+	ActiveResendID *int64                    `json:"active_resend_id"`
 }
 
 // events streams the campaign's status: a snapshot at once, then one on each
@@ -164,20 +173,38 @@ func (h *Handler) snapshot(ctx context.Context, id int64) (statusSnapshot, error
 		s.Channels[ch] = cs
 	}
 
-	rows, err := tx.Query(ctx, `SELECT channel, status, coalesce(skip_reason, ''), `+groupSQL+`, count(*)
-		FROM messages m WHERE campaign_id = $1 GROUP BY 1, 2, 3, 4`, id)
+	rows, err := tx.Query(ctx, `SELECT channel, status, coalesce(skip_reason, ''), `+groupSQL+`, coalesce(variant, ''), count(*)
+		FROM messages m WHERE campaign_id = $1 GROUP BY 1, 2, 3, 4, 5`, id)
 	if err != nil {
 		return s, err
 	}
-	var ch, status, reason, group string
+	var ch, status, reason, group, variant string
 	var n int
-	_, err = pgx.ForEachRow(rows, []any{&ch, &status, &reason, &group, &n}, func() error {
+	_, err = pgx.ForEachRow(rows, []any{&ch, &status, &reason, &group, &variant, &n}, func() error {
 		cs := s.Channels[ch]
 		cs.Audience += n
 		cs.Counts[status] += n
 		cs.Groups[group] += n
 		if reason != "" {
 			cs.SkipReasons[reason] += n
+		}
+		if variant != "" {
+			if cs.ByVariant == nil {
+				cs.ByVariant = map[string]*variantStatus{}
+			}
+			vs := cs.ByVariant[variant]
+			if vs == nil {
+				vs = &variantStatus{Groups: map[string]int{}, SkipReasons: map[string]int{}}
+				for _, g := range deliveryGroups {
+					vs.Groups[g] = 0
+				}
+				cs.ByVariant[variant] = vs
+			}
+			vs.Audience += n
+			vs.Groups[group] += n
+			if reason != "" {
+				vs.SkipReasons[reason] += n
+			}
 		}
 		if status == "pending" || status == "sending" || status == "retry_scheduled" {
 			s.inFlight = true

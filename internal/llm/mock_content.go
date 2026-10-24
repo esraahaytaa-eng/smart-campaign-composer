@@ -34,12 +34,29 @@ var mockResendTexts = map[string]mockText{
 	"en": {sms: "{{first_name}}, your offer is waiting!", subject: "Your offer is waiting"},
 }
 
+// mockVersionBTexts are the mock's alternatives for an A/B test's version B (D68).
+var mockVersionBTexts = map[string]mockText{
+	"tr": {
+		sms:     "{{first_name}}, fırsat bugün bitiyor! Şimdi göz at.",
+		subject: "Son gün, {{first_name}}",
+		body:    "Merhaba {{first_name}},\n\nFırsat bugün sona eriyor. Kaçırma!\n\nSmart Campaign Composer",
+	},
+	"en": {
+		sms:     "{{first_name}}, the offer ends today! Take a look now.",
+		subject: "Last day, {{first_name}}",
+		body:    "Hi {{first_name}},\n\nThe offer ends today. Don't miss it!\n\nSmart Campaign Composer",
+	},
+}
+
 // StreamContent returns fixed, valid templates in each selected language and
 // streams them in small chunks, ChunkDelay apart, like a real model would.
 func (m *Mock) StreamContent(ctx context.Context, in ContentInput, onText func(string)) (json.RawMessage, error) {
 	out := map[string]map[string]mockMessage{}
 	for _, lang := range in.Languages {
 		texts := mockTexts[lang]
+		if in.VersionA != nil {
+			texts = mockVersionBTexts[lang]
+		}
 		if in.Resend {
 			short := mockResendTexts[lang]
 			texts.sms, texts.subject = short.sms, short.subject

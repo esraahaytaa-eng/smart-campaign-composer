@@ -71,6 +71,8 @@ const channels = computed<Channel[]>(() => campaign.value?.channels ?? [])
 const at = computed(() => fromLocalInput(localAt.value))
 const counts = computed(() => estimate.value?.audience ?? campaign.value?.counts ?? { total: 0, sms: 0, email: 0 })
 const over = computed(() => estimate.value?.over_limit?.by_language?.[active.value] ?? null)
+const overB = computed(() => estimate.value?.over_limit_b?.by_language?.[active.value] ?? null)
+const LETTERS = ['A', 'B'] as const // i18n-ignore: version names, the same in every language
 const messages = computed(() => channels.value.reduce((n, c) => n + (counts.value[c] ?? 0), 0))
 const blockers = computed<Blocker[]>(() =>
   campaign.value
@@ -79,6 +81,8 @@ const blockers = computed<Blocker[]>(() =>
         content: campaign.value.content,
         defaultLanguage: campaign.value.default_language,
         languages: campaign.value.languages ?? {},
+        abTest: campaign.value.ab_test,
+        contentB: campaign.value.content_b,
         audience: counts.value.total,
         when: when.value,
         at: at.value,
@@ -97,6 +101,7 @@ const langs = computed(() => orderLanguages(Object.keys(campaign.value?.content 
 const delivery = computed(() => estimate.value?.delivery ?? campaign.value?.delivery ?? {})
 const sample = computed(() => samplesFor(active.value)[0]!.vars)
 const activeContent = computed(() => campaign.value?.content?.[active.value] ?? null)
+const activeContentB = computed(() => campaign.value?.content_b?.[active.value] ?? null)
 function stateOf(l: Lang): 'approved' | 'outdated' | 'needsReview' {
   const s = campaign.value?.languages?.[l]
   if (s?.approved_at) return 'approved'
@@ -230,10 +235,23 @@ function reload() {
                   {{ name(l) }}
                 </button>
               </div>
-              <MessagePreview v-if="activeContent" :key="active" :content="activeContent" :channels="channels" :samples="samplesFor(active)" />
-              <p v-else class="muted">{{ t('content.empty') }}</p>
-              <p v-if="over?.sms" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overSms', { count: formatNumber(over.sms) }) }}</p>
-              <p v-if="over?.email" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overEmail', { count: formatNumber(over.email) }) }}</p>
+              <p v-if="campaign.ab_test" class="muted">{{ t('ab.split') }}</p>
+              <div :class="{ 'ab-compare': campaign.ab_test }">
+                <div>
+                  <h3 v-if="campaign.ab_test" class="version-title">{{ t('ab.version', { v: LETTERS[0] }) }}</h3>
+                  <MessagePreview v-if="activeContent" :key="active" :content="activeContent" :channels="channels" :samples="samplesFor(active)" />
+                  <p v-else class="muted">{{ t('content.empty') }}</p>
+                  <p v-if="over?.sms" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overSms', { count: formatNumber(over.sms) }) }}</p>
+                  <p v-if="over?.email" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overEmail', { count: formatNumber(over.email) }) }}</p>
+                </div>
+                <div v-if="campaign.ab_test">
+                  <h3 class="version-title">{{ t('ab.version', { v: LETTERS[1] }) }}</h3>
+                  <MessagePreview v-if="activeContentB" :key="`${active}-b`" :content="activeContentB" :channels="channels" :samples="samplesFor(active)" />
+                  <p v-else class="muted">{{ t('ab.missingB') }}</p>
+                  <p v-if="overB?.sms" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overSms', { count: formatNumber(overB.sms) }) }}</p>
+                  <p v-if="overB?.email" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overEmail', { count: formatNumber(overB.email) }) }}</p>
+                </div>
+              </div>
             </section>
           </div>
 
@@ -416,6 +434,15 @@ function reload() {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink-2);
+}
+.ab-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.version-title {
+  font-size: 14px;
+  margin: 0 0 8px;
 }
 .by-language {
   margin: 0;

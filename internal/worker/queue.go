@@ -54,12 +54,13 @@ func (q *Queue) buildOne(ctx context.Context, now time.Time) (bool, error) {
 		parent   *int64
 		def      *string // set on every approved campaign with content
 		langs    []string
+		abTest   bool
 	)
 	// SKIP LOCKED: concurrent builders take different campaigns; a cancel waits for this one.
 	err = tx.QueryRow(ctx, `SELECT id, channels, rules, time_zone, parent_campaign_id, default_language,
-			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id)
+			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id), ab_test
 		FROM campaigns c WHERE status = 'approved' AND send_at <= $1 ORDER BY send_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).
-		Scan(&id, &channels, &rules, &zone, &parent, &def, &langs)
+		Scan(&id, &channels, &rules, &zone, &parent, &def, &langs, &abTest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -94,6 +95,18 @@ func (q *Queue) buildOne(ctx context.Context, now time.Time) (bool, error) {
 			return false, fmt.Errorf("campaign %d: create messages: %w", id, err)
 		}
 		created += tag.RowsAffected()
+	}
+
+	// An A/B test splits each language's unique recipients 50/50 (D68): in
+	// md5 order, alternately A and B, so the split is exact even for a few
+	// recipients, reproducible, and the same on every channel. Retries reuse it.
+	if abTest {
+		if _, err := tx.Exec(ctx, `UPDATE messages m SET variant = CASE WHEN r.n % 2 = 1 THEN 'a' ELSE 'b' END
+			FROM (SELECT user_id, row_number() OVER (PARTITION BY language ORDER BY md5($1::text || ':' || user_id), user_id) AS n
+				FROM (SELECT user_id, min(language) AS language FROM messages WHERE campaign_id = $1 GROUP BY user_id) u) r
+			WHERE m.campaign_id = $1 AND m.user_id = r.user_id`, id); err != nil {
+			return false, fmt.Errorf("campaign %d: assign versions: %w", id, err)
+		}
 	}
 
 	status := "sending"

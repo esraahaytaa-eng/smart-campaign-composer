@@ -118,3 +118,17 @@ describe('attemptView', () => {
     expect(attemptView(attempt({ outcome: 'server_error', http_status: 500 }), true, recipient({ group: 'retrying' })).next).toBe('retry')
   })
 })
+
+// D68: the version filter of an A/B test lives in the URL like the others.
+describe('the version filter', () => {
+  it('round-trips through the URL and the API path', () => {
+    const q: RecipientsQuery = { ...base, variant: 'b' }
+    expect(writeQuery(q)).toEqual({ recipients: 'failed', variant: 'b' })
+    expect(readQuery({ recipients: 'failed', variant: 'b' })?.variant).toBe('b')
+    expect(recipientsPath(7, q)).toBe('/api/campaigns/7/recipients?group=failed&variant=b&page=1')
+  })
+
+  it('ignores anything but a or b', () => {
+    expect(readQuery({ recipients: 'failed', variant: 'c' })?.variant).toBeUndefined()
+  })
+})

@@ -13,6 +13,8 @@ export type ApprovalState = {
   at: string | null
   reviewed: boolean
   scheduleProblem: ScheduleProblem | null
+  abTest?: boolean // an A/B test needs version B in every language (D68)
+  contentB?: Variants | null
 }
 
 export type Blocker =
@@ -23,6 +25,7 @@ export type Blocker =
   | 'missingEmail'
   | 'missingDefault'
   | 'unapprovedLanguage'
+  | 'missingVersionB'
   | 'scheduleInvalid'
   | 'scheduleTooSoon'
   | 'scheduleTooLate'
@@ -37,6 +40,7 @@ export function approvalBlockers(s: ApprovalState): Blocker[] {
   if (s.content && Object.keys(s.content).length > 0) {
     if (s.defaultLanguage === null || s.content[s.defaultLanguage] === undefined) out.push('missingDefault')
     if (Object.keys(s.content).some((l) => !s.languages[l]?.approved_at)) out.push('unapprovedLanguage')
+    if (s.abTest && Object.keys(s.content).some((l) => !s.contentB?.[l])) out.push('missingVersionB')
   }
   if (s.audience <= 0) out.push('noAudience')
   if (s.when === null) out.push('chooseWhen')

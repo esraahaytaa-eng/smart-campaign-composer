@@ -80,3 +80,29 @@ func ForChannels(c Content, channels []string) Content {
 	}
 	return c
 }
+
+// ValidateVersionB checks an A/B test's version B (D68): only languages that
+// have version A, each complete for the chosen channels. complete also
+// requires every language of a to have version B, as approval does. Fields
+// are prefixed with "b.": "b.en.sms.body".
+func ValidateVersionB(a, b Variants, channels []string, complete bool) []FieldError {
+	var errs []FieldError
+	for lang, c := range b {
+		if _, ok := a[lang]; !ok {
+			errs = append(errs, FieldError{"b." + lang, "version B needs version A in the same language"})
+			continue
+		}
+		for _, e := range ValidateDraft(ForChannels(c, channels), channels) {
+			errs = append(errs, FieldError{"b." + lang + "." + e.Field, e.Message})
+		}
+	}
+	if complete {
+		for lang := range a {
+			if _, ok := b[lang]; !ok {
+				errs = append(errs, FieldError{"b." + lang, "write version B in this language"})
+			}
+		}
+	}
+	slices.SortFunc(errs, func(x, y FieldError) int { return strings.Compare(x.Field, y.Field) })
+	return errs
+}

@@ -208,3 +208,17 @@ Not changed by these fixes, and still as above: P4 and P5 under back-to-back loa
 | P7 first load | 96.5 / 103.7 / 109.8 kB gzipped (sign-in / dashboard / list), as after D60 (96–109 kB) | unchanged |
 
 The first run found a 500 in recipient details: a finished campaign with no language anywhere (the perf fixture inserts one directly, without content) made the row's language NULL. Real campaigns can't reach that state, but the row now reads "not recorded" (`und`) instead (`TestRecipients_NoLanguageAnywhere`).
+
+## With an A/B test (T21), 2026-10-24
+
+`make perf` now runs the full send as a two-language A/B campaign (D68): the build also splits each language's recipients 50/50 and the live screens count per version. One run, same machine, load average 7–9.
+
+| Target | Measured | Met |
+|---|---|---|
+| P1 full send | 4,191 messages: 95% at 24.2 s, all at 41.7 s (T20: all at 38.0–42.5 s) | yes |
+| P2 rate | peaks 100 per channel | yes |
+| P3 10 marketers back to back | reads p95 57.1 ms, writes 23.3 ms, 0 server errors | yes |
+| P4 list search | p95 64.7 ms | yes |
+| P5 recipient details | p95 78.9 ms (T20: 51–73 ms) | no, back-to-back only, as before; each request now also reads version B's text for the over-limit detail (one more small query). One run, so the 6 ms over T20's last run isn't shown to be more than noise |
+| P6 live screens | 13 ms/s of database time, slowest update 1.13 s behind | yes |
+| P7 first load | 96.8 / 104.1 / 110.2 kB gzipped (sign-in / dashboard / list), about 0.3 kB more than T20 (the A/B text) | unchanged |

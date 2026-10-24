@@ -30,6 +30,9 @@ export type Campaign = {
   content: Variants | null
   default_language: Lang | null
   languages?: Record<Lang, LanguageState>
+  // an A/B test's version B per language (D68); content is version A
+  ab_test?: boolean
+  content_b?: Variants
   // drafts only: a suggestion, never a restriction (D64), and who gets which text
   recommendation?: { languages: Lang[]; default: Lang }
   delivery?: Partial<Record<Channel, Record<Lang, DeliveryCount>>>

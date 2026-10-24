@@ -55,6 +55,7 @@ type recipientJSON struct {
 	Contact       string        `json:"contact"`
 	Channel       string        `json:"channel"`
 	Language      content.Lang  `json:"language"` // whose text it got: its own, else the default (D64)
+	Variant       *string       `json:"variant"`  // an A/B test's version (D68), else null
 	Group         string        `json:"group"`
 	Reason        *string       `json:"reason"`
 	Detail        *overLimit    `json:"detail"`
@@ -84,7 +85,7 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	qs := r.URL.Query()
-	group, channel, q, lang := qs.Get("group"), qs.Get("channel"), strings.TrimSpace(qs.Get("q")), qs.Get("language")
+	group, channel, q, lang, variant := qs.Get("group"), qs.Get("channel"), strings.TrimSpace(qs.Get("q")), qs.Get("language"), qs.Get("variant")
 	page := 1
 	if p := qs.Get("page"); p != "" {
 		n, err := strconv.Atoi(p)
@@ -104,12 +105,15 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 	case lang != "" && !content.IsLanguage(lang) && lang != content.LegacyLang:
 		writeError(w, http.StatusUnprocessableEntity, "language must be a supported language or "+content.LegacyLang)
 		return
+	case variant != "" && variant != "a" && variant != "b":
+		writeError(w, http.StatusUnprocessableEntity, "variant must be a or b")
+		return
 	case utf8.RuneCountInString(q) > maxNameQuery:
 		writeError(w, http.StatusUnprocessableEntity, "the name search is limited to "+strconv.Itoa(maxNameQuery)+" characters")
 		return
 	}
 
-	out, err := h.listRecipients(r.Context(), id, group, channel, q, lang, page)
+	out, err := h.listRecipients(r.Context(), id, group, channel, q, lang, variant, page)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "campaign not found")
 		return
@@ -121,10 +125,14 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q, lang string, page int) (recipientsResponse, error) {
+func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q, lang, variant string, page int) (recipientsResponse, error) {
 	out := recipientsResponse{AsOf: h.Now(), Groups: map[string]map[string]int{}, Reasons: map[string]int{},
 		Page: page, PageSize: recipientsPageSize, Recipients: []recipientJSON{}}
-	v, err := h.loadContent(ctx, id) // fixed after approval (D11)
+	v, err := h.loadContent(ctx, id, "a") // fixed after approval (D11)
+	if err != nil {
+		return out, err
+	}
+	vb, err := h.loadContent(ctx, id, "b")
 	if err != nil {
 		return out, err
 	}
@@ -189,6 +197,10 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 		args = append(args, lang)
 		where += ` AND ` + messageLangSQL + ` = $` + strconv.Itoa(len(args))
 	}
+	if variant != "" {
+		args = append(args, variant)
+		where += ` AND m.variant = $` + strconv.Itoa(len(args))
+	}
 	if err := tx.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&out.Total); err != nil {
 		return out, err
 	}
@@ -198,7 +210,7 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 			ORDER BY last_at DESC NULLS LAST, m.id DESC
 			LIMIT `+strconv.Itoa(recipientsPageSize)+` OFFSET `+strconv.Itoa((page-1)*recipientsPageSize)+`)
 		SELECT m.id, concat_ws(' ', u.first_name, u.last_name), u.first_name, coalesce(u.last_name, ''), u.city,
-			CASE m.channel WHEN 'sms' THEN u.phone ELSE u.email END, m.channel, `+messageLangSQL+`, `+reasonSQL+`,
+			CASE m.channel WHEN 'sms' THEN u.phone ELSE u.email END, m.channel, `+messageLangSQL+`, m.variant, `+reasonSQL+`,
 			CASE WHEN m.status = 'retry_scheduled' THEN m.next_attempt_at END
 		FROM page p JOIN messages m ON m.id = p.id JOIN users u ON u.id = m.user_id`+lastAttemptsSQL+`
 		ORDER BY p.last_at DESC NULLS LAST, m.id DESC`, args...)
@@ -208,14 +220,18 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 	byID := map[int64]int{}
 	var first, last, city, contact string
 	var rc recipientJSON
-	if _, err := pgx.ForEachRow(rows, []any{&rc.ID, &rc.Name, &first, &last, &city, &contact, &rc.Channel, &rc.Language, &rc.Reason, &rc.NextAttemptAt}, func() error {
+	if _, err := pgx.ForEachRow(rows, []any{&rc.ID, &rc.Name, &first, &last, &city, &contact, &rc.Channel, &rc.Language, &rc.Variant, &rc.Reason, &rc.NextAttemptAt}, func() error {
 		rc.Group, rc.Attempts, rc.Detail = group, []attemptJSON{}, nil
 		if rc.Channel == "sms" {
 			rc.Contact = maskPhone(contact)
 		} else {
 			rc.Contact = maskEmail(contact)
 		}
-		if tpl, ok := v[rc.Language]; ok && rc.Reason != nil && *rc.Reason == "character_limit_exceeded" {
+		texts := v
+		if rc.Variant != nil && *rc.Variant == "b" {
+			texts = vb
+		}
+		if tpl, ok := texts[rc.Language]; ok && rc.Reason != nil && *rc.Reason == "character_limit_exceeded" {
 			rc.Detail = overLimitDetail(tpl, rc.Channel, content.UserVars{FirstName: first, LastName: last, City: city})
 		}
 		byID[rc.ID] = len(out.Recipients)

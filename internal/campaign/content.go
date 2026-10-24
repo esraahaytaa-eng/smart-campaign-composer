@@ -39,6 +39,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		Languages       []content.Lang `json:"languages"`
 		DefaultLanguage content.Lang   `json:"default_language"` // optional: the default to set
 		Replace         bool           `json:"replace"`          // rewrite languages that have text
+		Variant         string         `json:"variant"`          // "b": write an A/B test's version B (D68)
 	}
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
 		return
@@ -53,9 +54,10 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	var isResend bool
 	var def *string
 	var written []content.Lang
+	var abTest bool
 	if err := h.Pool.QueryRow(r.Context(), `SELECT request_text, channels, version, parent_campaign_id IS NOT NULL, default_language,
-			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id)
-		FROM campaigns c WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend, &def, &written); err != nil {
+			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id), ab_test
+		FROM campaigns c WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend, &def, &written, &abTest); err != nil {
 		serverError(w, "load campaign", err)
 		return
 	}
@@ -66,6 +68,39 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	// Checked before any AI call, so a refusal costs nothing (D63).
 	if slices.Contains(written, content.LegacyLang) {
 		writeError(w, http.StatusUnprocessableEntity, "set the language of the existing text before writing another language")
+		return
+	}
+	var versionA content.Variants
+	switch in.Variant {
+	case "", "a":
+	case "b":
+		if !abTest {
+			writeError(w, http.StatusUnprocessableEntity, "turn on the A/B test to write version B")
+			return
+		}
+		a, err := h.loadContent(r.Context(), id, "a")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		b, err := h.loadContent(r.Context(), id, "b")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		versionA = content.Variants{}
+		for _, l := range in.Languages {
+			c, ok := a[l]
+			if !ok {
+				writeError(w, http.StatusUnprocessableEntity, "write version A in "+content.LanguageName(l)+" first")
+				return
+			}
+			versionA[l] = content.ForChannels(c, channels)
+		}
+		written = slices.Collect(maps.Keys(b)) // what replace protects: existing version B
+		in.DefaultLanguage = ""                // writing B never changes the default
+	default:
+		writeError(w, http.StatusUnprocessableEntity, "unknown version: "+in.Variant)
 		return
 	}
 	if !in.Replace {
@@ -100,7 +135,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	}
 	send := startSSE(w)
 
-	input := llm.ContentInput{Text: brief, Channels: channels, Languages: in.Languages, Resend: isResend}
+	input := llm.ContentInput{Text: brief, Channels: channels, Languages: in.Languages, Resend: isResend, VersionA: versionA}
 	var fields []string
 	for _, l := range in.Languages {
 		for _, f := range contentFields {
@@ -140,7 +175,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		llmCalls.WithLabelValues("content", "ok").Inc()
-		newVersion, err := h.saveContent(r.Context(), id, *in.Version, v, *def, true)
+		newVersion, err := h.saveContent(r.Context(), id, *in.Version, toSave(versionA != nil, v, *def))
 		switch {
 		case r.Context().Err() != nil:
 			return
@@ -241,14 +276,15 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 		Version         *int             `json:"version"`
 		DefaultLanguage content.Lang     `json:"default_language"`
 		Content         content.Variants `json:"content"`
+		ContentB        content.Variants `json:"content_b"` // absent: version B unchanged (D68)
 	}
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
 		return
 	}
 	var channels []string
-	var legacy bool
+	var legacy, abTest bool
 	if err := h.Pool.QueryRow(r.Context(), `SELECT channels, EXISTS (SELECT 1 FROM campaign_languages
-		WHERE campaign_id = $1 AND language = $2) FROM campaigns WHERE id = $1`, id, content.LegacyLang).Scan(&channels, &legacy); err != nil {
+		WHERE campaign_id = $1 AND language = $2), ab_test FROM campaigns WHERE id = $1`, id, content.LegacyLang).Scan(&channels, &legacy, &abTest); err != nil {
 		serverError(w, "load campaign", err)
 		return
 	}
@@ -256,11 +292,16 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 	if _, ok := in.Content[content.LegacyLang]; ok && !legacy {
 		errs = append(errs, content.FieldError{Field: content.LegacyLang, Message: "content without a recorded language exists only on campaigns written before languages were recorded"})
 	}
+	if in.ContentB != nil && !abTest {
+		errs = append(errs, content.FieldError{Field: "b", Message: "turn on the A/B test to write version B"})
+	} else if in.ContentB != nil {
+		errs = append(errs, content.ValidateVersionB(in.Content, in.ContentB, channels, false)...)
+	}
 	if len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}
-	_, err := h.saveContent(r.Context(), id, *in.Version, in.Content, in.DefaultLanguage, false)
+	_, err := h.saveContent(r.Context(), id, *in.Version, contentSave{a: in.Content, b: in.ContentB, replaceB: in.ContentB != nil, def: in.DefaultLanguage})
 	if errors.Is(err, errStale) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -272,16 +313,33 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 	h.respond(w, r.Context(), http.StatusOK, id)
 }
 
+// toSave is the AI's text as saveContent writes it: version B for an A/B
+// test (versionB), else version A.
+func toSave(versionB bool, v content.Variants, def content.Lang) contentSave {
+	if versionB {
+		return contentSave{b: v, def: def, generated: true}
+	}
+	return contentSave{a: v, def: def, generated: true}
+}
+
+// contentSave is what saveContent writes. A nil version is left unchanged.
+type contentSave struct {
+	a, b      content.Variants
+	replaceB  bool // b is version B's whole set: other languages' B is removed
+	def       content.Lang
+	generated bool
+}
+
 // saveContent writes the text of the given languages for the chosen channels
 // if the draft still has the expected version, and returns the new version.
 // Text of channels that aren't chosen is kept as it is (D67).
-//   - Hand edits (generated false) replace the whole set: languages not given
-//     are removed, and a language whose text changed needs review again,
-//     while one saved unchanged keeps its approval (D66).
+//   - Hand edits (generated false) replace the whole set: languages not in a
+//     are removed, and a language whose text changed in either version needs
+//     review again, while one saved unchanged keeps its approval (D66, D68).
 //   - AI text (generated true) is merged: other languages stay exactly as
-//     they were, and each written language needs review, now for the
-//     current brief.
-func (h *Handler) saveContent(ctx context.Context, id int64, version int, v content.Variants, def content.Lang, generated bool) (int, error) {
+//     they were, and each written language needs review. Writing version A
+//     is for the current brief; writing B leaves A's "may be outdated".
+func (h *Handler) saveContent(ctx context.Context, id int64, version int, s contentSave) (int, error) {
 	tx, err := h.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -291,60 +349,81 @@ func (h *Handler) saveContent(ctx context.Context, id int64, version int, v cont
 	var newVersion int
 	var channels []string
 	err = tx.QueryRow(ctx, `UPDATE campaigns SET version = version + 1, updated_at = now(), default_language = $3
-		WHERE id = $1 AND version = $2 AND status = 'draft' RETURNING version, channels`, id, version, def).Scan(&newVersion, &channels)
+		WHERE id = $1 AND version = $2 AND status = 'draft' RETURNING version, channels`, id, version, s.def).Scan(&newVersion, &channels)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, errStale
 	}
 	if err != nil {
 		return 0, err
 	}
-	if !generated {
+	if !s.generated && s.a != nil {
 		if _, err := tx.Exec(ctx, `DELETE FROM campaign_languages WHERE campaign_id = $1 AND NOT language = ANY($2)`,
-			id, slices.Collect(maps.Keys(v))); err != nil {
+			id, slices.Collect(maps.Keys(s.a))); err != nil {
 			return 0, err
 		}
 	}
-	for lang, c := range v {
-		if _, err := tx.Exec(ctx, `INSERT INTO campaign_languages (campaign_id, language) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, lang); err != nil {
+	changed := map[content.Lang]bool{}
+	if s.replaceB {
+		rows, err := tx.Query(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1 AND variant = 'b' AND NOT language = ANY($2)
+			RETURNING language`, id, slices.Collect(maps.Keys(s.b)))
+		if err != nil {
 			return 0, err
 		}
-		changed := false
-		for ch, m := range map[string]*content.Message{"sms": c.SMS, "email": c.Email} {
-			if m == nil || !slices.Contains(channels, ch) {
-				continue
-			}
-			var subject *string
-			if ch == "email" {
-				subject = &m.Subject
-			}
-			tag, err := tx.Exec(ctx, `INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES ($1, $2, $3, $4, $5)
-				ON CONFLICT (campaign_id, channel, language) DO UPDATE SET subject = excluded.subject, body = excluded.body
-				WHERE (campaign_content.subject, campaign_content.body) IS DISTINCT FROM (excluded.subject, excluded.body)`,
-				id, ch, lang, subject, m.Body)
-			if err != nil {
-				return 0, err
-			}
-			changed = changed || tag.RowsAffected() > 0
+		langs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return 0, err
 		}
-		if generated {
-			if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL, outdated = false
-				WHERE campaign_id = $1 AND language = $2`, id, lang); err != nil {
+		for _, l := range langs {
+			changed[l] = true
+		}
+	}
+	for _, set := range []struct {
+		variant string
+		v       content.Variants
+	}{{"a", s.a}, {"b", s.b}} {
+		for lang, c := range set.v {
+			if _, err := tx.Exec(ctx, `INSERT INTO campaign_languages (campaign_id, language) VALUES ($1, $2) ON CONFLICT DO NOTHING`, id, lang); err != nil {
 				return 0, err
 			}
-		} else if changed {
-			if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL
-				WHERE campaign_id = $1 AND language = $2`, id, lang); err != nil {
-				return 0, err
+			for ch, m := range map[string]*content.Message{"sms": c.SMS, "email": c.Email} {
+				if m == nil || !slices.Contains(channels, ch) {
+					continue
+				}
+				var subject *string
+				if ch == "email" {
+					subject = &m.Subject
+				}
+				tag, err := tx.Exec(ctx, `INSERT INTO campaign_content (campaign_id, channel, language, variant, subject, body) VALUES ($1, $2, $3, $4, $5, $6)
+					ON CONFLICT (campaign_id, channel, language, variant) DO UPDATE SET subject = excluded.subject, body = excluded.body
+					WHERE (campaign_content.subject, campaign_content.body) IS DISTINCT FROM (excluded.subject, excluded.body)`,
+					id, ch, lang, set.variant, subject, m.Body)
+				if err != nil {
+					return 0, err
+				}
+				changed[lang] = changed[lang] || tag.RowsAffected() > 0 || s.generated
 			}
+		}
+	}
+	for lang := range changed {
+		if !changed[lang] {
+			continue
+		}
+		// Only AI text for version A is written for the current brief.
+		fresh := s.generated && s.a != nil
+		if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL, outdated = outdated AND NOT $3
+			WHERE campaign_id = $1 AND language = $2`, id, lang, fresh); err != nil {
+			return 0, err
 		}
 	}
 	return newVersion, tx.Commit(ctx)
 }
 
-// loadContent reads a campaign's saved content per language, including
-// channels that aren't chosen; nil if there is none.
-func (h *Handler) loadContent(ctx context.Context, id int64) (content.Variants, error) {
-	rows, err := h.Pool.Query(ctx, `SELECT language, channel, coalesce(subject, ''), body FROM campaign_content WHERE campaign_id = $1`, id)
+// loadContent reads one version ("a" or "b", D68) of a campaign's saved
+// content per language, including channels that aren't chosen; nil if there
+// is none.
+func (h *Handler) loadContent(ctx context.Context, id int64, variant string) (content.Variants, error) {
+	rows, err := h.Pool.Query(ctx, `SELECT language, channel, coalesce(subject, ''), body FROM campaign_content
+		WHERE campaign_id = $1 AND variant = $2`, id, variant)
 	if err != nil {
 		return nil, err
 	}

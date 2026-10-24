@@ -25,7 +25,7 @@ await fetch(`${BASE}/api/logout`, { method: 'POST', headers: { cookie } })
 const alone = ['campaigns.mjs']
 const lanes = [
   ['sign-in.mjs', 'composer.mjs', 'saving.mjs', 'languages.mjs', 'content-review.mjs', 'languages-content.mjs', 'pagination.mjs', 'responsive.mjs'],
-  ['delivery.mjs', 'recipients.mjs', 'resend.mjs', 'live.mjs', 'review-fixes.mjs'],
+  ['delivery.mjs', 'recipients.mjs', 'resend.mjs', 'live.mjs', 'review-fixes.mjs', 'ab-test.mjs'],
 ]
 const times = []
 async function run(f) {

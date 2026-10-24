@@ -1,6 +1,7 @@
 // The live status stream's snapshot (D16, D36) as the screens show it: seven
 // groups that add up to the audience (D46), estimate vs actual, resend offers.
 import type { Channel, Status } from '../campaign/types'
+import type { VariantStatus } from '../content/variants'
 
 export const GROUPS = ['sent', 'uncertain', 'failed', 'skipped', 'cancelled', 'retrying', 'pending'] as const
 export type Group = (typeof GROUPS)[number]
@@ -15,6 +16,7 @@ export type ChannelStatus = {
   skip_reasons: Record<string, number>
   resendable: number
   active_resend_id: number | null
+  by_variant?: Partial<Record<'a' | 'b', VariantStatus>> // an A/B test's delivery per version (D68)
 }
 
 export type Snapshot = {

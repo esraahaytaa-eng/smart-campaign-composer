@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"smart-campaign-composer/internal/audience"
+	"smart-campaign-composer/internal/content"
 )
 
 type LLM interface {
@@ -31,6 +32,9 @@ type ContentInput struct {
 	Languages []string // catalog languages to write, one version each (D64)
 	Errors    []string // validation errors of the previous answer, on the retry
 	Resend    bool     // the first text was too long for some recipients (D31): write shorter
+	// VersionA is set when writing an A/B test's version B (D68): the text it
+	// is an alternative to, per language. The marketer's text, sent as data.
+	VersionA map[string]content.Content
 }
 
 // InterpretInput never contains user records (D15): only the brief, the

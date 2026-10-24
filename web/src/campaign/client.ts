@@ -8,12 +8,13 @@ type OverLimit = { sms: number; email: number }
 export type Estimate = {
   audience: ChannelCounts & { by_language?: Record<Lang, ChannelCounts> }
   over_limit: (OverLimit & { by_language?: Record<Lang, OverLimit> }) | null
+  over_limit_b?: (OverLimit & { by_language?: Record<Lang, OverLimit> }) | null // version B over the whole audience (D68)
   calculated_at: string
   delivery?: Partial<Record<Channel, Record<Lang, DeliveryCount>>>
   recommendation?: { languages: Lang[]; default: Lang }
 }
 // What the AI writes (D64): replace rewrites languages that already have text (D66).
-export type WriteRequest = { languages: Lang[]; default_language?: Lang; replace: boolean }
+export type WriteRequest = { languages: Lang[]; default_language?: Lang; replace: boolean; variant?: 'b' }
 
 const path = (id: number, rest = '') => `/api/campaigns/${id}${rest}`
 
@@ -32,8 +33,13 @@ export const campaigns = {
   setRequest: (id: number, version: number, request: string) =>
     api<Campaign>(path(id, '/request'), { method: 'PUT', body: { version, request } }),
   remove: (id: number, version: number) => api<void>(path(id), { method: 'DELETE', body: { version } }),
-  setContent: (id: number, version: number, content: Variants, defaultLanguage: Lang) =>
-    api<Campaign>(path(id, '/content'), { method: 'PUT', body: { version, default_language: defaultLanguage, content } }),
+  // contentB: an A/B test's version B; left out, version B is unchanged (D68).
+  setContent: (id: number, version: number, content: Variants, defaultLanguage: Lang, contentB?: Variants) =>
+    api<Campaign>(path(id, '/content'), {
+      method: 'PUT',
+      body: { version, default_language: defaultLanguage, content, ...(contentB ? { content_b: contentB } : {}) },
+    }),
+  setAB: (id: number, version: number, enabled: boolean) => api<Campaign>(path(id, '/ab'), { method: 'PUT', body: { version, enabled } }),
   // A language's text approved as it is: no new version, no AI call (D66).
   approveLanguage: (id: number, lang: Lang, version: number) =>
     api<Campaign>(path(id, `/languages/${lang}/approve`), { method: 'POST', body: { version } }),

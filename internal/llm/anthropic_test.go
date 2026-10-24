@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"smart-campaign-composer/internal/content"
 )
 
 const validOutput = `{"unsupported":false,"reason":"","rules":[{"field":"city","op":"in","value":["İstanbul"]}],"suggested_send_at":null,"schedule_note":null}`
@@ -312,5 +314,16 @@ func TestContentPrompt_ResendAsksForShorterText(t *testing.T) {
 
 	if !strings.Contains(resend, "under 100") || strings.Contains(normal, "under 100") {
 		t.Fatalf("resend prompt must ask for shorter text, the normal one must not:\n%s\n---\n%s", resend, normal)
+	}
+}
+
+// D68: version B is written as an alternative to version A, which is quoted as data.
+func TestContentPrompt_VersionBQuotesVersionA(t *testing.T) {
+	a := map[string]content.Content{"tr": {SMS: &content.Message{Body: "Merhaba A"}}}
+	b := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}, Languages: []string{"tr"}, VersionA: a})
+	normal := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}, Languages: []string{"tr"}})
+
+	if !strings.Contains(b, "<version_a>") || !strings.Contains(b, "Merhaba A") || strings.Contains(normal, "version_a") {
+		t.Fatalf("only the version B prompt quotes version A:\n%s\n---\n%s", b, normal)
 	}
 }

@@ -85,7 +85,13 @@ func fullSend(t *testing.T, ctx context.Context, pool *pgxpool.Pool, c *client, 
 		"request": "Performance check: every consenting customer", "channels": []string{"sms", "email"}, "time_zone": "Europe/Istanbul",
 		"rules": []any{map[string]any{"field": "city", "op": "in", "value": cities}},
 	}, 201), &draft)
-	c.decode(c.must(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/content", draft.ID), map[string]any{"version": draft.Version, "default_language": "tr", "content": map[string]any{"tr": map[string]any{
+	// An A/B test (D68): the build also splits every language's recipients.
+	c.decode(c.must(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/ab", draft.ID), map[string]any{"version": draft.Version, "enabled": true}, 200), &draft)
+	versionB := map[string]any{
+		"tr": map[string]any{"sms": map[string]string{"body": "{{first_name}}, indirim bu hafta sonu!"}, "email": map[string]string{"subject": "Bu hafta sonu", "body": "{{first_name}}, indirim bu hafta sonu."}},
+		"en": map[string]any{"sms": map[string]string{"body": "{{first_name}}, the sale is this weekend!"}, "email": map[string]string{"subject": "This weekend", "body": "{{first_name}}, the sale is this weekend."}},
+	}
+	c.decode(c.must(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/content", draft.ID), map[string]any{"version": draft.Version, "default_language": "tr", "content_b": versionB, "content": map[string]any{"tr": map[string]any{
 		"sms":   map[string]string{"body": "Merhaba {{first_name}}, hafta sonu indirimi başladı!"},
 		"email": map[string]string{"subject": "Hafta sonu indirimi", "body": "Merhaba {{first_name}}, hafta sonu indirimi başladı."},
 	}, "en": map[string]any{ // two languages (D64): each recipient gets their own

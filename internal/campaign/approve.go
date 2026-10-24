@@ -143,7 +143,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cont, err := h.loadContent(ctx, id)
+	cont, err := h.loadContent(ctx, id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
@@ -152,7 +152,16 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "write the messages before approving")
 		return
 	}
-	if errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage); len(errs) > 0 {
+	errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage)
+	if c.ABTest {
+		b, err := h.loadContent(ctx, id, "b")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		errs = append(errs, content.ValidateVersionB(cont, b, c.Channels, true)...)
+	}
+	if len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}
@@ -318,7 +327,7 @@ func (h *Handler) estimate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "the audience is fixed once sending has started")
 		return
 	}
-	cont, err := h.loadContent(r.Context(), id)
+	cont, err := h.loadContent(r.Context(), id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
@@ -329,8 +338,25 @@ func (h *Handler) estimate(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "estimate", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"estimate": true, "audience": counts, "over_limit": over, "calculated_at": now,
-		"delivery": deliveryFor(c, cont, counts), "recommendation": newRecommendation(counts)})
+	out := map[string]any{"estimate": true, "audience": counts, "over_limit": over, "calculated_at": now,
+		"delivery": deliveryFor(c, cont, counts), "recommendation": newRecommendation(counts)}
+	// Version B's text over the whole audience; about half of each language gets it (D68).
+	if c.ABTest {
+		b, err := h.loadContent(r.Context(), id, "b")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		if b != nil {
+			_, overB, err := h.estimateFor(r.Context(), c, b, now)
+			if err != nil {
+				serverError(w, "estimate", err)
+				return
+			}
+			out["over_limit_b"] = overB
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // resend creates a draft follow-up for one channel, addressed to the
