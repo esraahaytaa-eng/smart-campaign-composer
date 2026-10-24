@@ -243,6 +243,18 @@ const lockCheck = time.Second
 
 var errLockLost = errors.New("sender lock lost")
 
+// senderLockConfig is the pool's connection settings for the lock's own
+// connection, with server keepalives: if this worker's host vanishes without
+// closing it, the server drops the session and frees the lock in about 25 s,
+// instead of after the OS default of about two hours.
+func (q *Queue) senderLockConfig() *pgx.ConnConfig {
+	cfg := q.Pool.Config().ConnConfig.Copy()
+	cfg.RuntimeParams["tcp_keepalives_idle"] = "10"
+	cfg.RuntimeParams["tcp_keepalives_interval"] = "5"
+	cfg.RuntimeParams["tcp_keepalives_count"] = "3"
+	return cfg
+}
+
 // holdSenderLock waits until this process holds the sender lock, taken on a
 // connection of its own outside the pool. The returned context ends when ctx
 // does or when that connection fails, since the lock may then be gone and
@@ -250,7 +262,7 @@ var errLockLost = errors.New("sender lock lost")
 // lock, and returns errLockLost if the connection failed. The error is ctx's
 // when it ended while waiting.
 func (q *Queue) holdSenderLock(ctx context.Context, poll time.Duration) (context.Context, func() error, error) {
-	cfg := q.Pool.Config().ConnConfig.Copy()
+	cfg := q.senderLockConfig()
 	var conn *pgx.Conn
 	waiting := false
 	for conn == nil {
