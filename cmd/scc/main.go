@@ -97,7 +97,11 @@ func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error 
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
 	api := auth.Routes(mux, pool, cfg.LLMMode)
-	(&campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}).Routes(api)
+	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}
+	if cfg.LLMMode == "real" { // mock AI costs nothing and stays unlimited (D63)
+		h.AICalls = campaign.NewAICallLimit(cfg.AICallsPerHour)
+	}
+	h.Routes(api)
 	if cfg.WebDir != "" {
 		mux.Handle("/", spa.Handler(cfg.WebDir))
 	}
@@ -129,8 +133,8 @@ func runWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error
 		close(served)
 	}()
 
-	w := &worker.Worker{Queue: &worker.Queue{Pool: pool}, ProviderURL: cfg.ProviderURL, MaxAttempts: cfg.MaxAttempts}
-	slog.Info("worker starting", "provider", cfg.ProviderURL, "max_attempts", cfg.MaxAttempts)
+	w := &worker.Worker{Queue: &worker.Queue{Pool: pool}, ProviderURL: cfg.ProviderURL, MaxAttempts: cfg.MaxAttempts, BackoffMax: cfg.RetryBackoffMax}
+	slog.Info("worker starting", "provider", cfg.ProviderURL, "max_attempts", cfg.MaxAttempts, "retry_backoff_max", cfg.RetryBackoffMax)
 	err := w.Run(ctx)
 	cancel()
 	<-served
@@ -139,8 +143,11 @@ func runWorker(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error
 
 // serve runs an HTTP server until ctx ends, then shuts it down gracefully.
 func serve(ctx context.Context, addr string, handler http.Handler) error {
-	// No WriteTimeout: SSE responses (T8, T14) and slow provider replies stay open.
-	srv := &http.Server{Addr: addr, Handler: obs.Instrument(handler), ReadHeaderTimeout: 10 * time.Second}
+	// No WriteTimeout or ReadTimeout: both would also cut SSE responses (T8,
+	// T14) and slow provider replies. Headers must arrive within 10 s, bodies
+	// are size-capped by the handlers, and idle keep-alive connections close.
+	srv := &http.Server{Addr: addr, Handler: obs.Instrument(handler), ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout: 2 * time.Minute}
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()

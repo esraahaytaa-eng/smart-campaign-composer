@@ -52,7 +52,9 @@ All endpoints need a login session (see above).
 | `PUT /api/campaigns/{id}/rules` `{"rules", "version"}` | Replace the draft's rules; they are validated and recounted. |
 | `PUT /api/campaigns/{id}/channels` `{"channels", "version"}` | Change a draft's channels, validated as on create; counts are refreshed. A removed channel's content is deleted; an added channel has no content until it is written or generated, and approval waits for it (D38). A resend's channel is fixed (409). |
 | `PUT /api/campaigns/{id}/schedule` `{"send_at", "version"}` | Change or clear (`null`) the proposed send time: RFC 3339 with offset, between now and 30 days ahead. |
-| `GET /api/campaigns`, `GET /api/campaigns/{id}` | List (newest 200) / one campaign; drafts include current counts, a single campaign its content. |
+| `GET /api/campaigns?status=&q=&page=` | The campaign list (D54): 25 per page, newest first, optionally one `status` and a search `q` in the brief (≤ 50 characters, ignoring case and Turkish letters; `%` and `_` are literal). Returns `campaigns` (a resend also carries its original's brief, `parent_request_text`), the `total` for the filter, and `counts` per status over all campaigns. |
+| `GET /api/dashboard` | The status `counts` and the six campaigns that need attention first: sending, drafts, scheduled by send time, then the rest, most recently changed first (D54). |
+| `GET /api/campaigns/{id}` | One campaign with its content; a draft also has its current counts. |
 | `POST /api/campaigns/{id}/content` `{"version"}` | The AI writes the messages for the chosen channels, in the brief's language. The response is a `text/event-stream`: `delta` `{field, text}` events while it writes (fields `sms.body`, `email.subject`, `email.body`), `retry` `{errors}` if the first answer was invalid, then `done` `{content, version}` or `error` `{message}`. Content is saved only when valid and only if the client is still connected. |
 | `PUT /api/campaigns/{id}/content` `{"content", "version"}` | Save messages edited by hand: `{"sms": {"body"}, "email": {"subject", "body"}}`. |
 | `GET /api/campaigns/{id}/estimate` | Current audience and over-limit counts per channel, labelled as estimates (draft or approved). |
@@ -70,7 +72,7 @@ curl -b cookies.txt -X POST localhost:8080/api/campaigns -d '{"request":"Send a 
 
 ### Trying the real AI (manual check)
 
-Tests never call Claude. To check real mode by hand: set `LLM_MODE=real` and `ANTHROPIC_API_KEY` in `.env`, run `docker compose up --build`, log in as above, and post a free-form brief (e.g. "Send a thank-you note to customers in Izmir who spent at least 2,000 TL"). Expect a draft with matching rules, or `"unsupported": true` with a reason for a brief the rule catalog can't express (e.g. one that mentions age). `LLM_TIMEOUT` (default `60s`) limits each AI call. Each call costs real API credits.
+Tests never call Claude. To check real mode by hand: set `LLM_MODE=real` and `ANTHROPIC_API_KEY` in `.env`, run `docker compose up --build`, log in as above, and post a free-form brief (e.g. "Send a thank-you note to customers in Izmir who spent at least 2,000 TL"). Expect a draft with matching rules, or `"unsupported": true` with a reason for a brief the rule catalog can't express (e.g. one that mentions age). `LLM_TIMEOUT` (default `60s`) limits each AI call. Each call costs real API credits. Each marketer can make at most `AI_CALLS_PER_HOUR` (default 10) AI calls in any hour, retries included (D63).
 
 ## Mock AI briefs
 
@@ -139,7 +141,7 @@ The composer (T16): **+ New campaign** takes a brief and the channels, and the A
 
 The review step (T17): rules, the estimated audience, the messages and the over-limit estimate in one place, and the send choice. **Sending always needs an explicit decision:** *Send now* or *Schedule* (a date and time in the browser's zone, sent as UTC; between 1 minute and 30 days ahead), a tick that the audience and messages were checked, and a second confirmation that repeats the estimates. A time suggested from the brief is preselected only if it is still usable, labelled as a suggestion with the brief's own words; otherwise nothing is selected. Until everything is in place, the approve button lists what is missing.
 
-The dashboard and the campaign list (T18): the dashboard counts campaigns by status (each card opens the list filtered by it) and lists six campaigns, live and waiting ones first, each with its next step. The campaign list filters by status and searches the brief (ignoring case and Turkish letters); both are kept in the address, so a reload or Back keeps them. Each row shows the channels, status, creation day and send time, links a resend to its original campaign, and offers what the status allows: delete a draft or cancel an approved or sending campaign (each asks first), or open it. Search and filters work on the newest 200 campaigns the API returns (D49).
+The dashboard and the campaign list (T18): the dashboard counts campaigns by status (each card opens the list filtered by it) and lists six campaigns, live and waiting ones first, each with its next step. The campaign list filters by status and searches the brief (ignoring case and Turkish letters); both are kept in the address, so a reload or Back keeps them. Each row shows the channels, status, creation day and send time, links a resend to its original campaign, and offers what the status allows: delete a draft or cancel an approved or sending campaign (each asks first), or open it. The server filters, searches and pages the list (25 per page) and counts the statuses over all campaigns (D54).
 
 After approval, the campaign's page shows its delivery (T18), all from the live status stream (D36):
 
@@ -203,19 +205,46 @@ Changes from the design so far:
 - **429 counts:** shown for the last 5 minutes, as designed, and in total.
 - **Recipient details** (D47): contacts are masked by the server, and the search covers names only, never phone numbers or emails. The panel is a snapshot with its time, as designed.
 - **Resend** (D48): the design edits and approves the shorter SMS in one dialog. Here the dialog shows who gets the resend and who doesn't, then creates a draft that goes through the content and review steps like any campaign (D31), with the original message viewable. Offered on any channel with length skips once the campaign has finished.
-- **Dashboard rows** (D49) don't mention resend opportunities; the campaign's page does. The campaign list searches the brief (there are no names, D43) over the newest 200 campaigns.
+- **Dashboard rows** don't mention resend opportunities; the campaign's page does. The campaign list searches the brief, since there are no names (D43); search, filters and paging run on the server (D54).
 - **Archive:** not built (deferred; see Future improvements).
 
 ## Test
 
 ```sh
-make test         # in Docker: throwaway Postgres + Go tests, then Vitest and the frontend type check
+make test         # in Docker: throwaway Postgres + Go tests, with Vitest and the frontend type check alongside
 make test-local   # needs local Go and DATABASE_URL pointing to a Postgres (Go tests only)
 make lint         # in Docker: gofmt check + go vet
-make e2e          # opt-in browser tests (Playwright) against the app from `docker compose up`
+make e2e          # browser tests (Playwright) on their own throwaway stack
 ```
 
-`make e2e` runs the browser suite in `e2e/` in Microsoft's Playwright image (pinned to 1.64.1; nothing is added to the app) against the running api, with the demo login: sign-in and the login guard, the audience step, autosave races (slowed and failing saves, switching campaigns, changes made elsewhere), English and Turkish, the content and review steps (streaming and Stop, no lost edits when leaving, conflicts during generation, explicit approval), the dashboard and campaign list (status counts, filters and search in the address, delete and cancel with a confirmation), and the campaign page after approval (a scheduled campaign and its cancel; live delivery to completion, with counts checked against the API), recipient details (tabs, search, paging, attempt history, masked contacts, Back, Escape and focus, Turkish), resend (the dialog's numbers, the draft through content and review, an audience of exactly the eligible skipped recipients, links both ways, a resend created elsewhere), and a send watched mid-way (counts moving, pause and resume) and cancelled while sending (sent messages stay sent, the rest are cancelled, nothing is sent afterwards), plus the fixes from the PR #6 review (one campaign per double click, signing out saves typed text, the stale-content warning on the review step, a failed status stream with *Try again*, cancelling while paused, paging past the end). The delivery, recipient and resend checks really send campaigns (about 60 SMS to Adana; the about 250 Ankara customers four times: the recipient check, the resend check's original and its resend, and a conflict case; and the mid-send and review-fix checks each start a send to all about 2,100 SMS customers and cancel it after a few hundred) through the mock SMS provider, so they stay in the list as completed. It is not part of `make test` because it needs the running app, in mock mode: its checks rely on the mock AI's answers, and it refuses to run against the real AI (which would cost API credits). It creates its own campaigns and cleans up: drafts are deleted and approved ones cancelled; the cancelled test campaigns stay in the list, and so do the campaigns the delivery, recipient, resend, mid-send and review-fix checks send to the mock provider. A full run takes a few minutes. Set `SHOTS=/e2e/shots` to keep screenshots.
+`make test` runs the Go tests and the frontend checks at the same time; the frontend's output is printed after Go's. Each Go test gets its own database, copied from a template that is migrated once per run (much faster than migrating each one), and the `db` and `e2e` packages run their tests in parallel. Frontend packages are reinstalled only when the lockfile changes. On this project's reference machine (Docker Desktop, 8 CPUs) a run takes about a minute; see `docs/performance.md`.
+
+`make e2e` runs the browser suite in `e2e/` in Microsoft's Playwright image (pinned to 1.64.1; nothing is added to the app) on **its own stack** (D53): a separate Compose project (`scc-e2e`, `docker-compose.e2e.yml`) with a fresh, seeded database, mock AI only and a 2-second cap on retry waits (`RETRY_BACKOFF_MAX`; the real 30-second cap stays covered by the Go tests). It starts the stack, runs the checks, and removes the stack, so your local app and its data are never touched and nothing has to be running first. The dashboard check runs first and alone (it compares counts over all campaigns); then the checks that send nothing and the checks that send run side by side, the sending ones one after another so they don't share the provider's 100/s limit. Each file's time is printed at the end.
+
+What it covers: sign-in and the login guard, the audience step, autosave races (slowed and failing saves, switching campaigns, changes made elsewhere), English and Turkish, the content and review steps (streaming and Stop, no lost edits when leaving, conflicts during generation, explicit approval), the dashboard and campaign list (status counts, filters and search in the address, paging across several pages with a filter and a search, delete and cancel with a confirmation), layouts at desktop, tablet and phone widths (no sideways scrolling, the account menu in reach, campaign rows readable in English and Turkish) and signing out with the keyboard, the campaign page after approval (a scheduled campaign and its cancel; live delivery to completion, with counts checked against the API), recipient details (tabs, search, paging, attempt history, masked contacts, Back, Escape and focus, Turkish), resend (the dialog's numbers, the draft through content and review, an audience of exactly the eligible skipped recipients, links both ways, a resend created elsewhere), a send watched mid-way (counts moving, pause and resume) and cancelled while sending (sent messages stay sent, the rest are cancelled, nothing is sent afterwards), and the fixes from the PR #6 review. Several checks really send campaigns through the mock SMS provider of that stack. A full run takes under two minutes. Set `SHOTS=/e2e/shots` to keep screenshots.
+
+`make perf` measures the performance targets (D57) on another throwaway stack (`scc-perf`, `docker-compose.perf.yml`, default settings): a full send watched by 20 live screens, 10 marketers using the API for 2 minutes, and cold loads and interactions in a browser on a desktop and a throttled phone profile. It prints each target with what was measured and takes about 5 minutes. Results and method: `docs/performance.md`.
+
+### Continuous integration (D52)
+
+GitHub Actions (`.github/workflows/`):
+
+| Workflow | When | What |
+|---|---|---|
+| **CI** (`ci.yml`) | every push and every pull request, and on request | `make test`, `make lint`, and the scan: `make scan-selftest`, the files in the repository, and the new commits |
+| **Browser checks** (`e2e.yml`) | every pull request, every push to `main`, nightly at 02:30 UTC, and on request (Actions → Browser checks → Run workflow) | `make e2e` on its own stack; screenshots of failing files are kept for 14 days |
+
+Nothing runs twice for the same commit: a push to a branch with an open pull request is left to the pull request's run, which tests the commit merged with `main`, and a newer commit cancels the older run. The jobs run the same make targets as a developer's machine, in Docker. In CI the Go and npm caches live in the workspace (`.github/ci/compose.cache.yml`), so later runs reuse them. Actions are pinned to commits. The repository is private, so the runs use the account's Actions minutes (about 4 runner-minutes for CI and 4 for the browser checks per pull request update).
+
+### Scanning for secrets and personal data (D51)
+
+```sh
+make scan           # the files Git sees and the commits not pushed yet
+make scan-selftest  # proves the rules on planted keys, emails, phone numbers and a .env file
+make hooks          # once per clone: scan the staged changes before every commit
+```
+
+`make scan` runs [gitleaks](https://github.com/gitleaks/gitleaks) (pinned Docker image, nothing installed) with gitleaks' own rules plus the project's rules in `.gitleaks.toml`: Anthropic keys, email addresses, phone numbers and committed `.env` files. Only the project's fictional seed and test data, placeholders, the documented demo login and masked contacts are allowed; anything else blocks the commit, with the value redacted in the output. Session exports in `ai-sessions/` are redacted (names, usernames and emails replaced by roles) before they are committed. `scripts/scan.sh history` scans every commit, as a report.
 
 Integration tests fail, never skip, when no database is available. `internal/e2e` runs the API, the worker and the mock provider together on a seeded database: a send through a provider that fails, rate-limits and loses responses, a scheduled send, and an over-limit send followed by a resend. Its lifecycle tests cover timeouts and replays, worker shutdowns and crashes, cancellation races, consent changes, length skips, resends after a cancelled resend, retry limits and two workers on one queue.
 
@@ -232,14 +261,17 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 - **AI-generated campaign titles:** the AI could suggest a short title in the same answer that interprets the brief, with the brief's start as the fallback and manual edits kept. Deferred to keep the scope small (D43).
 - **Archiving campaigns:** hide finished campaigns from the list. Not built: deleting drafts removes most of the clutter, and archiving can be added later without changing how deletion works (D37).
 
+## Security
+
+The security review (T19) with its evidence is in `docs/security-review.md`. In short: customer contacts are masked by the server and never cached; the AI never receives customer data; every API route needs a session; failed sign-ins are limited (5 per 15 minutes per email and per address); requests from other sites are refused; the app is served with a strict Content Security Policy; secrets and personal data are scanned before every commit and in CI.
+
 ## Known limitations
 
-- Each open status stream polls the database about once a second (around five small queries, more when a resend count is shown; about 20 ms of database time for a 6,000-message campaign, see `docs/performance.md`), and nothing limits how many streams are open. Fine for a demo; a shared poller per campaign is the upgrade path.
+- The streams of a campaign share one status snapshot (D59): its database cost grows with the campaigns being watched, not with the screens (20 screens on one send: about 25 ms of database time per second, see `docs/performance.md`). Nothing limits how many streams are open, and the sharing is per api process.
 - If no worker is running, a cancelled campaign's stream stays open until its in-flight messages are reclaimed.
 - Metrics count per process since it started.
-- The campaign list and dashboard work on the newest 200 campaigns (D49); older ones are not listed.
 - Recipient details page by offset (D47): while a campaign sends, rows can move between pages, and the panel shows a snapshot with its time. Sorting by last attempt costs about 15 ms for a 5,000-message group; see `docs/performance.md` for the upgrade path.
 - After a campaign's status stream has ended, a resend created in another tab is noticed when the page is opened again or a resend fails (D36).
-- The browser suite (`make e2e`) leaves its cancelled and sent test campaigns in the local list.
 - The Inter font from the design is not bundled: the app uses Inter when it is installed and the system font otherwise. There is no frontend linter yet; `make test` runs the TypeScript type check.
-- AI calls are not rate-limited. Every create or brief edit can cost up to two AI calls (one retry), parallel edits of the same draft each make their own call before the version check at save rejects all but one, and an unsupported answer can be asked again at once. Mock mode costs nothing; in real mode every call uses API credits.
+- Sign-in limits are kept in memory per api process and reset on restart; behind a proxy, all clients share its address.
+- Real AI calls are limited to `AI_CALLS_PER_HOUR` (default 10) per marketer in any hour, retries included (D63); over the limit the API answers `429` with `Retry-After`. The limit is kept in memory per api process and resets on restart; the Anthropic console's spend limit is the real cost ceiling. Mock AI is unlimited.

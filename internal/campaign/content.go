@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"smart-campaign-composer/internal/auth"
 	"smart-campaign-composer/internal/content"
 	"smart-campaign-composer/internal/llm"
 )
@@ -47,13 +48,20 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The stream can't answer 429 once started, so the limit is checked first (D63).
+	if marketer, _ := auth.MarketerID(r.Context()); h.AICalls != nil {
+		if wait := h.AICalls.wait(marketer); wait > 0 {
+			writeAILimit(w, &aiLimitError{h.AICalls.n, wait})
+			return
+		}
+	}
 	send := startSSE(w)
 
 	input := llm.ContentInput{Text: brief, Channels: channels, Resend: isResend}
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(r.Context(), h.Timeout)
 		streamer := llm.NewFieldStreamer(contentFields, func(d llm.Delta) { send("delta", d) })
-		raw, err := h.LLM.StreamContent(ctx, input, streamer.Write)
+		raw, err := h.model().StreamContent(ctx, input, streamer.Write)
 		cancel()
 		if r.Context().Err() != nil {
 			llmCalls.WithLabelValues("content", "cancelled").Inc()
@@ -120,7 +128,10 @@ func parseContent(raw json.RawMessage, channels []string) (content.Content, []st
 }
 
 func aiErrorMessage(err error) string {
+	var limited *aiLimitError
 	switch {
+	case errors.As(err, &limited):
+		return limited.Error()
 	case errors.Is(err, llm.ErrRefused):
 		return "The AI declined to write this content. Rephrase the brief or write the messages by hand."
 	case errors.Is(err, context.DeadlineExceeded):

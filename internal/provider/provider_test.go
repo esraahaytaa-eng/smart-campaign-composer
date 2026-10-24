@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smart-campaign-composer/internal/config"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/provider"
 )
@@ -25,10 +24,7 @@ import (
 // admin one and one logged in as the provider's own role (D6).
 func providerDB(t *testing.T) (admin, prov *pgxpool.Pool) {
 	t.Helper()
-	admin = dbtest.FreshDB(t)
-	if err := db.Migrate(context.Background(), admin); err != nil {
-		t.Fatal(err)
-	}
+	admin = dbtest.MigratedDB(t)
 	return admin, dbtest.ProviderPool(t, admin)
 }
 
@@ -85,6 +81,7 @@ func keyState(t *testing.T, pool *pgxpool.Pool, key string) string {
 }
 
 func TestSend_SuccessIsStoredAndReplayed(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 	url := start(t, prov, instant, nil)
 
@@ -103,6 +100,7 @@ func TestSend_SuccessIsStoredAndReplayed(t *testing.T) {
 }
 
 func TestSend_KeyIsInsertedBeforeSimulating(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 	const delay = 400 * time.Millisecond // the simulated send
 	slow := config.ProviderChannel{DelayMin: delay, DelayMax: delay}
@@ -161,6 +159,7 @@ func TestSend_ConcurrentSameKey(t *testing.T) {
 
 // Failed attempts release the key, so the worker's retry is processed (D7).
 func TestSend_FailuresReleaseTheKey(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 
 	url := start(t, prov, config.ProviderChannel{ErrorRate: 1}, nil)
@@ -183,13 +182,19 @@ func TestSend_FailuresReleaseTheKey(t *testing.T) {
 // A timeout is a lost response: the send still happens, and the retry with
 // the same key gets the stored result instead of a second send.
 func TestSend_TimeoutIsALostResponse(t *testing.T) {
-	_, prov := providerDB(t)
+	admin, prov := providerDB(t)
 	url := start(t, prov, config.ProviderChannel{TimeoutRate: 1}, func(s *provider.Server) { s.Hang = 300 * time.Millisecond })
 
 	if r := send(t, url, "sms", "msg-1", smsBody, &http.Client{Timeout: 100 * time.Millisecond}); !r.timeout {
 		t.Fatalf("want a client timeout, got %d", r.status)
 	}
-	time.Sleep(400 * time.Millisecond)
+	// The provider finishes the request the client gave up on; wait until it
+	// has stored the result instead of guessing how long that takes.
+	for give := time.Now().Add(10 * time.Second); keyState(t, admin, "msg-1") != "completed"; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(give) {
+			t.Fatal("the provider never completed the request the client gave up on")
+		}
+	}
 
 	r := send(t, url, "sms", "msg-1", smsBody, nil)
 	if r.status != 200 || r.header.Get("Idempotent-Replayed") != "true" {
@@ -198,6 +203,7 @@ func TestSend_TimeoutIsALostResponse(t *testing.T) {
 }
 
 func TestSend_StaleInProgressKeyIsTakenOver(t *testing.T) {
+	t.Parallel()
 	admin, prov := providerDB(t)
 	if _, err := admin.Exec(context.Background(), `INSERT INTO provider.idempotency_keys (key, channel, state, created_at)
 		VALUES ('msg-1', 'sms', 'in_progress', now() - interval '2 minutes')`); err != nil {
@@ -211,6 +217,7 @@ func TestSend_StaleInProgressKeyIsTakenOver(t *testing.T) {
 }
 
 func TestSend_RestartKeepsKeys(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	first := send(t, start(t, prov, instant, nil), "email", "msg-1", `{"to":"a@example.com","subject":"S","body":"B"}`, nil)
 
@@ -222,6 +229,7 @@ func TestSend_RestartKeepsKeys(t *testing.T) {
 }
 
 func TestSend_MalformedRequests(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	url := start(t, prov, instant, nil)
 	send(t, url, "sms", "used-for-sms", smsBody, nil)
@@ -247,6 +255,7 @@ func TestSend_MalformedRequests(t *testing.T) {
 
 // The same seed gives the same sequence of outcomes, so test runs repeat.
 func TestFailureInjection_IsDeterministic(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	mixed := config.ProviderChannel{ErrorRate: 0.3, RateLimitRate: 0.3}
 	outcomes := func(seed int64, prefix string) []int {
@@ -283,6 +292,7 @@ func TestFailureInjection_IsDeterministic(t *testing.T) {
 
 // D6: the provider's role sees only its own schema.
 func TestProviderRole_CannotReadAppTables(t *testing.T) {
+	t.Parallel()
 	_, prov := providerDB(t)
 	ctx := context.Background()
 

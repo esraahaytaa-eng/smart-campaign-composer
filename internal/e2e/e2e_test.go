@@ -72,10 +72,7 @@ const apiClockLag = 59 * time.Second
 func newStack(t *testing.T) *stack {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	if err := db.Seed(ctx, pool, db.DefaultRNGSeed, time.Now(), "e2e-password"); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +97,9 @@ func newStack(t *testing.T) *stack {
 		Now: func() time.Time { return time.Now().Add(-apiClockLag) }}).Routes(guarded)
 
 	w := &worker.Worker{Queue: &worker.Queue{Pool: pool}, ProviderURL: provSrv.URL, Client: worker.NewClient(2 * time.Second),
-		MaxAttempts: 5, Poll: 50 * time.Millisecond}
+		// Short retry waits: the retries still happen; the backoff's own values are
+		// tested in internal/worker (D53).
+		MaxAttempts: 5, BackoffMax: 2 * time.Second, Poll: 50 * time.Millisecond}
 	runCtx, stop := context.WithCancel(ctx)
 	done := make(chan error)
 	go func() { done <- w.Run(runCtx) }()
@@ -223,6 +222,7 @@ func (s *stack) checkDelivery(campaignID int64) {
 const caseExample = "Send a 30% discount reminder to users in Istanbul who added products to their cart in the last 30 days but did not buy anything. Keep the message short and friendly."
 
 func TestEndToEnd(t *testing.T) {
+	t.Parallel() // own database; nothing shared with other tests
 	s := newStack(t)
 
 	t.Run("send now through a flaky provider", func(t *testing.T) {
@@ -261,10 +261,14 @@ func TestEndToEnd(t *testing.T) {
 		cid := id(c)
 		path := "/api/campaigns/" + strconv.FormatInt(cid, 10)
 		s.json(http.MethodPut, path+"/content", `{"version":1,"content":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}`, 200)
-		sendAt := time.Now().Add(3 * time.Second)
+		sendAt := time.Now().Add(4 * time.Second)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":{"at":"`+sendAt.Format(time.RFC3339Nano)+`"}}`, 200)
 
-		time.Sleep(time.Until(sendAt.Add(-time.Second)))
+		time.Sleep(time.Until(sendAt.Add(-2 * time.Second)))
+		// Only meaningful while send_at is still ahead, by the database's clock.
+		if s.count(`SELECT count(*) WHERE now() < $1`, sendAt) != 1 {
+			t.Fatal("the check before send_at ran after it; the machine is too slow for this test")
+		}
 		if n := s.count(`SELECT count(*) FROM messages WHERE campaign_id = $1`, cid); n != 0 ||
 			s.count(`SELECT count(*) FROM campaigns WHERE id = $1 AND status = 'approved'`, cid) != 1 {
 			t.Fatalf("before send_at: want approved and no messages, got %d messages", n)

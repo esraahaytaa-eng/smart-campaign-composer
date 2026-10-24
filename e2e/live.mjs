@@ -61,9 +61,7 @@ export default () =>
     check((await cancelledRow.innerText()).includes(g.cancelled.toLocaleString('en-GB')), 'the page shows the cancelled count')
     check((await page.getByRole('button', { name: 'Cancel campaign…' }).count()) === 0, 'it cannot be cancelled twice')
     await t.shot('cancelled-mid-send')
-    await page.waitForTimeout(3000)
-    const later = (await (await page.request.get(`${BASE}/api/campaigns/${id}/recipients?group=sent`)).json()).groups.sms.sent
-    check(later === g.sent, 'no message is sent after the cancel')
+    // Nothing is sent after a cancel: TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel (Go).
 
     // Turkish on the resend-free result page and in the drawer
     await page.getByRole('link', { name: /^SMS Cancelled/ }).click()
@@ -73,6 +71,7 @@ export default () =>
     // the same screens in Turkish
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'Türkçe' }).click()
+    await page.getByText('Salt okunur sonuçlar').waitFor() // Turkish loads on first use (D58)
     check(await page.getByText('Salt okunur sonuçlar').isVisible() && await page.getByText('Gönderilmeyenler ve istisnalar').isVisible(), 'the results are in Turkish')
     await page.getByRole('link', { name: /^SMS İptal edildi/ }).click()
     await page.getByRole('dialog', { name: 'Alıcı ayrıntıları' }).waitFor()

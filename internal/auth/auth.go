@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +29,12 @@ const (
 
 const errInvalidLogin = "invalid email or password"
 
+// Failed sign-ins allowed per email and per client address (D55).
+const (
+	maxFailures   = 5
+	failureWindow = 15 * time.Minute
+)
+
 // Routes registers POST /api/login and guards every other /api/ path with
 // Require. It returns the guarded mux, where later tasks add their routes.
 func Routes(mux *http.ServeMux, pool *pgxpool.Pool, llmMode string) *http.ServeMux {
@@ -33,9 +42,37 @@ func Routes(mux *http.ServeMux, pool *pgxpool.Pool, llmMode string) *http.ServeM
 	api.HandleFunc("GET /api/me", me(pool, llmMode))
 	api.HandleFunc("POST /api/logout", logout(pool))
 
-	mux.HandleFunc("POST /api/login", login(pool))
-	mux.Handle("/api/", Require(pool, api))
+	mux.Handle("POST /api/login", secure(login(pool, newThrottle(maxFailures, failureWindow, time.Now))))
+	mux.Handle("/api/", secure(Require(pool, api)))
 	return api
+}
+
+// secure adds the API's security headers (D56) and refuses writes from other
+// sites' pages: SameSite=Lax already keeps the cookie off them; this is a
+// second layer. Browsers always send Origin on POST, PUT and DELETE; clients
+// without one (curl, scripts) are not browsers and carry no ambient cookie.
+func secure(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Cache-Control", "no-store") // answers can hold customer data
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {
+			writeError(w, http.StatusForbidden, "cross-site request refused")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sameOrigin reports whether the request's Origin, if any, is this host.
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && u.Host == r.Host
 }
 
 type ctxKey struct{}
@@ -72,7 +109,7 @@ func Require(pool *pgxpool.Pool, next http.Handler) http.Handler {
 	})
 }
 
-func login(pool *pgxpool.Pool) http.HandlerFunc {
+func login(pool *pgxpool.Pool, th *throttle) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Email    string `json:"email"`
@@ -83,6 +120,17 @@ func login(pool *pgxpool.Pool) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "email and password are required")
 			return
 		}
+		// Counted before the password is checked, so a locked-out guesser learns
+		// nothing. The address first: a blocked address adds no email keys.
+		emailKey, addrKey := "email:"+strings.ToLower(strings.TrimSpace(in.Email)), "addr:"+clientAddr(r)
+		for _, k := range []string{addrKey, emailKey} {
+			if ok, wait := th.take(k); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+				writeError(w, http.StatusTooManyRequests, "too many failed sign-ins; try again later")
+				return
+			}
+		}
+		fail := func() { writeError(w, http.StatusUnauthorized, errInvalidLogin) }
 
 		var m marketer
 		var hash string
@@ -91,7 +139,7 @@ func login(pool *pgxpool.Pool) http.HandlerFunc {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Compare anyway so an unknown email takes as long as a wrong password.
 			bcrypt.CompareHashAndPassword(dummyHash, []byte(in.Password))
-			writeError(w, http.StatusUnauthorized, errInvalidLogin)
+			fail()
 			return
 		}
 		if err != nil {
@@ -99,17 +147,21 @@ func login(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 		if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil {
-			writeError(w, http.StatusUnauthorized, errInvalidLogin)
+			fail()
 			return
 		}
+		th.reset(emailKey)
+		th.reset(addrKey)
 
 		token := rand.Text()
-		if _, err := pool.Exec(r.Context(), `INSERT INTO sessions (token_hash, marketer_id, expires_at)
+		// Expired sessions can't be used; removing them here keeps the table small.
+		if _, err := pool.Exec(r.Context(), `WITH gone AS (DELETE FROM sessions WHERE expires_at <= now())
+			INSERT INTO sessions (token_hash, marketer_id, expires_at)
 			VALUES ($1, $2, now() + make_interval(secs => $3))`, hashToken(token), m.ID, sessionTTL.Seconds()); err != nil {
 			serverError(w, "create session", err)
 			return
 		}
-		setCookie(w, token, int(sessionTTL.Seconds()))
+		setCookie(w, r, token, int(sessionTTL.Seconds()))
 		writeJSON(w, http.StatusOK, m)
 	}
 }
@@ -121,7 +173,7 @@ func logout(pool *pgxpool.Pool) http.HandlerFunc {
 			serverError(w, "delete session", err)
 			return
 		}
-		setCookie(w, "", -1)
+		setCookie(w, r, "", -1)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -149,8 +201,11 @@ func me(pool *pgxpool.Pool, llmMode string) http.HandlerFunc {
 	}
 }
 
-// setCookie writes the session cookie; maxAge < 0 deletes it.
-func setCookie(w http.ResponseWriter, token string, maxAge int) {
+// setCookie writes the session cookie; maxAge < 0 deletes it. It is Secure
+// when the request came over HTTPS (directly or through a proxy that says so);
+// the local demo runs on plain http://localhost, where a Secure cookie would
+// never be sent back.
+func setCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    token,
@@ -158,8 +213,20 @@ func setCookie(w http.ResponseWriter, token string, maxAge int) {
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		// shortcut: not Secure because the demo runs on plain http://localhost; set Secure behind HTTPS.
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 	})
+}
+
+// clientAddr is the connection's address, without the port. Forwarding
+// headers are not trusted: anyone could set them to dodge the limit.
+// shortcut: behind a proxy every client shares its address (and its limit);
+// trust the proxy's X-Forwarded-For there.
+func clientAddr(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // hashToken is what the database stores: never the token itself.

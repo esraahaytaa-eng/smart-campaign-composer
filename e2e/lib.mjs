@@ -17,6 +17,8 @@ export async function suite(name, body) {
   const problems = []
   const created = []
   page.on('pageerror', (e) => problems.push(`page error: ${e.message}`))
+  // A strict CSP (D56) must never block anything the app itself does.
+  page.on('console', (m) => /Content Security Policy/i.test(m.text()) && problems.push(`CSP violation: ${m.text()}`))
   const t = {
     page,
     context,
@@ -41,6 +43,11 @@ export async function suite(name, body) {
       await page.getByRole('button', { name: 'Sign in' }).click()
       await page.waitForURL((u) => !u.pathname.startsWith('/login'))
     },
+    // Waits until the campaign has finished sending.
+    async completed(id, seconds = 120) {
+      for (let i = 0; i < seconds && (await t.get(id)).status !== 'completed'; i++) await page.waitForTimeout(1000)
+      return (await t.get(id)).status === 'completed'
+    },
     // A draft from a brief the mock AI understands, through the API.
     async draft(request, channels = ['sms', 'email']) {
       const r = await page.request.post(`${BASE}/api/campaigns`, { data: { request, channels, time_zone: 'Europe/Istanbul' } })
@@ -53,6 +60,8 @@ export async function suite(name, body) {
     problems.push(`stopped: ${err.message.split('\n')[0]}`)
     console.log(`FAIL ${name}: stopped: ${err.message.split('\n')[0]}`)
   } finally {
+    // A file that failed leaves a screenshot of where it stopped (CI keeps them).
+    if (SHOTS && problems.length) await page.screenshot({ path: `${SHOTS}/FAILED-${name}.png`, fullPage: true }).catch(() => {})
     for (const id of created) {
       const c = await t.get(id).catch(() => null)
       if (c?.status === 'draft') await page.request.delete(`${BASE}/api/campaigns/${id}`, { data: { version: c.version } })
@@ -67,3 +76,24 @@ export async function suite(name, body) {
 export const CART_BRIEF = 'Send a 30% discount reminder to users in Istanbul who added products to their cart in the last 30 days but did not buy anything.'
 export const ANKARA_BRIEF = 'Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00.'
 export const WELCOME_BRIEF = 'Send a welcome discount to users who signed up in the last 7 days.'
+
+// 150 characters with the names empty: fits, but not with most full names, so
+// a send gives both sent and skipped (character limit) recipients.
+export const LONG_SMS = 'Merhaba {{first_name}} {{last_name}}, ' + 'hafta sonu indirimi başladı! Sepetinizdeki ürünlerde geçerli fırsatlar için hemen uygulamayı açın ve kodu girin: HAFTA'.padEnd(150 - 'Merhaba , '.length, '.')
+
+// Campaigns several files need are sent once per run and shared; every
+// marketer sees every campaign (D10). The first caller sends, the others wait.
+const once = new Map()
+export function sentOnce(key, send) {
+  if (!once.has(key)) once.set(key, send())
+  return once.get(key)
+}
+
+// The too-long SMS sent to the Ankara customers, finished (recipients, resend).
+export const longSmsToAnkara = (t) =>
+  sentOnce('long-sms-ankara', async () => {
+    const id = await t.draft(ANKARA_BRIEF, ['sms'])
+    await t.page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: { sms: { body: LONG_SMS } } } })
+    const ok = (await t.page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 2, send: 'now' } })).ok()
+    return { id, ok: ok && (await t.completed(id)) }
+  })

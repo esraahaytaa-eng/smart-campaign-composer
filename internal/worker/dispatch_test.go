@@ -121,6 +121,7 @@ func (f *fixture) message(id int64) messageRow {
 }
 
 func TestProcess_SendsPersonalizedMessageWithIdempotencyKey(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	p := &fakeProvider{}
 	w := f.newWorker(p.serve(t))
@@ -217,6 +218,7 @@ func TestProcess_Classification(t *testing.T) {
 }
 
 func TestProcess_FifthFailureFails(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	p := &fakeProvider{handle: status(500)}
 	w := f.newWorker(p.serve(t))

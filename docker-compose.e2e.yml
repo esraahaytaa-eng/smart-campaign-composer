@@ -1,0 +1,22 @@
+# The browser suite's own stack (D53). make e2e starts it as the Compose
+# project scc-e2e next to docker-compose.yml and removes it afterwards, so the
+# suite never fills the local app's data. Mock AI only: the checks rely on its
+# answers, and the real AI would cost money.
+services:
+  postgres:
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql/data # a fresh, seeded database every run
+  migrate:
+    environment:
+      DEMO_MARKETER_PASSWORD: "Demo1234!" # what the suite signs in with
+  api:
+    ports: !reset [] # the suite reaches it inside the network; no clash with the local app
+    environment:
+      LLM_MODE: mock
+  worker:
+    environment:
+      RETRY_BACKOFF_MAX: 2s # shorter retry waits; the 30 s cap stays covered by the Go tests
+  e2e:
+    environment:
+      DEMO_PASSWORD: "Demo1234!"

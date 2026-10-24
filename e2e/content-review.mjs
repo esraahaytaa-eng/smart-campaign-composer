@@ -231,6 +231,7 @@ export default () =>
     check(!(await page.getByRole('alertdialog').isVisible()), 'no confirmation without that choice')
 
     await page.getByRole('button', { name: 'Türkçe' }).click()
+    await page.getByRole('heading', { name: 'Ne zaman gönderilsin?' }).waitFor() // Turkish loads on first use (D58)
     check(await page.getByRole('heading', { name: 'Ne zaman gönderilsin?' }).isVisible(), 'the review screen in Turkish')
     await page.getByRole('button', { name: 'English' }).click()
   })

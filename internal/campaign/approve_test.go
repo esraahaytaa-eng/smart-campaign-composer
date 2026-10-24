@@ -37,6 +37,7 @@ func (a *app) exec(sql string, args ...any) {
 func at(d time.Duration) string { return fixedNow.Add(d).Format(time.RFC3339) }
 
 func TestApprove_RequiresExplicitSendChoice(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	_, d := a.create(map[string]any{
 		"request": "Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00.", "channels": []string{"sms"}, "time_zone": "Europe/Istanbul",
@@ -54,6 +55,7 @@ func TestApprove_RequiresExplicitSendChoice(t *testing.T) {
 }
 
 func TestApprove_NowStoresEstimateAndCreatesNoMessages(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 
@@ -72,6 +74,7 @@ func TestApprove_NowStoresEstimateAndCreatesNoMessages(t *testing.T) {
 }
 
 func TestApprove_Scheduled(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 
@@ -83,6 +86,7 @@ func TestApprove_Scheduled(t *testing.T) {
 }
 
 func TestApprove_Rejects(t *testing.T) {
+	t.Parallel() // times are relative to the fixed test clock
 	cases := []struct {
 		name  string
 		setup func(a *app, id int64) // runs on a ready draft at version 2
@@ -106,6 +110,7 @@ func TestApprove_Rejects(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel() // each case has its own database
 			a := newApp(t, llm.NewMock())
 			d := a.readyDraft()
 			if tc.setup != nil {
@@ -122,6 +127,7 @@ func TestApprove_Rejects(t *testing.T) {
 }
 
 func TestApprove_ConcurrentDoubleApprove(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 
@@ -142,6 +148,7 @@ func TestApprove_ConcurrentDoubleApprove(t *testing.T) {
 }
 
 func TestApprovedCampaign_IsFrozen(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	a.approve(d.ID, `{"version":2,"send":"now"}`)
@@ -161,6 +168,7 @@ func TestApprovedCampaign_IsFrozen(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	cancel := func(id int64) (int, map[string]any) {
@@ -182,6 +190,7 @@ func TestCancel(t *testing.T) {
 }
 
 func TestCancel_WhileSendingOnlyStopsWaitingMessages(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 	a.exec(`UPDATE campaigns SET status = 'sending' WHERE id = $1`, d.ID)
@@ -219,6 +228,7 @@ func indexOf(list []string, s string) int {
 }
 
 func TestEstimate(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft()
 
@@ -256,6 +266,7 @@ func (a *app) parentWithSkips() int64 {
 }
 
 func TestResend_AudienceIsExactlyTheSkippedNotYetSent(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	parent := a.parentWithSkips()
 
@@ -276,6 +287,7 @@ func TestResend_AudienceIsExactlyTheSkippedNotYetSent(t *testing.T) {
 }
 
 func TestResend_Conflicts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	parent := a.parentWithSkips()
 	path := "/api/campaigns/" + itoa(parent) + "/resend"
@@ -309,6 +321,7 @@ func TestResend_Conflicts(t *testing.T) {
 }
 
 func TestGenerate_ResendAsksForShorterContent(t *testing.T) {
+	t.Parallel()
 	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{`{"sms":{"body":"Merhaba {{first_name}}!"}}`, validContent}}
 	a := newApp(t, model)
 	parent := a.parentWithSkips()

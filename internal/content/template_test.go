@@ -8,6 +8,7 @@ import (
 )
 
 func TestParse_Variables(t *testing.T) {
+	t.Parallel()
 	vars, err := Parse("Hi {{first_name}} {{last_name}}, {{city}} deals! Bye {{first_name}}.")
 	if err != nil {
 		t.Fatal(err)
@@ -21,6 +22,7 @@ func TestParse_Variables(t *testing.T) {
 }
 
 func TestParse_RejectsMalformed(t *testing.T) {
+	t.Parallel()
 	for _, tpl := range []string{
 		"Hi {{ first_name }}",
 		"Hi {{FIRST_NAME}}",
@@ -40,6 +42,7 @@ func TestParse_RejectsMalformed(t *testing.T) {
 }
 
 func TestRender_TurkishLengthInCharacters(t *testing.T) {
+	t.Parallel()
 	got := Render("Merhaba {{first_name}}, {{city}}'da %30 indirim!", UserVars{FirstName: "Şükrü", City: "İstanbul"})
 
 	if got != "Merhaba Şükrü, İstanbul'da %30 indirim!" {
@@ -51,6 +54,7 @@ func TestRender_TurkishLengthInCharacters(t *testing.T) {
 }
 
 func TestRender_EmptyValuesAreTidied(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		tpl  string
 		u    UserVars
@@ -81,6 +85,7 @@ func fieldErrs(errs []FieldError) string {
 }
 
 func TestValidateDraft_FixedTextOverLimit(t *testing.T) {
+	t.Parallel()
 	if errs := ValidateDraft(sms(strings.Repeat("a", 172)), []string{"sms"}); len(errs) != 1 || errs[0].Field != "sms.body" {
 		t.Fatalf("172 fixed characters: want one sms.body error, got %s", fieldErrs(errs))
 	}
@@ -94,6 +99,7 @@ func TestValidateDraft_FixedTextOverLimit(t *testing.T) {
 }
 
 func TestValidateDraft_Email(t *testing.T) {
+	t.Parallel()
 	email := func(subject, body string) Content { return Content{Email: &Message{Subject: subject, Body: body}} }
 	cases := []struct {
 		name  string
@@ -121,6 +127,7 @@ func TestValidateDraft_Email(t *testing.T) {
 }
 
 func TestValidateDraft_ChannelsMatchContent(t *testing.T) {
+	t.Parallel()
 	both := Content{SMS: &Message{Body: "Hi"}, Email: &Message{Subject: "S", Body: "B"}}
 
 	if errs := ValidateDraft(sms("Hi"), []string{"sms", "email"}); len(errs) != 1 || errs[0].Field != "email" {
@@ -140,6 +147,7 @@ func TestValidateDraft_ChannelsMatchContent(t *testing.T) {
 // A template of variables only renders empty for recipients without those
 // values (Milestone C review), so some fixed text is required.
 func TestValidateDraft_RequiresFixedText(t *testing.T) {
+	t.Parallel()
 	for name, c := range map[string]Content{
 		"sms of one variable":   {SMS: &Message{Body: "{{last_name}}"}},
 		"sms of variables only": {SMS: &Message{Body: "{{first_name}}  {{city}}"}},
@@ -159,6 +167,7 @@ func TestValidateDraft_RequiresFixedText(t *testing.T) {
 
 // Postgres rejects NUL, and control characters have no place in a message.
 func TestValidateDraft_RejectsControlCharacters(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{"Hi\x00 there", "Hi\x07 there", "Hi\x1b[31m there", "Hi\x7f"} {
 		if errs := ValidateDraft(sms(body), []string{"sms"}); len(errs) != 1 || errs[0].Field != "sms.body" {
 			t.Errorf("%q: want one sms.body error, got %s", body, fieldErrs(errs))

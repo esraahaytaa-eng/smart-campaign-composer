@@ -4,10 +4,14 @@ import { BASE, suite } from './lib.mjs'
 export default () =>
   suite('sign-in', async (t) => {
     const { page, check } = t
+    const scripts = []
+    page.on('response', (r) => r.request().resourceType() === 'script' && scripts.push(r))
     await page.goto(BASE + '/campaigns/new')
     await page.waitForURL(/\/login\?redirect=/)
     check(decodeURIComponent(page.url()).includes('redirect=/campaigns/new'), 'a signed-out deep link goes to sign-in with the return address')
     await t.shot('sign-in')
+    const encodings = await Promise.all(scripts.map(async (r) => (await r.allHeaders())['content-encoding']))
+    check(encodings.length > 0 && encodings.every((e) => e === 'gzip'), `the app's scripts arrive gzipped (D60): ${encodings.join(', ')}`)
 
     await page.getByRole('button', { name: 'Sign in' }).click()
     check(await page.getByText('Enter your work email.').isVisible(), 'an empty email is reported')

@@ -16,7 +16,7 @@ export const tr: Record<Key, Message> = {
 
   'nav.primary': 'Ana menü',
   'nav.newCampaign': '+ Yeni kampanya',
-  'mode.mock': 'Simüle yapay zekâ · Simüle sağlayıcılar',
+  'mode.mock': 'Simüle YZ ve sağlayıcılar',
   'mode.real': 'Claude yapay zekâ · Simüle sağlayıcılar',
   'mode.mockHelp': 'Yapay zekâ ile SMS ve e-posta sağlayıcıları simüle edilir. Gerçek mesaj gönderilmez.',
   'mode.realHelp': 'Yapay zekâ Claude’dur. SMS ve e-posta sağlayıcıları simüle edilir: gerçek mesaj gönderilmez.',
@@ -46,6 +46,11 @@ export const tr: Record<Key, Message> = {
 
   'error.network': 'Sunucuya ulaşılamıyor. Çalıştığından emin olun.',
   'error.server': 'Sunucuda bir sorun oluştu. Birazdan tekrar deneyin.',
+  'error.aiCallLimit': {
+    one: 'Bu saatlik yapay zekâ sınırına ulaştınız. {count} dakika sonra yeniden deneyin ya da elle düzenleyin.',
+    other: 'Bu saatlik yapay zekâ sınırına ulaştınız. {count} dakika sonra yeniden deneyin ya da elle düzenleyin.',
+  },
+  'error.tooManySignIns': 'Çok fazla başarısız giriş denemesi. Birkaç dakika bekleyip tekrar deneyin.',
   'error.notFound': 'Bu kampanya yok ya da silinmiş.',
   'error.changed': 'Bu taslak başka bir yerde, başka bir sekmede ya da başka bir pazarlamacı tarafından değiştirildi. Tekrar düzenlemeden önce en son hâlini görmek için yenileyin.',
   'error.aiFailed': 'Yapay zekâ kullanılabilir bir yanıt üretemedi. Tekrar deneyin ya da açıklamayı yeniden yazın.',
@@ -356,7 +361,12 @@ export const tr: Record<Key, Message> = {
   'campaigns.noMatch': 'Eşleşen kampanya yok.',
   'campaigns.clear': 'Aramayı ve filtreleri temizle',
   'campaigns.note': 'Onaylanan kampanyalar düzenlenemez. Yalnızca taslaklar silinebilir. Onaylanan ve gönderilmekte olan kampanyalar iptal edilebilir.',
-  'campaigns.limit': 'En yeni {count} kampanya gösteriliyor.',
+  'campaigns.showing': '{total} kampanyadan {from}–{to} gösteriliyor',
+  'campaigns.range': '{total} kampanyadan {from}–{to}',
+  'pager.above': 'Sayfalar, listenin üstünde',
+  'pager.below': 'Sayfalar, listenin altında',
+  'pager.prev': 'Önceki sayfa',
+  'pager.next': 'Sonraki sayfa',
   'campaigns.deleted': 'Taslak silindi.',
   'campaigns.cancelledNotice': 'Kampanya iptal edildi.',
 
@@ -469,8 +479,6 @@ export const tr: Record<Key, Message> = {
   'recipients.noMatch': '“{q}” ile eşleşen alıcı yok.',
   'recipients.showing': '{total} alıcıdan {from}–{to} gösteriliyor · son denemeye göre sıralı',
   'recipients.showingNone': '{total} alıcıdan 0 gösteriliyor',
-  'recipients.prev': 'Önceki sayfa',
-  'recipients.next': 'Sonraki sayfa',
   'info.sent': 'Gönderildi — sahte sağlayıcı kabul etti',
   'info.failed': 'Başarısız — denendi ve sağlayıcı kesinlikle kabul etmedi',
   'info.skipped': 'Atlandı — hiç denenmedi',

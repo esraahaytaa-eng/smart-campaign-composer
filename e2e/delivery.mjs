@@ -58,10 +58,5 @@ export default () =>
     await page.waitForTimeout(5000)
     check(streams.length === opened, 'the stream is not reopened after the end (D36)')
 
-    // pause and Turkish
-    await page.goto(`${BASE}/campaigns/${live}`)
-    await page.getByText('Read-only results').waitFor()
-    await page.getByRole('button', { name: 'Türkçe' }).click()
-    check(await page.getByText('Salt okunur sonuçlar').isVisible(), 'the results are in Turkish')
-    await page.getByRole('button', { name: 'English' }).click()
+    // The results in Turkish are checked in live.mjs.
   })

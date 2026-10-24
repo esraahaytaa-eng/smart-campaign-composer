@@ -18,8 +18,8 @@ export default () =>
     const at = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
     const approved = await page.request.post(`${BASE}/api/campaigns/${scheduled}/approve`, { data: { version: 2, send: { at } } })
     check(approved.ok(), 'test setup: a campaign is scheduled for tomorrow')
-    const list = await (await page.request.get(`${BASE}/api/campaigns`)).json()
-    const count = (s) => list.filter((c) => c.status === s).length
+    const { counts } = await (await page.request.get(`${BASE}/api/campaigns`)).json() // over all campaigns (D54)
+    const count = (s) => counts[s]
 
     // dashboard
     await page.goto(BASE + '/')
@@ -43,9 +43,13 @@ export default () =>
     check(!(await row(scheduled).isVisible()), 'the draft filter hides the scheduled campaign')
     await page.getByRole('button', { name: /^All\b/ }).click()
     await page.getByRole('searchbox', { name: 'Search campaigns' }).fill('ANKARA HAFTA')
+    // The server searches after a short pause in typing (D54).
+    await page.waitForURL((u) => u.searchParams.get('q') === 'ANKARA HAFTA')
+    await row(draft).waitFor({ state: 'detached' })
     check(!(await row(draft).isVisible()), 'search narrows the list')
     await page.getByRole('searchbox', { name: 'Search campaigns' }).fill('WEEKEND SALE ANNOUNCEMENT')
     await page.waitForURL((u) => u.searchParams.get('q') === 'WEEKEND SALE ANNOUNCEMENT')
+    await row(scheduled).waitFor()
     check(await row(scheduled).isVisible(), 'search finds the brief (case-insensitive)')
     await page.reload()
     await row(scheduled).waitFor() // the list loads after the page
@@ -56,7 +60,8 @@ export default () =>
     await page.getByRole('searchbox', { name: 'Search campaigns' }).fill('no campaign matches this text zzz')
     await page.getByText('No campaigns match.').waitFor()
     await page.getByRole('button', { name: 'Clear search and filters' }).click()
-    check(await row(draft).isVisible(), 'clearing brings every campaign back')
+    await row(draft).waitFor()
+    check(await row(draft).isVisible() && (await page.getByRole('searchbox', { name: 'Search campaigns' }).inputValue()) === '', 'clearing brings every campaign back')
     await t.shot('campaigns')
 
     // delete a draft

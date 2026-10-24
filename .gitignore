@@ -5,3 +5,4 @@
 cookies.txt
 .DS_Store
 e2e/shots*/
+.ci-cache/

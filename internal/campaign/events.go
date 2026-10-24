@@ -91,6 +91,13 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	interval := h.EventsInterval
+	if interval == 0 {
+		interval = time.Second
+	}
+	// The first snapshot is read fresh, so a page opened again sees what changed
+	// meanwhile (D36); the polls after it share the campaign's snapshot (D59).
+	snapshot := func() (statusSnapshot, error) { return h.snapshots.get(ctx, id, interval/4, h.snapshot) }
 	snap, err := h.snapshot(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "campaign not found")
@@ -104,10 +111,6 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 	last, _ := json.Marshal(snap)
 	send("status", json.RawMessage(last))
 
-	interval := h.EventsInterval
-	if interval == 0 {
-		interval = time.Second
-	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -122,7 +125,7 @@ func (h *Handler) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 		}
-		if snap, err = h.snapshot(ctx, id); err != nil {
+		if snap, err = snapshot(); err != nil {
 			if ctx.Err() == nil {
 				slog.Error("status snapshot", "campaign", id, "err", err)
 			}

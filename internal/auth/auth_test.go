@@ -13,7 +13,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"smart-campaign-composer/internal/auth"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/obs"
 	"smart-campaign-composer/internal/obstest"
@@ -33,10 +32,7 @@ type server struct {
 func newServer(t *testing.T) *server {
 	t.Helper()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +88,7 @@ func (s *server) count(sql string, args ...any) int {
 }
 
 func TestLogin_SetsHttpOnlyLaxCookie(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	c := s.sessionCookie()
@@ -105,6 +102,7 @@ func TestLogin_SetsHttpOnlyLaxCookie(t *testing.T) {
 }
 
 func TestLogin_EmailIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	if rec := s.login("Marketer@Example.COM", password); rec.Code != http.StatusOK {
@@ -113,6 +111,7 @@ func TestLogin_EmailIsCaseInsensitive(t *testing.T) {
 }
 
 func TestLogin_WrongPasswordSameAsUnknownEmail(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	wrongPass := s.login(email, "wrong-password")
@@ -133,6 +132,7 @@ func TestLogin_WrongPasswordSameAsUnknownEmail(t *testing.T) {
 }
 
 func TestLogin_InvalidBody400(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	for _, body := range []string{`not json`, `{}`, `{"email":"","password":"x"}`, `{"email":"a@b.c"}`,
@@ -144,6 +144,7 @@ func TestLogin_InvalidBody400(t *testing.T) {
 }
 
 func TestSession_DBStoresOnlyTokenHash(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 
@@ -157,6 +158,7 @@ func TestSession_DBStoresOnlyTokenHash(t *testing.T) {
 }
 
 func TestMe_ReturnsMarketerAndLLMMode(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	rec := s.do(http.MethodGet, "/api/me", "", s.sessionCookie())
@@ -175,6 +177,7 @@ func TestMe_ReturnsMarketerAndLLMMode(t *testing.T) {
 }
 
 func TestRequire_ExpiredSession401(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 	if _, err := s.pool.Exec(context.Background(), `UPDATE sessions SET expires_at = now() - interval '1 second'`); err != nil {
@@ -186,7 +189,32 @@ func TestRequire_ExpiredSession401(t *testing.T) {
 	}
 }
 
+// Expired sessions can't be used (expires_at is checked); signing in also
+// removes them, so the table doesn't keep every session ever made.
+func TestLogin_RemovesExpiredSessions(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	live := s.sessionCookie()
+	if _, err := s.pool.Exec(context.Background(), `INSERT INTO sessions (token_hash, marketer_id, expires_at)
+		SELECT decode(md5(g::text), 'hex'), (SELECT id FROM marketers), now() - interval '1 minute' FROM generate_series(1, 3) g`); err != nil {
+		t.Fatal(err)
+	}
+	s.sessionCookie() // another sign-in
+
+	var expired, valid int
+	if err := s.pool.QueryRow(context.Background(), `SELECT count(*) FILTER (WHERE expires_at <= now()), count(*) FILTER (WHERE expires_at > now()) FROM sessions`).Scan(&expired, &valid); err != nil {
+		t.Fatal(err)
+	}
+	if expired != 0 || valid != 2 {
+		t.Fatalf("want the 3 expired sessions removed and both live ones kept, got %d expired, %d valid", expired, valid)
+	}
+	if rec := s.do(http.MethodGet, "/api/me", "", live); rec.Code != http.StatusOK {
+		t.Fatalf("the earlier live session still works, got %d", rec.Code)
+	}
+}
+
 func TestRequire_UnknownToken401(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	c := &http.Cookie{Name: auth.CookieName, Value: "forged-token"}
@@ -196,6 +224,7 @@ func TestRequire_UnknownToken401(t *testing.T) {
 }
 
 func TestLogout_InvalidatesSession(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 
@@ -216,6 +245,7 @@ func TestLogout_InvalidatesSession(t *testing.T) {
 }
 
 func TestAPI_RequiresSessionExceptLogin(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 
 	for _, r := range []struct{ method, path string }{
@@ -236,6 +266,7 @@ func TestAPI_RequiresSessionExceptLogin(t *testing.T) {
 }
 
 func TestMarketerID_InContext(t *testing.T) {
+	t.Parallel()
 	s := newServer(t)
 	c := s.sessionCookie()
 
@@ -266,5 +297,118 @@ func TestRequire_GuardedRouteLabelsMetrics(t *testing.T) {
 
 	if got := obstest.Value(t, "scc_http_requests_total", "route", "GET /api/me", "code", "200") - before; got != 1 {
 		t.Fatalf("want 1 request labelled GET /api/me, got %v", got)
+	}
+}
+
+// D55: after 5 failed sign-ins for an email, even the right password waits.
+func TestLogin_ThrottledAfterFiveFailures(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	for range 5 {
+		if rec := s.login(email, "wrong-password"); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("want 401, got %d", rec.Code)
+		}
+	}
+	rec := s.login(email, password)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("want 429 with Retry-After, got %d %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+// The client address is limited too, so guessing across many emails stops.
+func TestLogin_ThrottlesAnAddressAcrossEmails(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	for i := range 5 {
+		s.login("nobody"+strings.Repeat("x", i)+"@example.com", "guess")
+	}
+	if rec := s.login(email, password); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("want 429 for the address, got %d", rec.Code)
+	}
+}
+
+func TestLogin_SuccessResetsTheCount(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	for range 4 {
+		s.login(email, "wrong-password")
+	}
+	if rec := s.login(email, password); rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", rec.Code)
+	}
+	for range 4 {
+		s.login(email, "wrong-password")
+	}
+	if rec := s.login(email, password); rec.Code != http.StatusOK {
+		t.Fatalf("the earlier failures were forgotten after a success, want 200, got %d", rec.Code)
+	}
+}
+
+// Writes from another site's page are refused, even with a valid cookie
+// (defense in depth behind SameSite=Lax).
+func TestAPI_RejectsCrossSiteWrites(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	c := s.sessionCookie()
+	req := func(origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/api/logout", nil)
+		r.AddCookie(c)
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, r)
+		return rec
+	}
+	if rec := req("https://evil.example"); rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site write: want 403, got %d", rec.Code)
+	}
+	if rec := req("http://example.com"); rec.Code != http.StatusNoContent {
+		t.Fatalf("same-site write (httptest's host): want 204, got %d", rec.Code)
+	}
+
+	login := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"email":"`+email+`","password":"`+password+`"}`))
+	login.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, login)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-site sign-in: want 403, got %d", rec.Code)
+	}
+}
+
+// D56: API answers are never cached, sniffed or sent as a referrer.
+func TestAPI_SecurityHeaders(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	for _, rec := range []*httptest.ResponseRecorder{
+		s.do(http.MethodGet, "/api/me", ""),                    // 401
+		s.do(http.MethodGet, "/api/me", "", s.sessionCookie()), // 200
+		s.login(email, "wrong-password"),
+	} {
+		h := rec.Header()
+		if h.Get("Cache-Control") != "no-store" || h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" {
+			t.Errorf("status %d: headers %v", rec.Code, h)
+		}
+	}
+}
+
+// The session cookie is Secure whenever the request came over HTTPS.
+func TestLogin_SecureCookieOverHTTPS(t *testing.T) {
+	t.Parallel()
+	s := newServer(t)
+	secure := func(proto string) bool {
+		r := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{"email":"`+email+`","password":"`+password+`"}`))
+		if proto != "" {
+			r.Header.Set("X-Forwarded-Proto", proto)
+		}
+		rec := httptest.NewRecorder()
+		s.mux.ServeHTTP(rec, r)
+		return rec.Result().Cookies()[0].Secure
+	}
+	if secure("") {
+		t.Fatal("plain http (the local demo): the cookie must still work, so not Secure")
+	}
+	if !secure("https") {
+		t.Fatal("behind HTTPS the cookie must be Secure")
 	}
 }

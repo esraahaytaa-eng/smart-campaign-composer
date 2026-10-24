@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -15,7 +17,6 @@ import (
 
 	"smart-campaign-composer/internal/auth"
 	"smart-campaign-composer/internal/campaign"
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/llm"
 )
@@ -59,11 +60,14 @@ func (garbageLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.Ra
 
 func newApp(t *testing.T, model llm.LLM) *app {
 	t.Helper()
+	return newAppWith(t, model, nil)
+}
+
+// newAppWith is newApp with handler settings changed by configure.
+func newAppWith(t *testing.T, model llm.LLM, configure func(*campaign.Handler)) *app {
+	t.Helper()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	exec := func(sql string, args ...any) {
 		if _, err := pool.Exec(ctx, sql, args...); err != nil {
 			t.Fatalf("%v: %s", err, sql)
@@ -83,6 +87,9 @@ func newApp(t *testing.T, model llm.LLM) *app {
 	stopping := make(chan struct{})
 	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: 5 * time.Second, Now: func() time.Time { return fixedNow },
 		EventsInterval: 20 * time.Millisecond, Stopping: stopping}
+	if configure != nil {
+		configure(h)
+	}
 	h.Routes(api)
 
 	a := &app{t: t, pool: pool, mux: mux, stopping: stopping}
@@ -154,6 +161,7 @@ func (a *app) create(fields map[string]any) (*httptest.ResponseRecorder, draft) 
 }
 
 func TestCreate_FromBrief_DraftWithRulesAndCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec, d := a.create(map[string]any{"request": caseExample, "channels": []string{"sms", "email"}, "time_zone": "Europe/Istanbul"})
@@ -176,6 +184,7 @@ func TestCreate_FromBrief_DraftWithRulesAndCounts(t *testing.T) {
 }
 
 func TestCreate_ScheduleSuggestionIsOnlyAProposal(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec, d := a.create(map[string]any{
@@ -196,6 +205,7 @@ func TestCreate_ScheduleSuggestionIsOnlyAProposal(t *testing.T) {
 }
 
 func TestCreate_Unsupported_422NothingSaved(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	rec, _ := a.create(map[string]any{"request": "Send something nice to our best customers", "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
@@ -210,6 +220,7 @@ func TestCreate_Unsupported_422NothingSaved(t *testing.T) {
 }
 
 func TestCreate_InvalidInput_NothingSavedNoAICall(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, failingLLM{t})
 	ok := map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"}
 	with := func(k string, v any) string {
@@ -248,6 +259,7 @@ func TestCreate_InvalidInput_NothingSavedNoAICall(t *testing.T) {
 
 // D15: the marketer can build the rules by hand when the AI can't help.
 func TestCreate_ManualRulesSkipAI(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, failingLLM{t})
 
 	rec, d := a.create(map[string]any{
@@ -269,6 +281,7 @@ func TestCreate_ManualRulesSkipAI(t *testing.T) {
 }
 
 func TestCreate_AIInvalidTwice_502NothingSaved(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, garbageLLM{})
 
 	rec, _ := a.create(map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
@@ -291,6 +304,7 @@ func (a *app) newDraft() draft {
 }
 
 func TestUpdateRules(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/rules"
@@ -320,6 +334,7 @@ func TestUpdateRules(t *testing.T) {
 }
 
 func TestUpdateSchedule(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/schedule"
@@ -350,23 +365,8 @@ func TestUpdateSchedule(t *testing.T) {
 	}
 }
 
-func TestEdit_NonDraft_409(t *testing.T) {
-	a := newApp(t, llm.NewMock())
-	d := a.newDraft()
-	if _, err := a.pool.Exec(context.Background(), `UPDATE campaigns SET status = 'approved' WHERE id = $1`, d.ID); err != nil {
-		t.Fatal(err)
-	}
-	id := itoa(d.ID)
-
-	if rec := a.do(http.MethodPut, "/api/campaigns/"+id+"/rules", `{"version":1,"rules":[{"field":"city","op":"in","value":["Ankara"]}]}`); rec.Code != http.StatusConflict {
-		t.Errorf("rules on approved: want 409, got %d", rec.Code)
-	}
-	if rec := a.do(http.MethodPut, "/api/campaigns/"+id+"/schedule", `{"version":1,"send_at":null}`); rec.Code != http.StatusConflict {
-		t.Errorf("schedule on approved: want 409, got %d", rec.Code)
-	}
-}
-
 func TestGet(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.newDraft()
 
@@ -376,8 +376,8 @@ func TestGet(t *testing.T) {
 	}
 
 	rec = a.do(http.MethodGet, "/api/campaigns", "")
-	list := decode[[]draft](t, rec)
-	if rec.Code != http.StatusOK || len(list) != 1 || list[0].ID != d.ID {
+	list := decode[struct{ Campaigns []draft }](t, rec)
+	if rec.Code != http.StatusOK || len(list.Campaigns) != 1 || list.Campaigns[0].ID != d.ID {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body)
 	}
 
@@ -392,18 +392,34 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestCampaigns_RequireLogin(t *testing.T) {
+func itoa(id int64) string { return strconv.FormatInt(id, 10) }
+
+// Every API route requires a session, found by reading the route patterns
+// from the source, so a route added later can't slip past this test. Only
+// signing in is open.
+func TestEveryAPIRouteRequiresLogin(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	a.cookie = nil
-
-	for _, r := range []struct{ method, path string }{
-		{http.MethodGet, "/api/campaigns"}, {http.MethodPost, "/api/campaigns"}, {http.MethodGet, "/api/campaigns/1"},
-		{http.MethodGet, "/api/campaigns/1/recipients?group=sent"},
-	} {
-		if rec := a.do(r.method, r.path, "{}"); rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s %s: want 401, got %d", r.method, r.path, rec.Code)
+	pattern := regexp.MustCompile(`Handle(?:Func)?\("(GET|POST|PUT|DELETE|PATCH) (/api/[^"]+)"`)
+	var routes [][]string
+	for _, f := range []string{"http.go", "../auth/auth.go"} {
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes = append(routes, pattern.FindAllStringSubmatch(string(src), -1)...)
+	}
+	if len(routes) < 15 {
+		t.Fatalf("found only %d routes; the pattern no longer matches how routes are registered", len(routes))
+	}
+	for _, r := range routes {
+		method, path := r[1], strings.ReplaceAll(r[2], "{id}", "1")
+		if path == "/api/login" {
+			continue
+		}
+		if rec := a.do(method, path, "{}"); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without a session: want 401, got %d", method, r[2], rec.Code)
 		}
 	}
 }
-
-func itoa(id int64) string { return strconv.FormatInt(id, 10) }

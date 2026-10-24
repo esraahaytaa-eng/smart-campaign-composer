@@ -19,6 +19,7 @@ type Config struct {
 	AnthropicAPIKey string
 	AnthropicModel  string
 	LLMTimeout      time.Duration // per AI call (D15)
+	AICallsPerHour  int           // real AI calls per marketer per hour (D63)
 	WebDir          string        // built frontend the api serves (T15); empty serves none
 
 	DemoMarketerPassword string // migrate seeds the demo marketer logins with it (D10)
@@ -26,6 +27,9 @@ type Config struct {
 
 	ProviderURL string // where the worker sends messages
 	MaxAttempts int    // provider attempts per message before it fails (D7)
+	// RetryBackoffMax caps the wait between retries: 30 s (D7), lower only for
+	// the browser-suite stack (D53).
+	RetryBackoffMax time.Duration
 
 	Provider     map[string]ProviderChannel // mock provider behaviour per channel (D20)
 	ProviderSeed int64                      // seeds the provider's failure injection, so runs repeat
@@ -78,6 +82,11 @@ func Load(process string) (Config, error) {
 		return Config{}, fmt.Errorf("LLM_TIMEOUT must be a positive duration such as 60s, got %q", os.Getenv("LLM_TIMEOUT"))
 	}
 	cfg.LLMTimeout = timeout
+	calls, err := strconv.Atoi(getenv("AI_CALLS_PER_HOUR", "10"))
+	if err != nil || calls < 1 {
+		return Config{}, fmt.Errorf("AI_CALLS_PER_HOUR must be a whole number of at least 1, got %q", os.Getenv("AI_CALLS_PER_HOUR"))
+	}
+	cfg.AICallsPerHour = calls
 	// Without the build every page would be a 404 after a normal-looking start.
 	if cfg.WebDir != "" {
 		if _, err := os.Stat(filepath.Join(cfg.WebDir, "index.html")); err != nil {
@@ -163,5 +172,10 @@ func loadWorker(cfg Config) (Config, error) {
 		return Config{}, errors.New("MAX_ATTEMPTS must be a whole number from 1 to 10")
 	}
 	cfg.MaxAttempts = n
+	b, err := time.ParseDuration(getenv("RETRY_BACKOFF_MAX", "30s"))
+	if err != nil || b < 100*time.Millisecond || b > 30*time.Second {
+		return Config{}, fmt.Errorf("RETRY_BACKOFF_MAX must be a duration from 100ms to 30s, got %q", os.Getenv("RETRY_BACKOFF_MAX"))
+	}
+	cfg.RetryBackoffMax = b
 	return cfg, nil
 }

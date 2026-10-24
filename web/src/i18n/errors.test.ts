@@ -13,6 +13,7 @@ describe('errorText', () => {
     [new ApiError('The AI did not answer in time.', 504), 'The AI didn’t answer in time. Try again.'],
     [new ApiError('internal error', 500), 'The server ran into a problem. Try again in a moment.'],
     [new ApiError('login required', 401), 'Your session has expired. Sign in again.'],
+    [new ApiError('too many failed sign-ins; try again later', 429), 'Too many failed sign-ins. Wait a few minutes, then try again.'],
     [new Error('boom'), 'Something went wrong. Try again.'],
   ])('%s', (err, text) => {
     expect(errorText(err)).toBe(text)
@@ -20,10 +21,10 @@ describe('errorText', () => {
 
   // Validation the UI can't foresee: a localized heading, the server's own
   // words kept as details so nothing is lost.
-  it('keeps the server details of a rejected change', () => {
+  it('keeps the server details of a rejected change', async () => {
     const err = new ApiError('send_at must be between now and 30 days from now', 422)
     expect(errorText(err)).toBe('The server didn’t accept this change. Details from the server (in English): send_at must be between now and 30 days from now')
-    setLocale('tr')
+    await setLocale('tr')
     expect(errorText(err)).toBe('Sunucu bu değişikliği kabul etmedi. Sunucudan gelen ayrıntı (İngilizce): send_at must be between now and 30 days from now')
   })
 
@@ -36,21 +37,30 @@ describe('errorText', () => {
     )
   })
 
+  // D63: 429 is also the real-AI call limit; it says so, with the wait.
+  it('explains the AI call limit with its wait', async () => {
+    const err = new ApiError('AI call limit reached', 429, { code: 'ai_call_limit', retry_after_seconds: 1250 })
+    expect(errorText(err)).toBe('You have reached the AI limit for this hour. Try again in 21 minutes, or edit by hand.')
+    expect(errorText(new ApiError('', 429, { code: 'ai_call_limit', retry_after_seconds: 30 }))).toContain('in 1 minute,')
+    await setLocale('tr')
+    expect(errorText(err)).toBe('Bu saatlik yapay zekâ sınırına ulaştınız. 21 dakika sonra yeniden deneyin ya da elle düzenleyin.')
+  })
+
   it('explains a session that could not be loaded after signing in', () => {
     expect(errorText(sessionLoadError())).toBe('Signed in, but the session could not be loaded. Try again.')
   })
 
-  it('speaks Turkish when the UI does', () => {
-    setLocale('tr')
+  it('speaks Turkish when the UI does', async () => {
+    await setLocale('tr')
     expect(errorText(new ApiError('', 0))).toBe('Sunucuya ulaşılamıyor. Çalıştığından emin olun.')
   })
 })
 
 // The AI's reason is AI output: shown exactly as written, never translated.
 describe('aiReason', () => {
-  it('returns the reason of an unsupported brief unchanged', () => {
+  it('returns the reason of an unsupported brief unchanged', async () => {
     const reason = 'Yaş bilgisi katalogda yok; "40 yaş üstü" bir kurala çevrilemez.'
-    setLocale('en')
+    await setLocale('en')
     expect(aiReason(new ApiError(reason, 422, { error: reason, unsupported: true }))).toBe(reason)
   })
 

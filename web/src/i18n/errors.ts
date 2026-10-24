@@ -22,6 +22,12 @@ export function errorText(err: unknown): string {
       return t('error.sessionExpired')
     case 404:
       return t('error.notFound')
+    case 429: {
+      // Failed sign-ins (D55), or the real-AI call limit (D63).
+      const body = err.body as { code?: string; retry_after_seconds?: number } | undefined
+      if (body?.code !== 'ai_call_limit') return t('error.tooManySignIns')
+      return t('error.aiCallLimit', { count: Math.max(1, Math.ceil((body.retry_after_seconds ?? 60) / 60)) })
+    }
     case 502:
       return t('error.aiFailed')
     case 504:

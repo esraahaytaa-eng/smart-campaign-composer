@@ -73,12 +73,15 @@ async function signOut() {
 <style scoped>
 .shell {
   min-height: 100vh;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
 }
+/* Stays in view on long pages; scrolls itself on short screens. */
 .sidebar {
-  flex: 1 1 220px;
-  max-width: 260px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
   background: var(--surface);
   border-right: 1px solid var(--line);
   padding: 22px 16px;
@@ -184,18 +187,69 @@ async function signOut() {
   white-space: nowrap;
 }
 .content {
-  flex: 999 1 560px;
   min-width: 0;
   padding: 24px 32px 40px;
 }
-@media (max-width: 720px) {
+/* Tablets and phones: the sidebar becomes a compact bar above the page. */
+@media (max-width: 899px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
   .sidebar {
-    max-width: none;
+    position: static;
+    height: auto;
+    overflow: visible;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
+  .brand {
+    padding: 0;
+  }
+  .new {
+    order: 1;
+    padding: 0 12px;
+    height: 36px;
+  }
+  .links {
+    flex-direction: row;
+  }
+  .link {
+    padding: 8px 10px;
+  }
+  .foot {
+    order: 2;
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  .account {
+    width: auto;
+  }
   .content {
     padding: 20px 16px 32px;
+  }
+}
+/* Phones: the avatar alone opens the account menu; the name stays for screen readers. */
+@media (max-width: 640px) {
+  .brand-name,
+  .who {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .foot {
+    margin-left: 0;
   }
 }
 </style>

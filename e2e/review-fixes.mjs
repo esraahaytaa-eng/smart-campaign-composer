@@ -9,17 +9,18 @@ export default () =>
   suite('review-fixes', async (t) => {
     const { page, check } = t
     await t.signIn()
-    const drafts = async () => (await (await page.request.get(`${BASE}/api/campaigns`)).json()).length
 
-    // a double click on Interpret creates one campaign
-    const before = await drafts()
+    // a double click on Interpret creates one campaign: exactly one create
+    // request from this page (other files may create campaigns meanwhile)
+    const creates = []
+    page.on('request', (r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/campaigns' && creates.push(r))
     await page.goto(`${BASE}/campaigns/new`)
     await page.locator('#brief').fill(CART_BRIEF)
     await page.getByRole('button', { name: 'Interpret with AI' }).dblclick()
     await page.waitForURL((u) => /^\/campaigns\/\d+$/.test(u.pathname))
     t.track(Number(new URL(page.url()).pathname.split('/')[2]))
-    await page.waitForTimeout(1500)
-    check((await drafts()) === before + 1, 'a double click on Interpret creates one campaign')
+    await page.waitForTimeout(1500) // a second request would have been sent by now
+    check(creates.length === 1, `a double click on Interpret sends one create request (${creates.length})`)
 
     // signing out right after typing keeps the text
     const id = await t.draft(ANKARA_BRIEF, ['sms'])

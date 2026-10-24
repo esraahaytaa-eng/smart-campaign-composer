@@ -1,26 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { campaigns } from '../campaign/client'
-import { dashboardAction, dashboardCampaigns, dashboardHint, statusCounts } from '../campaign/list'
+import { dashboardAction, dashboardHint, type ListPage } from '../campaign/list'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Status } from '../campaign/types'
 import StatusBadge from '../components/StatusBadge.vue'
 import { formatDateTime, formatLongDate, formatNumber, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 
-const ROWS = 6
-const LIST_LIMIT = 200 // what GET /api/campaigns returns (D49)
 const STATUSES: Status[] = ['draft', 'approved', 'sending', 'completed', 'cancelled']
 
-const list = ref<Campaign[] | null>(null)
+// The server counts every campaign and picks the ones needing attention (D54).
+const data = ref<ListPage | null>(null)
 const loadError = ref<unknown>(null)
 campaigns
-  .list()
-  .then((l) => (list.value = l))
+  .dashboard()
+  .then((d) => (data.value = d))
   .catch((err) => (loadError.value = err))
 
-const counts = computed(() => statusCounts(list.value ?? []))
-const dash = computed(() => dashboardCampaigns(list.value ?? [], ROWS))
+const counts = computed(() => data.value?.counts)
+const dash = computed(() => ({ rows: data.value?.campaigns ?? [], more: Math.max(0, (data.value?.total ?? 0) - (data.value?.campaigns.length ?? 0)) }))
 
 function hint(c: Campaign): string {
   const h = dashboardHint(c)
@@ -39,7 +38,7 @@ function hint(c: Campaign): string {
     </div>
 
     <div v-if="loadError" role="alert" class="alert alert-error">{{ errorText(loadError) }}</div>
-    <p v-else-if="!list" class="loading" role="status">{{ t('list.loading') }}</p>
+    <p v-else-if="!data || !counts" class="loading" role="status">{{ t('list.loading') }}</p>
     <template v-else>
       <nav class="cards" :aria-label="t('campaigns.filter')">
         <RouterLink v-for="s in STATUSES" :key="s" :to="{ name: 'campaigns', query: { status: s } }" class="card status-card">
@@ -76,7 +75,6 @@ function hint(c: Campaign): string {
         </p>
         <RouterLink v-if="dash.more" :to="{ name: 'campaigns' }" class="link more">{{ t('dashboard.more', { count: dash.more }) }}</RouterLink>
       </section>
-      <p v-if="list.length >= LIST_LIMIT" class="kicker">{{ t('campaigns.limit', { count: LIST_LIMIT }) }}</p>
     </template>
   </div>
 </template>

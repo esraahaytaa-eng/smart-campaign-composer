@@ -81,7 +81,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Prevents unauthenticated sends and wasted API credits, and records who approved what, at minimal cost.
 - **Rejected:** *No authentication:* anyone could trigger sends. *Roles such as editor and approver:* beyond the case.
 - **Trade-offs:** No four-eyes approval. The demo login details are not suitable for production.
-- **History:** 2026-10-22. The seed creates a single demo login, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWORD`, default documented in the README), at the engineer's request. The schema still supports several marketers. 2026-10-22: session lifetime of 12 hours approved (was an open question): covers a working day without frequent logins, and a stolen cookie stays useful for at most half a day.
+- **History:** 2026-10-22. The seed creates a single demo login, `marketer@marketer.com` (password from `DEMO_MARKETER_PASSWORD`, default documented in the README), at the engineer's request. The schema still supports several marketers. 2026-10-22: session lifetime of 12 hours approved (was an open question): covers a working day without frequent logins, and a stolen cookie stays useful for at most half a day. 2026-10-23 (roadmap review): kept as is. "Data isolation" means protecting customer data (masking, no customer data to the AI, the provider's own database role, nothing personal in logs or errors), not restricting which campaigns a marketer sees.
 
 ### D11 — Campaign lifecycle with cancel only
 - **Status:** Accepted · 2026-10-21
@@ -194,11 +194,46 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Trade-offs:** One more click than the design.
 
 ### D49 — Campaign list filtered in the browser; dashboard without resend counts
-- **Status:** Accepted · 2026-10-23
+- **Status:** Superseded by D54 · 2026-10-23
 - **Decision:** The campaigns page filters by status and searches the brief (Turkish-folded) in the browser over the newest 200 campaigns the API returns. The dashboard shows status counts and the six most relevant campaigns; resend offers appear on a campaign's page, not on dashboard rows.
 - **Why:** No backend change is needed at this size.
 - **Rejected:** *Server-side filtering:* not needed for 200 rows. *Per-row resend counts:* a query per campaign.
 - **Trade-offs:** Campaigns beyond the newest 200 aren't listed; the dashboard doesn't point out resend opportunities.
+- **History:** 2026-10-23 (T19 plan). Superseded by D54: the list, search, filters and counts move to the server. The dashboard still shows no resend offers (kept in D54).
+
+### D50 — Remaining work in three milestones: T19–T21
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The plan's single T19 is replaced by three milestones:
+  - **T19 Quality & Engineering:** test speed-ups and CI, customer-data and API security, server-side campaign paging, search and filtering, UX and responsive work, performance testing against agreed targets, and independent exploratory QA.
+  - **T20 Product bonuses:** messages in the recipient's language (TR, EN, DE, English fallback); A/B testing evaluated for measurable value and complexity, and built only if approved.
+  - **T21 Documentation & Delivery:** the final independent UI/UX audit, OpenAPI and Swagger UI, product analysis and roadmap, README and architecture, fresh-clone delivery checks.
+  - **Standing rule:** every commit and push is scanned for keys, credentials, secrets and personal data first; already-pushed sensitive data is reported before any correction.
+- **Why:** CASE.md puts the core workflow first. Quality and CI guard the send path before T20 changes it, and the audit and docs come last so they describe the final product.
+- **Rejected:** *A/B and language together, unconditionally:* they multiply the content model with no outcome metric for A/B. *The UI/UX audit in T19:* T20 adds screens it would miss. *CI as a bonus:* it protects every later change.
+- **Trade-offs:** More milestones and PRs. A/B may not ship. Personal details already pushed are left as is for now (user's choice): the GitHub username and first name in `ai-sessions/04`, and the author email in commit metadata.
+- **History:** 2026-10-23 (T19 step 1). Corrected: the session exports never contained the email address; what was counted as the email was the GitHub username in the repository's PR links. The one item the history scan found, a made-up German mobile number in a test fixture (`internal/campaign/mask_test.go`, commit `236761d`), was reported and replaced going forward; history was not rewritten.
+
+### D54 — Campaign list paged, searched and counted on the server
+- **Status:** Accepted · 2026-10-23
+- **Decision:** `GET /api/campaigns?status=&q=&page=` returns 25 campaigns per page, newest first, with the total and the status counts over all campaigns. `q` searches the brief, Turkish-folded, with the recipient search's limits and LIKE escaping (D47). The campaigns page and the dashboard cards use these counts; the dashboard's "needs attention" rows come from the server. The dashboard still shows no resend offers (from D49). Replaces D49.
+- **Why:** Counts and search were only right for the newest 200 campaigns.
+- **Rejected:** *Keep D49 and add only server-side counts:* search and paging would still miss older campaigns.
+- **Trade-offs:** More API surface and tests; a round trip per filter change.
+- **History:** 2026-10-23 (T19 step 5). Built as `GET /api/campaigns?status=&q=&page=` and `GET /api/dashboard`; at 10,000 campaigns every request takes under 20 ms (`docs/performance.md`).
+
+### D57 — Performance targets for T19
+- **Status:** Accepted · 2026-10-23
+- **Decision:** T19 is measured against the targets P1–P7 and T1–T3 in `docs/plans/2026-10-23-t19-plan.md`: send completion, the 100/s per-channel limit (a hard requirement), API latency under 10 concurrent marketers, the campaign list at 10,000 campaigns, recipient details, 20 live screens, first-load size, test wall time and no flaky runs. Baselines are measured first; a missed target is reported with numbers, never adjusted silently.
+- **Why:** "Performance testing" needs a measurable finish line.
+- **Rejected:** *No fixed targets, only measurements:* nothing to decide pass or fail.
+- **Trade-offs:** Numbers are for this machine (Docker Desktop, 8 CPUs, 8 GB); other machines differ.
+
+### D62 — A second pager above the campaign list
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The campaign list shows a compact pager ("1–25 of 300", Previous, Next) above the rows as well as the one below them.
+- **Why:** 25 rows push the lower pager below the fold on a desktop screen.
+- **Rejected:** *Fewer rows per page:* more paging for everyone. *A pager that sticks to the screen bottom:* covers rows and the page note.
+- **Trade-offs:** Two sets of the same buttons; both carry the same labels.
 
 ## Architecture & Technical Decisions
 
@@ -383,9 +418,90 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Trade-offs:** Server validation details stay in English; the language is per browser, not per account; the scan is a heuristic (it catches phrases and capitalised words, not every possible string).
 - **History:** 2026-10-23 (review): in Turkish the brief is "açıklama" and only the draft is "taslak"; 409 is no longer mapped to "changed elsewhere" by default; the scan also covers template literals, bound attributes and modules.
 
+### D51 — Secret and personal-data scanning with gitleaks
+- **Status:** Accepted · 2026-10-23
+- **Decision:** `make scan` runs gitleaks from its official, pinned Docker image with the repository's own rules for emails and phone numbers, over the working tree, the staged changes and the commits not yet pushed. A git pre-commit hook (installed with `make hooks`) runs it on staged changes, and CI runs it on every push (D52). Fictional seed and test data, `@example.com`, and the documented demo login are allowed by the configuration. Session exports are redacted (names and emails replaced by roles) before they are committed.
+- **Why:** Enforces the standing rule (D50) mechanically instead of relying on memory.
+- **Rejected:** *A grep script:* misses key formats gitleaks knows. *A scanner as an app dependency:* not needed; it runs in Docker.
+- **Trade-offs:** False positives need allow-list entries; the hook is per clone.
+- **History:** 2026-10-24 (PR #7 review). Tighter rules, each proven by the self-test: a Go checksum no longer hides other findings on its line; only the UI's four placeholder addresses at company.com/sirket.com are allowed; `.env.*.*`, `.envrc` and `*.env` files are caught. The history scan finds the same single item as before.
+
+### D52 — CI with GitHub Actions
+- **Status:** Accepted · 2026-10-23
+- **Decision:** Tests, lint and the secret and personal-data scan (`make test`, `make lint`, the scan with its self-test) run on every push and every pull request. The browser suite runs on every pull request, every push to `main`, nightly and on request, on its own stack, keeping screenshots of failures. Runs are not duplicated: a push to a branch with an open pull request is left to the pull request's run (which tests the commit merged with `main`), and a newer commit cancels the older run of the same pull request or branch.
+- **Why:** Guards every change from T19 on, especially T20's changes to the send path; the browser suite catches UI regressions before a merge.
+- **Rejected:** *Both the push and the pull request run for the same commit:* twice the minutes for the same code. *The browser suite on every push to any branch:* minutes without a pull request to report to.
+- **Trade-offs:** A small gate job checks for an open pull request on each branch push; the browser suite adds about 4 minutes to every pull request update.
+- **History:** 2026-10-23 (T19 step 3). First version: the browser suite only nightly and on request, then also when a push changed the suite (GitHub can start a workflow by hand or on a schedule only once it is on `main`). Replaced the same day by the strategy above, at the user's request. `make lint` checks only the module's own packages, so CI's restored module cache is not linted.
+
+### D53 — A separate, faster stack for the browser suite
+- **Status:** Accepted · 2026-10-23
+- **Decision:** `make e2e` starts its own Compose project (`scc-e2e`) with a throwaway database, shorter mock-provider delays and a lower retry backoff cap through a new `RETRY_BACKOFF_MAX` setting (default 30 s, unchanged in production).
+- **Why:** Retry waits and local data growth made the suite slow and left test campaigns behind.
+- **Rejected:** *Testing against the developer's running app:* slower, and it fills local data.
+- **Trade-offs:** The suite no longer exercises the 30 s cap (the backend tests still do); one more Compose project to start.
+- **History:** 2026-10-23 (T19 step 2). Shorter mock-provider delays were not added: sends are limited by the 100/s rate, so they brought no gain. The suite also runs in two lanes (checks that send, one after another; checks that don't, alongside), with the dashboard check alone first. Results in `docs/performance.md`.
+
+### D55 — Failed sign-ins are throttled
+- **Status:** Accepted · 2026-10-23
+- **Decision:** After 5 failed sign-ins in 15 minutes for an email or from a client address, further attempts get `429` with `Retry-After`, in memory per api process (`golang.org/x/time/rate`, already used by the worker).
+- **Why:** Nothing limited password guessing.
+- **Rejected:** *Documenting it as a limitation:* the fix is small.
+- **Trade-offs:** Limits reset on restart and are per process; a shared address can be throttled by someone else's failures.
+- **History:** 2026-10-24 (PR #7 review). Each attempt is counted before the password check and a success clears it, so parallel requests can't all slip past the limit; the address is checked before the email.
+
+### D56 — Security headers and no caching of customer data
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The app is served with a strict Content Security Policy (`default-src 'self'`, no inline scripts, `frame-ancestors 'none'`), and every response gets `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Every API response that carries customer data is `Cache-Control: no-store`.
+- **Why:** Defense in depth for the screens that show customer data.
+- **Rejected:** *Headers without a CSP:* leaves script injection unmitigated.
+- **Trade-offs:** Any future inline script or third-party asset needs a CSP change.
+- **History:** 2026-10-23 (T19 step 4). Also: state-changing API requests (and sign-in) from another site's page are refused by their `Origin` header, a second layer behind `SameSite=Lax`; the session cookie is `Secure` whenever the request came over HTTPS; idle connections close after 2 minutes. The review is in `docs/security-review.md`.
+
+### D58 — The Turkish dictionary loads on demand
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The English dictionary is part of the app; the Turkish one is loaded when Turkish is chosen (or remembered from a previous visit), before the page renders in it.
+- **Why:** Both dictionaries made the largest download (51 kB gzipped) for everyone.
+- **Rejected:** *Leave it:* the app is small, but this is the biggest single file.
+- **Trade-offs:** A short wait when switching to Turkish for the first time.
+
+### D59 — Live screens share one snapshot per campaign
+- **Status:** Accepted · 2026-10-23
+- **Decision:** Each status stream keeps its own loop (D36); its first snapshot is read fresh, and its polls after that read the campaign's snapshot through an in-process cache: a snapshot younger than a quarter of the stream interval is reused, and streams that ask at the same time wait for one database read. Errors are not cached; campaigns nobody reads are dropped.
+- **Why:** 20 screens on one send cost 1.0–2.2 s of database time per second (P6); the cost should grow with campaigns, not screens.
+- **Rejected:** *A poller per campaign that pushes to subscribers:* same gain, more code and start/stop races. *`LISTEN/NOTIFY` from the worker:* a worker change and notification storms. *Redis or Kafka:* new infrastructure for one process.
+- **Trade-offs:** An update can be up to ~1.25 s old instead of ~1 s; per api process (one replica).
+- **History:** 2026-10-24: the first snapshot was cached too at first; a page opened again right after a resend made elsewhere then missed it (caught by the browser suite), so it is read fresh. Reuse shortened from half to a quarter of the interval: with half, the slowest update was 1.4–2.1 s behind, at the edge of P6's 2 s.
+
+### D60 — Built assets are served precompressed
+- **Status:** Accepted · 2026-10-23
+- **Decision:** The image build writes a gzip copy of each built text file; the server sends it when the browser accepts gzip, with the original content type and `Vary: Accept-Encoding`. No further chunk splitting.
+- **Why:** First visits downloaded 263–294 kB of JavaScript uncompressed (~95 kB gzipped).
+- **Rejected:** *Compressing per request:* CPU on every request and a wrapped response writer. *Splitting Vue out:* Vue's runtime alone is ~43 kB, and splitting doesn't reduce bytes. *Brotli:* optional later.
+- **Trade-offs:** A slightly larger image. The largest-chunk part of P7 (≤ 40 kB) stays missed and is reported.
+
+### D61 — Database-backed Go tests run in parallel
+- **Status:** Accepted · 2026-10-23
+- **Decision:** Tests in `campaign`, `worker`, `auth`, `content` and `provider` that use their own database run in parallel (as `db` and `e2e` already do, D53); tests that share process state stay serial. An audit of redundant tests comes separately, each removal approved.
+- **Why:** `make test` is as long as its slowest package, and `campaign` ran 82 tests one after another (32 s, 9 s of CPU); T1 is missed (median 76 s against 65 s).
+- **Rejected:** *Removing tests for speed:* little gain, lost coverage.
+- **Trade-offs:** More load on the test database at once; a shared-state test made parallel by mistake would be flaky, so 5 consecutive runs check it.
+- **History:** 2026-10-24, measured. 138 tests run in parallel; 19 stay serial (4 read shared metrics, 15 depend on timing). One package at a time is much faster (`campaign` 15–20 s → 4–5 s), but the full `make test` is not: alternating old and new code gave 60–64 s both ways, because the full run already keeps the machine busy and `e2e` (already parallel) is now the longest package. The 76 s median before was host load; at a load around 10, both meet T1. 8 of 8 full runs passed.
+
+### D63 — Real AI calls are limited per marketer
+- **Status:** Accepted · 2026-10-24
+- **Decision:** With real AI, each marketer may make at most `AI_CALLS_PER_HOUR` (default 10) provider calls in any 60 minutes; every call counts, including the retry inside one operation. Over the limit the API answers `429` with `Retry-After` and code `ai_call_limit`. Mock AI is unlimited. In memory, per api process.
+- **Why:** Every create, brief edit and message generation can cost up to two paid calls, with nothing capping them (security review, step 4).
+- **Rejected:** *Counting operations instead of calls:* retries would go uncounted. *A token bucket:* allows more than N in an hour after a quiet spell. *Limits stored in Postgres:* one api replica; a restart needs operator access.
+- **Trade-offs:** Resets on restart; a refused retry ends the operation with 429 although its first call was spent. The Anthropic console's spend limit remains the real ceiling.
+
 ## Open Questions
 
-None currently.
+Proposed 2026-10-23 after the step 7 measurements (`docs/performance.md`). Q1, Q2, Q5 and the first half of Q3 were approved as D59–D62.
+
+- **Q3 (second half) — A test audit.** A report of redundant, overlapping or low-value tests and browser checks that could be faster integration tests; each removal or move needs approval.
+- **Q4 — Desktop first.** Desktop speed and usability come first; phone layouts keep the step 6 checks, and phone-only performance work (list re-render 400–480 ms, language switch) is deferred.
+- **Q6 — How P3–P5 are read.** Report both loads: realistic (10 marketers, a 1 s pause per request: met) and back to back (about 14× that: missed, published as capacity). Targets stay unchanged; which load counts for "met" is yours to decide.
 
 ## Deferred
 

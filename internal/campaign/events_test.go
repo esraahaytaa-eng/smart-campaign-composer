@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"smart-campaign-composer/internal/campaign"
 	"smart-campaign-composer/internal/llm"
 )
 
@@ -123,6 +124,7 @@ func (a *app) sendingCampaign() int64 {
 }
 
 func TestEvents_SnapshotCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 
@@ -168,6 +170,7 @@ func TestEvents_SnapshotCounts(t *testing.T) {
 // Every message falls in exactly one display group (D46): an uncertain
 // delivery is its own group once the message has ended without being sent.
 func TestEvents_GroupsAndReasons(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	a.exec(`UPDATE messages SET status = 'retry_scheduled' WHERE campaign_id = $1 AND user_id = 6 AND channel = 'sms'`, id)
@@ -224,6 +227,7 @@ func TestEvents_GroupsAndReasons(t *testing.T) {
 }
 
 func TestEvents_SendsOnlyOnChange(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	s := a.stream(id)
@@ -276,6 +280,7 @@ func TestEvents_StopsOnServerShutdown(t *testing.T) {
 // A cancel leaves messages a worker holds in "sending"; the stream ends only
 // once they are final, so the last snapshot is the true result.
 func TestEvents_EndsAfterFinalSnapshot(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	if rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(id)+"/cancel", ""); rec.Code != http.StatusOK {
@@ -303,6 +308,7 @@ func TestEvents_EndsAfterFinalSnapshot(t *testing.T) {
 }
 
 func TestEvents_FinishedCampaignShowsActiveResend(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	a.exec(`UPDATE messages SET status = 'cancelled' WHERE campaign_id = $1 AND status IN ('pending', 'sending', 'retry_scheduled')`, id)
@@ -325,7 +331,33 @@ func TestEvents_FinishedCampaignShowsActiveResend(t *testing.T) {
 	}
 }
 
+// D59: streams share snapshots, but a stream's first one is read fresh, so a
+// page opened again (e.g. after a resend failed because one was made
+// elsewhere) sees what changed since the last stream ended (D36).
+func TestEvents_ANewStreamSeesChangesAtOnce(t *testing.T) {
+	t.Parallel()
+	a := newAppWith(t, llm.NewMock(), func(h *campaign.Handler) { h.EventsInterval = 10 * time.Second }) // a shared snapshot would be kept a while
+	id := a.sendingCampaign()
+	a.exec(`UPDATE messages SET status = 'cancelled' WHERE campaign_id = $1 AND status IN ('pending', 'sending', 'retry_scheduled')`, id)
+	a.exec(`UPDATE campaigns SET status = 'completed', completed_at = $2 WHERE id = $1`, id, fixedNow)
+	first := a.stream(id)
+	if e, _ := first.next(t); e.Data["channels"].(map[string]any)["sms"].(map[string]any)["active_resend_id"] != nil {
+		t.Fatalf("no resend yet, got %v", e)
+	}
+	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(id)+"/resend", `{"channel":"sms"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("resend: %d %s", rec.Code, rec.Body)
+	}
+	resend := decode[draft](t, rec)
+
+	e, _ := a.stream(id).next(t)
+	if got := e.Data["channels"].(map[string]any)["sms"].(map[string]any)["active_resend_id"]; got != float64(resend.ID) {
+		t.Fatalf("the page opened again must see the resend %d, got %v", resend.ID, got)
+	}
+}
+
 func TestEvents_UnknownCampaign404(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 
 	if rec := a.do(http.MethodGet, "/api/campaigns/999/events", ""); rec.Code != http.StatusNotFound {
@@ -336,6 +368,7 @@ func TestEvents_UnknownCampaign404(t *testing.T) {
 // attempt_count counts claims, so the retry and 429 query may skip sent
 // messages claimed once (one accepted attempt) but must count the rest.
 func TestEvents_RetryCountsWithRealClaimCounts(t *testing.T) {
+	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	id := a.sendingCampaign()
 	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, attempt_count) VALUES

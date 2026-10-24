@@ -259,8 +259,8 @@ function resend(ch: Channel) {
                 {{ t('resend.drawerLink', { channel: t(`channel.inline.${resendChannel}`) }) }}
               </button>
               <span class="pager">
-                <button type="button" class="btn btn-sm" :disabled="!info?.hasPrev" @click="set({ page: info!.prevPage })">{{ t('recipients.prev') }}</button>
-                <button type="button" class="btn btn-sm" :disabled="!info?.hasNext" @click="set({ page: query.page + 1 })">{{ t('recipients.next') }}</button>
+                <button type="button" class="btn btn-sm" :disabled="!info?.hasPrev" @click="set({ page: info!.prevPage })">{{ t('pager.prev') }}</button>
+                <button type="button" class="btn btn-sm" :disabled="!info?.hasNext" @click="set({ page: query.page + 1 })">{{ t('pager.next') }}</button>
               </span>
             </div>
           </template>

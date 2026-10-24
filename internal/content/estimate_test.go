@@ -18,11 +18,9 @@ import (
 // Render for every seeded user, with templates whose length lands right
 // around the limits, so the two must agree user by user.
 func TestEstimate_MatchesGoRender(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	if err := db.Seed(ctx, pool, db.DefaultRNGSeed, now, "seed-password"); err != nil {
 		t.Fatal(err)
@@ -92,11 +90,9 @@ func TestEstimate_MatchesGoRender(t *testing.T) {
 }
 
 func TestEstimate_OnlyChosenChannels(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO users (first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		VALUES ('A', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
 		t.Fatal(err)
@@ -113,11 +109,9 @@ func TestEstimate_OnlyChosenChannels(t *testing.T) {
 // Empty values leave double or edge spaces; tidying them decides whether
 // these templates go over 160, so SQL must tidy exactly like Render.
 func TestEstimate_TidiesLikeRender(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO users (first_name, last_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		VALUES ('A', NULL, 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
 		t.Fatal(err)

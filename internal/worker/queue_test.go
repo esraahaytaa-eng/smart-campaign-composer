@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
 	"smart-campaign-composer/internal/worker"
 )
@@ -26,10 +25,7 @@ type fixture struct {
 // (1 allowed both channels, 2 only SMS); user 3 lives in İzmir.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	pool := dbtest.FreshDB(t)
-	if err := db.Migrate(context.Background(), pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := dbtest.MigratedDB(t)
 	f := &fixture{t: t, pool: pool, q: &worker.Queue{Pool: pool}}
 	f.exec(`INSERT INTO marketers (id, email, name, password_hash) VALUES (1, 'm@example.com', 'M', 'x')`)
 	f.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at) VALUES
@@ -89,6 +85,7 @@ func (f *fixture) build(at time.Time) int {
 }
 
 func TestBuildAudience_OnlyWhenDue(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	sendAt := now.Add(time.Hour)
 	id := f.approved(cartAbandoners, "{sms,email}", sendAt)
@@ -114,6 +111,7 @@ func TestBuildAudience_OnlyWhenDue(t *testing.T) {
 
 // D30: the audience is evaluated when sending starts, not at approval.
 func TestBuildAudience_EvaluatesAtSendTime(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	sendAt := now.Add(time.Hour)
 	id := f.approved(cartAbandoners, "{sms}", sendAt)
@@ -138,6 +136,7 @@ func TestBuildAudience_EvaluatesAtSendTime(t *testing.T) {
 }
 
 func TestBuildAudience_CancelledIsNeverBuilt(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	id := f.approved(cartAbandoners, "{sms}", now)
 	f.exec(`UPDATE campaigns SET status = 'cancelled' WHERE id = $1`, id)
@@ -148,6 +147,7 @@ func TestBuildAudience_CancelledIsNeverBuilt(t *testing.T) {
 }
 
 func TestBuildAudience_EmptyAudienceCompletes(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	id := f.approved(`[{"field":"cart_value","op":"gte","value":1000000}]`, "{sms}", now)
 
@@ -160,6 +160,7 @@ func TestBuildAudience_EmptyAudienceCompletes(t *testing.T) {
 }
 
 func TestBuildAudience_Resend(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	parent := f.approved(cartAbandoners, "{sms}", now)
 	f.exec(`UPDATE campaigns SET status = 'completed' WHERE id = $1`, parent)
@@ -178,6 +179,7 @@ func TestBuildAudience_Resend(t *testing.T) {
 }
 
 func TestBuildAudience_ConcurrentCallsBuildOnce(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	for range 5 {
 		f.approved(cartAbandoners, "{sms,email}", now)
@@ -208,6 +210,7 @@ func TestBuildAudience_ConcurrentCallsBuildOnce(t *testing.T) {
 
 // A failure mid-build rolls the whole campaign back; the next run builds it cleanly.
 func TestBuildAudience_CrashMidBuildRollsBack(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	id := f.approved(cartAbandoners, "{sms,email}", now)
 	// Make the email insert fail after the SMS messages were inserted.
@@ -236,6 +239,7 @@ func (f *fixture) sending() int64 {
 }
 
 func TestClaim_ConcurrentClaimersNeverShareARow(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		SELECT g, 'U', 'u' || g || '@example.com', '+90510' || g, 'Ankara', 'tr', true, true, $1 FROM generate_series(100, 299) g`, now)
@@ -280,6 +284,7 @@ func TestClaim_ConcurrentClaimersNeverShareARow(t *testing.T) {
 }
 
 func TestClaim_OnlyDueMessages(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sending()
 	f.exec(`UPDATE messages SET status = 'retry_scheduled', next_attempt_at = $1 WHERE user_id = 1 AND channel = 'sms'`, now.Add(time.Minute))
@@ -299,6 +304,7 @@ func TestClaim_OnlyDueMessages(t *testing.T) {
 }
 
 func TestClaim_ExpiredLeaseIsReclaimedAndStaleCompleteIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sending()
 	ctx := context.Background()
@@ -328,6 +334,7 @@ func TestClaim_ExpiredLeaseIsReclaimedAndStaleCompleteIsRefused(t *testing.T) {
 }
 
 func TestComplete_RecordsAttemptAndOutcome(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sending()
 	ctx := context.Background()
@@ -356,6 +363,7 @@ func TestComplete_RecordsAttemptAndOutcome(t *testing.T) {
 }
 
 func TestComplete_RetryAfterCancelIsCancelled(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	id := f.sending()
 	ctx := context.Background()
@@ -371,6 +379,7 @@ func TestComplete_RetryAfterCancelIsCancelled(t *testing.T) {
 }
 
 func TestFinishCampaigns(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	id := f.sending()
 	ctx := context.Background()
@@ -391,6 +400,7 @@ func TestFinishCampaigns(t *testing.T) {
 // Option A (D31 history): a resend skips everyone whose delivery on the
 // channel is uncertain, anywhere in the parent's family of campaigns.
 func TestBuildAudience_ResendSkipsUncertainDeliveries(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		SELECT g, 'U', 'u' || g || '@example.com', '+90510' || g, 'Ankara', 'tr', true, true, $1 FROM generate_series(10, 15) g`, now)
@@ -429,6 +439,7 @@ func TestBuildAudience_ResendSkipsUncertainDeliveries(t *testing.T) {
 }
 
 func TestClaim_ExpiredLeaseMarksDeliveryUncertain(t *testing.T) {
+	t.Parallel()
 	f := newFixture(t)
 	f.sending()
 	ctx := context.Background()

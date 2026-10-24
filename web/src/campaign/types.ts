@@ -18,6 +18,7 @@ export type Campaign = {
   schedule_note: string | null
   time_zone: string
   parent_campaign_id: number | null
+  parent_request_text?: string | null // in lists: the original's brief, for a resend (D54)
   counts?: Counts // drafts only
   content: Content | null
   created_at: string

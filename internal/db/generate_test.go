@@ -6,6 +6,7 @@ import (
 )
 
 func TestGenerate_EveryProfileHasAtLeast50Users(t *testing.T) {
+	t.Parallel() // pure function; nothing shared with other tests
 	data := generate(20261021)
 
 	perProfile := map[string]int{}
@@ -23,6 +24,7 @@ func TestGenerate_EveryProfileHasAtLeast50Users(t *testing.T) {
 }
 
 func TestGenerate_SameSeedSameData(t *testing.T) {
+	t.Parallel() // pure function; nothing shared with other tests
 	if !reflect.DeepEqual(generate(1), generate(1)) {
 		t.Fatal("same seed produced different data")
 	}
@@ -32,6 +34,7 @@ func TestGenerate_SameSeedSameData(t *testing.T) {
 }
 
 func TestEmailLocalPart_FoldsTurkishLetters(t *testing.T) {
+	t.Parallel() // pure function; nothing shared with other tests
 	if got := emailLocalPart("Çağrı", "Işık Öztürk"); got != "cagri.isik.ozturk" {
 		t.Fatalf("got %q", got)
 	}
