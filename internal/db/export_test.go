@@ -15,3 +15,11 @@ func MigrateTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
 		return err
 	})
 }
+
+// MigrateDownTo rolls migrations back to version, as a rollback would.
+func MigrateDownTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
+	return migrate(pool, func(p *goose.Provider) error {
+		_, err := p.DownTo(ctx, version)
+		return err
+	})
+}

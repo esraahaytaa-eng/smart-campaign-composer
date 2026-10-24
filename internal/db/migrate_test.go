@@ -57,6 +57,49 @@ func TestMigrate_LegacyContentBecomesApprovedUnd(t *testing.T) {
 	}
 }
 
+// Rolling languages back keeps each campaign's default-language text as its
+// only text, so a rollback never empties a campaign that had content (D64).
+func TestMigrate_DownKeepsDefaultLanguageContent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := dbtest.FreshDB(t)
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range []string{
+		`INSERT INTO marketers (id, email, name, password_hash) VALUES (1, 'm@example.com', 'M', 'x')`,
+		`INSERT INTO campaigns (id, request_text, channels, rules, status, time_zone, created_by, default_language)
+		 VALUES (1, 'bilingual', '{sms}', '[]', 'draft', 'UTC', 1, 'tr'), (2, 'legacy', '{sms}', '[]', 'draft', 'UTC', 1, 'und')`,
+		`INSERT INTO campaign_languages (campaign_id, language) VALUES (1, 'tr'), (1, 'en'), (2, 'und')`,
+		`INSERT INTO campaign_content (campaign_id, channel, language, body)
+		 VALUES (1, 'sms', 'tr', 'Merhaba'), (1, 'sms', 'en', 'Hello'), (2, 'sms', 'und', 'Eski')`,
+	} {
+		if _, err := pool.Exec(ctx, sql); err != nil {
+			t.Fatalf("%v: %s", err, sql)
+		}
+	}
+
+	if err := db.MigrateDownTo(ctx, pool, 5); err != nil {
+		t.Fatal(err)
+	}
+
+	var bodies []string
+	rows, err := pool.Query(ctx, `SELECT body FROM campaign_content ORDER BY campaign_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var b string
+		if err := rows.Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, b)
+	}
+	if strings.Join(bodies, ",") != "Merhaba,Eski" {
+		t.Fatalf("want each campaign's default-language text kept, got %q", bodies)
+	}
+}
+
 // The language checks in the database allow exactly the catalog languages
 // plus the legacy label, so a language added to one place but not the other
 // fails here (D64).

@@ -27,7 +27,9 @@ ALTER TABLE campaign_content DROP CONSTRAINT campaign_content_pkey,
     ADD FOREIGN KEY (campaign_id, language) REFERENCES campaign_languages ON DELETE CASCADE;
 
 -- +goose Down
-DELETE FROM campaign_content WHERE language <> 'und';
+-- Each campaign keeps its default language's text, the one it falls back to.
+DELETE FROM campaign_content cc USING campaigns c
+WHERE c.id = cc.campaign_id AND cc.language IS DISTINCT FROM c.default_language;
 ALTER TABLE campaign_content DROP CONSTRAINT campaign_content_pkey,
     DROP COLUMN language,
     ADD PRIMARY KEY (campaign_id, channel);
