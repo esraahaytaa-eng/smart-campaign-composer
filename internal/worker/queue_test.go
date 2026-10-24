@@ -372,6 +372,36 @@ func TestComplete_RecordsAttemptAndOutcome(t *testing.T) {
 	}
 }
 
+// Audit F3: the message keeps its latest attempt's start, for sorting the
+// recipient list, even when that attempt's lease was lost meanwhile.
+func TestComplete_RecordsLastAttemptTime(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sending()
+	ctx := context.Background()
+	jobs, _ := f.q.Claim(ctx, "sms", 2, now, 30*time.Second)
+	at := now.Add(time.Second)
+	f.q.Complete(ctx, jobs[0], worker.Result{Status: "sent", Attempt: &worker.Attempt{StartedAt: at, FinishedAt: at, Outcome: "accepted", HTTPStatus: 200}})
+	f.q.Complete(ctx, jobs[1], worker.Result{Status: "skipped", SkipReason: "no_consent"})
+
+	if f.count(`SELECT count(*) FROM messages WHERE id = $1 AND last_attempt_at = $2`, jobs[0].MessageID, at) != 1 ||
+		f.count(`SELECT count(*) FROM messages WHERE id = $1 AND last_attempt_at IS NULL`, jobs[1].MessageID) != 1 {
+		t.Fatal("want the attempt's start on the sent message and none on the skip")
+	}
+
+	// A stale worker's late attempt still happened: it moves the time on, never back.
+	f.exec(`UPDATE messages SET status = 'sending', lease_token = gen_random_uuid() WHERE id = $1`, jobs[0].MessageID)
+	later := now.Add(time.Minute)
+	stale := jobs[0]
+	stale.Attempt = 9
+	if err := f.q.Complete(ctx, stale, worker.Result{Status: "sent", Attempt: &worker.Attempt{StartedAt: later, FinishedAt: later, Outcome: "accepted", HTTPStatus: 200}}); !errors.Is(err, worker.ErrLeaseLost) {
+		t.Fatalf("want a lost lease, got %v", err)
+	}
+	if f.count(`SELECT count(*) FROM messages WHERE id = $1 AND last_attempt_at = $2`, jobs[0].MessageID, later) != 1 {
+		t.Fatal("the late attempt must still be the latest")
+	}
+}
+
 func TestComplete_RetryAfterCancelIsCancelled(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

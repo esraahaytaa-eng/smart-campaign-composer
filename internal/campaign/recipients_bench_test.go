@@ -22,11 +22,13 @@ type sqlRecorder struct {
 	mu    sync.Mutex
 	on    bool
 	stmts []pgx.TraceQueryStartData
+	all   int // every statement, for statements per request
 }
 
 func (r *sqlRecorder) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.all++
 	if sql := strings.TrimSpace(d.SQL); r.on && (strings.HasPrefix(sql, "SELECT") || strings.HasPrefix(sql, "WITH")) {
 		r.stmts = append(r.stmts, d)
 	}
@@ -87,6 +89,8 @@ func benchCampaign(b *testing.B, pool *pgxpool.Pool) int64 {
 			FROM messages m CROSS JOIN LATERAL generate_series(1, m.attempt_count) n
 			CROSS JOIN LATERAL (SELECT now() - (m.id % 3600) * interval '1 second' + n * interval '2 seconds' t) x
 			WHERE m.campaign_id = $1`, id)
+		exec(`UPDATE messages m SET last_attempt_at = (SELECT max(started_at) FROM delivery_attempts WHERE message_id = m.id)
+			WHERE campaign_id = $1`, id) // as the worker records it
 	}
 	exec(`ANALYZE`)
 	return id
@@ -153,6 +157,14 @@ func BenchmarkRecipients(b *testing.B) {
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
 			explain(c.name, func() { h.listRecipients(ctx, id, c.group, c.channel, c.q, "", "", c.page) })
+			rec.mu.Lock()
+			start := rec.all
+			rec.mu.Unlock()
+			defer func() {
+				rec.mu.Lock()
+				b.ReportMetric(float64(rec.all-start)/float64(b.N), "stmts/op")
+				rec.mu.Unlock()
+			}()
 			for b.Loop() {
 				out, err := h.listRecipients(ctx, id, c.group, c.channel, c.q, "", "", c.page)
 				if err != nil || (c.group == "sent" && c.q == "" && out.Total != counts.sent) {

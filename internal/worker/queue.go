@@ -191,10 +191,10 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var sentAt, nextAt *time.Time
+	var sentAt, nextAt, startedAt *time.Time
 	outcome := ""
 	if a := r.Attempt; a != nil {
-		outcome = a.Outcome
+		outcome, startedAt = a.Outcome, &a.StartedAt
 		// Recorded even if the lease was lost: the provider request did happen.
 		if _, err := tx.Exec(ctx, `INSERT INTO delivery_attempts (message_id, attempt_no, started_at, finished_at, outcome, http_status, error)
 			VALUES ($1, $2, $3, $4, $5, NULLIF($6, 0), NULLIF($7, ''))`,
@@ -213,11 +213,18 @@ func (q *Queue) Complete(ctx context.Context, j Job, r Result) error {
 			-- No clear answer: the provider may have sent it (D5 history).
 			delivery_uncertain = delivery_uncertain OR $8 IN ('timeout', 'network_error', 'interrupted'),
 			sent_at = CASE WHEN $2 = 'sent' THEN coalesce($6, now()) ELSE sent_at END,
+			last_attempt_at = greatest(last_attempt_at, $9),
 			lease_token = NULL, lease_expires_at = NULL, updated_at = now()
 		WHERE id = $1 AND lease_token = $7::uuid AND status = 'sending'`,
-		j.MessageID, r.Status, r.SkipReason, r.LastError, nextAt, sentAt, j.LeaseToken, outcome)
+		j.MessageID, r.Status, r.SkipReason, r.LastError, nextAt, sentAt, j.LeaseToken, outcome, startedAt)
 	if err != nil {
 		return fmt.Errorf("complete message: %w", err)
+	}
+	if tag.RowsAffected() == 0 && startedAt != nil {
+		// The lease was lost, but the attempt happened: it still counts as the latest.
+		if _, err := tx.Exec(ctx, `UPDATE messages SET last_attempt_at = greatest(last_attempt_at, $2) WHERE id = $1`, j.MessageID, startedAt); err != nil {
+			return fmt.Errorf("record last attempt: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
