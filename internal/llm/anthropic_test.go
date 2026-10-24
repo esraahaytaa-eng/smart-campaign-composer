@@ -8,12 +8,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
 
 	"smart-campaign-composer/internal/content"
+
+	"smart-campaign-composer/internal/audience"
 )
 
 const validOutput = `{"unsupported":false,"reason":"","rules":[{"field":"city","op":"in","value":["İstanbul"]}],"suggested_send_at":null,"schedule_note":null}`
@@ -116,10 +119,53 @@ func TestInterpretPrompt_ContainsContextNotUserData(t *testing.T) {
 	if !strings.Contains(interpretSystemPrompt, "at most once") {
 		t.Error("system prompt does not say each field and operator may appear at most once")
 	}
-	for _, field := range []string{"city", "cart_added", "no_order", "order_count", "total_spend", "last_order", "ordered_category", "carted_category", "cart_value", "signed_up"} {
-		if !strings.Contains(interpretSystemPrompt, field) {
-			t.Errorf("system prompt does not describe %s", field)
+	for _, f := range audience.Fields() {
+		if !strings.Contains(interpretSystemPrompt, f.Field) {
+			t.Errorf("system prompt does not describe %s", f.Field)
 		}
+	}
+	for _, want := range []string{"last_months", "gt", "lt", "signed_up / before"} { // D70
+		if !strings.Contains(interpretSystemPrompt, want) {
+			t.Errorf("system prompt does not describe %s", want)
+		}
+	}
+}
+
+// The answer schema offers every catalog field and operator (D70), and only those.
+func TestInterpretSchema_CoversCatalog(t *testing.T) {
+	b, _ := json.Marshal(interpretSchema["properties"].(map[string]any)["rules"])
+	var rules struct {
+		Items struct {
+			AnyOf []struct {
+				Properties struct {
+					Field, Op struct{ Enum []string }
+					Value     json.RawMessage
+				}
+			}
+		}
+	}
+	if err := json.Unmarshal(b, &rules); err != nil {
+		t.Fatal(err)
+	}
+	offered := map[string]bool{}
+	for _, r := range rules.Items.AnyOf {
+		for _, f := range r.Properties.Field.Enum {
+			for _, op := range r.Properties.Op.Enum {
+				offered[f+" "+op] = true
+			}
+		}
+	}
+	want := map[string]bool{}
+	for _, f := range audience.Fields() {
+		for _, op := range f.Ops {
+			want[f.Field+" "+op] = true
+		}
+	}
+	if !reflect.DeepEqual(offered, want) {
+		t.Fatalf("schema offers %v, catalog has %v", offered, want)
+	}
+	if !strings.Contains(string(b), `"last_months"`) || !strings.Contains(string(b), `"amount"`) || !strings.Contains(string(b), `"count"`) {
+		t.Fatalf("schema lacks last_months or the windowed totals: %s", b)
 	}
 }
 

@@ -111,7 +111,19 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Covers the case example and typical campaigns, and is easy to validate, display, test and keep safe.
 - **Rejected:** *Nested AND/OR groups:* harder UI and validation, and harder for marketers to read. *Only the fields in the case example:* too narrow for the variety of campaigns the case asks for.
 - **Trade-offs:** Some audiences, such as "(A and B) or C", cannot be expressed.
-- **History:** 2026-10-21 (planning). Category, cart value and signup conditions added with the event tables (D33). Fixed dates added so a cutoff named in a brief does not drift when sending starts later (D30). 2026-10-22: empty rule lists rejected, so a missing AI result or deleted chips cannot target the whole user base (D15).
+- **History:** 2026-10-21 (planning). Category, cart value and signup conditions added with the event tables (D33). Fixed dates added so a cutoff named in a brief does not drift when sending starts later (D30). 2026-10-22: empty rule lists rejected, so a missing AI result or deleted chips cannot target the whole user base (D15). 2026-10-24: extended by D70 (windowed spend and order count, strict comparisons, calendar months, signed up before).
+
+### D70 — Audience rules: windowed totals, strict comparisons, calendar months
+- **Status:** Accepted · 2026-10-24
+- **Decision:** D14 gains, without changing any existing rule's meaning or shape:
+  - `spend_in_window` and `orders_in_window`: total spend (TL) or order count inside a window, e.g. `{"amount": 10000, "last_months": 12}`, `{"count": 4, "last_days": 90}`.
+  - Strict `gt` / `lt` beside `gte` / `lte` on spend and order count (`gt` on cart value), so "over 10,000 TL" is exact.
+  - `last_months` (1–12) in every window: calendar months back from send time in the campaign's time zone, the day clamped to the month's end.
+  - `signed_up before`: signed up before the window start, so "not registered in the last 7 days" is expressible. No `to` date, like `last_order before`.
+  - Still a flat AND over a fixed catalog: values become query arguments; AI never writes SQL; anything else stays unsupported (D15).
+- **Why:** Realistic segments ("over 10,000 TL in 12 months, at least 4 orders, no order in 45 days, not new") were correctly rejected; approximating them would break D15.
+- **Rejected:** *Windows on `total_spend` / `order_count`:* two value shapes per field break stored rules and the chip editor. *12 months as 365 days:* an approximation. *A general NOT or OR:* turns the catalog into a query language.
+- **Trade-offs:** Four more field/operator families to validate, show and test; the AI prompt grows by a few lines.
 
 ### D15 — Handling invalid or failed AI output
 - **Status:** Accepted · 2026-10-21

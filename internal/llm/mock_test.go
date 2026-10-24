@@ -69,6 +69,11 @@ func TestMock_DocumentedPatterns(t *testing.T) {
 			if !sameJSON(t, string(rules), ex.Rules) {
 				t.Fatalf("rules\n got: %s\nwant: %s", rules, ex.Rules)
 			}
+			var parsed []audience.Rule
+			json.Unmarshal(rules, &parsed)
+			if _, errs := audience.Validate(parsed, testCatalog); len(errs) > 0 {
+				t.Fatalf("documented rules do not validate: %v", errs)
+			}
 		})
 	}
 }

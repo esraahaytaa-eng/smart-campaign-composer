@@ -43,6 +43,8 @@ var MockExamples = []MockExample{
 		`[{"field":"cart_value","op":"gte","value":5000}]`},
 	{"Send a welcome discount to users who signed up in the last 7 days.",
 		`[{"field":"signed_up","op":"within","value":{"last_days":7}}]`},
+	{"Send a loyalty reward to customers who spent more than 10,000 TL in the last 12 months with at least 4 orders, no orders in the last 45 days, and who did not sign up in the last 7 days.",
+		loyalRules},
 	{"Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00.",
 		`[{"field":"city","op":"in","value":["Ankara"]}]`},
 	{"Send a reminder to users who added products to their cart since 2026-10-01 but did not buy anything.",
@@ -59,11 +61,16 @@ var MockExamples = []MockExample{
 		`[{"field":"cart_value","op":"gte","value":5000}]`},
 	{"Son 7 günde üye olan kullanıcılara hoş geldin indirimi gönder.",
 		`[{"field":"signed_up","op":"within","value":{"last_days":7}}]`},
+	{"Son 12 ayda 10.000 TL'den fazla harcayan, bu sürede en az 4 sipariş veren, son 45 gündür sipariş vermeyen ve son 7 günde üye olmamış müşterilere sadakat ödülü gönder.",
+		loyalRules},
 	{"Ankara'daki tüm kullanıcılara hafta sonu indirimi duyurusu gönder. Yarın saat 10:00'da gönder.",
 		`[{"field":"city","op":"in","value":["Ankara"]}]`},
 	{"2026-10-01 tarihinden beri sepetine ürün ekleyip satın almayan kullanıcılara hatırlatma gönder.",
 		`[{"field":"cart_added","op":"within","value":{"from":"2026-10-01"}},{"field":"no_order","op":"within","value":{"from":"2026-10-01"}}]`},
 }
+
+// loyalRules: over 10,000 TL and 4+ orders in 12 months, no order in 45 days, not new (D70).
+const loyalRules = `[{"field":"spend_in_window","op":"gt","value":{"amount":10000,"last_months":12}},{"field":"orders_in_window","op":"gte","value":{"count":4,"last_months":12}},{"field":"no_order","op":"within","value":{"last_days":45}},{"field":"signed_up","op":"before","value":{"last_days":7}}]`
 
 // slots are the variable parts of a pattern.
 var slots = strings.NewReplacer(
@@ -75,6 +82,9 @@ var slots = strings.NewReplacer(
 	"{amount}", `(?P<amount>\d{1,3}(?:[.,]\d{3})+|\d{1,7})`,
 	"{category}", `(?P<category>\pL+)`,
 	"{date}", `(?P<date>\d{4}-\d{2}-\d{2})`,
+	"{months}", `(?P<months>\d{1,2})`,
+	"{count}", `(?P<count>\d{1,4})`,
+	"{days}", `(?P<days>\d{1,3})`,
 	"{'}", `['’]`,
 )
 
@@ -104,6 +114,18 @@ var patterns = []pattern{
 	p(`{city}{'}(?:daki|deki|taki|teki) (?:tüm )?(?:kullanıcılara|müşterilere) {offer} gönder`, cityOnly),
 	p(`send (?:a |an )?{offer} to (?:users|customers) who added (?:products|items) to their (?:cart|basket) since {date} but did not buy anything`, cartSince),
 	p(`{date} tarihinden beri sepetine ürün ekleyip satın almayan (?:kullanıcılara|müşterilere) {offer} gönder`, cartSince),
+	p(`send (?:a |an )?{offer} to customers who spent more than {amount} (?:tl|try|lira) in the last {months} months with at least {count} orders, no orders in the last {n} days,? and who did not sign up in the last {days} days`, loyal),
+	p(`son {months} ayda {amount} (?:tl|lira){'}den fazla harcayan, bu sürede en az {count} sipariş veren, son {n} gündür sipariş vermeyen ve son {days} günde üye olmamış müşterilere {offer} gönder`, loyal),
+}
+
+// loyal: more than the amount and at least count orders in the months, no
+// order in n days, not signed up in the last days (D70).
+func loyal(m map[string]string) (string, error) {
+	amount := strings.NewReplacer(".", "", ",", "").Replace(m["amount"])
+	return fmt.Sprintf(`[{"field":"spend_in_window","op":"gt","value":{"amount":%[1]s,"last_months":%[2]s}},`+
+		`{"field":"orders_in_window","op":"gte","value":{"count":%[3]s,"last_months":%[2]s}},`+
+		`{"field":"no_order","op":"within","value":{"last_days":%[4]s}},`+
+		`{"field":"signed_up","op":"before","value":{"last_days":%[5]s}}]`, amount, m["months"], m["count"], m["n"], m["days"]), nil
 }
 
 func cartAbandoners(m map[string]string) (string, error) {
