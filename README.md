@@ -2,7 +2,7 @@
 
 AI-assisted SMS and email campaign tool: Claude suggests the audience and content, the backend validates, the marketer approves, the system sends to mock providers. Requirements: [`CASE.md`](CASE.md). Decisions: [`DECISIONS.md`](DECISIONS.md). Plan: [`docs/plans/2026-10-21-implementation-plan.md`](docs/plans/2026-10-21-implementation-plan.md).
 
-> **Status: work in progress.** Done: backend T1–T14 (login, audience rules, AI interpretation and content with a mock and Claude, drafts, approval, cancel and resend, mock providers, sending worker, metrics and the live status stream) plus the draft endpoints the frontend needs (D37–D40), the frontend app shell with sign-in (T15), the composer's audience step (T16), its content and review-and-approve steps (T17), and English/Turkish UI (D44), and for T18 so far the delivery groups and recipient API (D46, D47), the dashboard and campaign list, and the campaign page after approval with live delivery, the recipient details drawer and resend (T18 done), T19 (verification, security, CI and performance), T20 messages in each customer's language (D64–D67), and T21 the optional A/B test (D68). Audit remediation (D69) done. Still to do: the exploratory QA (T19 step 8), after the feature work.
+> **Status: feature-complete for delivery.** The core workflow (T1–T18), quality and CI (T19), messages in each customer's language (T20, D64–D67), the optional A/B test (T21, D68), audit remediation (D69), one-step creation (D71) and personalization with AI timing (D72) are done. Manual QA of the whole application: [`docs/qa/2026-10-24-manual-qa/`](docs/qa/2026-10-24-manual-qa/README.md) (77 of 78 cases passed; the one bug found is fixed). Claude Code session exports: [`ai-sessions/`](ai-sessions/).
 
 ## Requirements
 
@@ -296,6 +296,7 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 
 - **A/B outcomes:** the stored version per message is what a real outcome would join on. The cheapest is orders placed within an attribution window after `sent_at` (the `orders` table already exists; needs a decision on the window), then tracked links for clicks. A winner needs one of these plus a significance rule (D68).
 - **AI-generated campaign titles:** the AI could suggest a short title in the same answer that interprets the brief, with the brief's start as the fallback and manual edits kept. Deferred to keep the scope small (D43).
+- **API reference (OpenAPI and Swagger UI), a final UI/UX audit and a product roadmap:** planned for T21 (D50) but not built; the API is described in this README and the decisions.
 - **Archiving campaigns:** hide finished campaigns from the list. Not built: deleting drafts removes most of the clutter, and archiving can be added later without changing how deletion works (D37).
 
 ## Security
