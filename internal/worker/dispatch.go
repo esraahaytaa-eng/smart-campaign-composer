@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"golang.org/x/time/rate"
@@ -224,9 +225,23 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 		return err
 	}
 
+	// A failed load means nothing was sent (audit F6). A message whose text or
+	// customer is gone can never be sent, so it fails; any other error (the
+	// database, shutdown) hands it back, without the uncertain flag that
+	// waiting for its lease to expire would give it.
+	notLoaded := func(err error) error {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.Join(err, done(Result{Status: "failed", LastError: "not sent: its campaign text or customer is missing"}))
+		}
+		w.mu.Lock()
+		next := w.Now().Add(Backoff(j.Attempt, 0, w.BackoffMax, w.Rand))
+		w.mu.Unlock()
+		return errors.Join(err, done(Result{Status: "retry_scheduled", NextAttemptAt: next, LastError: "not sent: the message could not be read, retrying"}))
+	}
+
 	rc, err := w.load(ctx, j)
 	if err != nil {
-		return err
+		return notLoaded(err)
 	}
 	if r, stop := skip(rc); stop {
 		return done(r) // no token taken, no provider call
@@ -249,7 +264,7 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 	var departure time.Time
 	for {
 		if rc, err = w.load(ctx, j); err != nil {
-			return err
+			return notLoaded(err)
 		}
 		if r, stop := skip(rc); stop {
 			return done(r)

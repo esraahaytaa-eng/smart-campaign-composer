@@ -354,6 +354,47 @@ func TestRun_RateLimitNoWindowOver100(t *testing.T) {
 	}
 }
 
+// Audit F6: a message whose text is gone can't be sent: it fails at once
+// instead of being reclaimed every 30 s, and nothing says it may have been delivered.
+func TestProcess_MissingTextFailsWithoutSending(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	f.exec(`DELETE FROM campaign_content WHERE channel = 'sms'`) // only a direct database edit can do this
+	p := &fakeProvider{}
+	job := f.claimOne("sms", 1)
+
+	f.newWorker(p.serve(t)).Process(context.Background(), job)
+
+	m := f.message(job.MessageID)
+	if m.Status != "failed" || m.Attempts != 0 || len(p.requests) != 0 ||
+		f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, job.MessageID) != "false" {
+		t.Fatalf("want failed, unsent and not uncertain; got %+v, %d requests", m, len(p.requests))
+	}
+}
+
+// Audit F6: when the message can't be read (a database error, or shutdown
+// mid-read), nothing was sent: it goes back to the queue, not flagged uncertain.
+func TestProcess_LoadErrorHandsTheMessageBack(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.sendingWithContent("Merhaba {{first_name}}")
+	p := &fakeProvider{}
+	job := f.claimOne("sms", 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := f.newWorker(p.serve(t)).Process(ctx, job); err == nil {
+		t.Fatal("the read error is still reported")
+	}
+
+	m := f.message(job.MessageID)
+	if m.Status != "retry_scheduled" || m.Attempts != 0 || len(p.requests) != 0 ||
+		f.str(`SELECT delivery_uncertain::text FROM messages WHERE id = $1`, job.MessageID) != "false" {
+		t.Fatalf("want it back in the queue, unsent and not uncertain; got %+v, %d requests", m, len(p.requests))
+	}
+}
+
 // A worker that died mid-attempt leaves its message "sending"; the running
 // worker takes it back once the lease expires, flagged uncertain, and sends it.
 func TestRun_ReclaimsExpiredLease(t *testing.T) {
