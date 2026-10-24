@@ -78,7 +78,7 @@ func (l *life) provider(b config.ProviderChannel, hang time.Duration) string {
 	}
 	mux := http.NewServeMux()
 	p.Routes(mux)
-	log := &providerLog{requests: map[string]int{}, processed: map[string]int{}, first: map[string]time.Time{}}
+	log := &providerLog{requests: map[string]int{}, processed: map[string]int{}, first: map[string]time.Time{}, body: map[string]string{}}
 	l.logs = append(l.logs, log)
 	srv := httptest.NewServer(log.wrap(mux))
 	l.t.Cleanup(srv.Close)
