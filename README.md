@@ -268,6 +268,7 @@ One Go module (`cmd/scc`) built into one image and run as separate Compose servi
 
 ## Optional features
 
+- **Scheduled sending:** built (D29).
 - **Messages in the customer's language:** built (T20, D64–D67); see the content step above.
 - **A/B testing:** evaluated and not built (D65). The app records delivery but no outcome (opens, clicks, orders after a send), so a winning variant can't be measured yet.
 - **CI pipeline:** built (D52).
