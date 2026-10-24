@@ -72,6 +72,12 @@ var fixture = []fixtureUser{
 		orders: []event{{time.Date(2026, 10, 1, 10, 0, 0, 0, istanbul), "electronics", 1, 1000}}},
 	{name: "oct2early", city: "Antalya", sms: true, email: true, signedUp: daysAgo(500),
 		orders: []event{{time.Date(2026, 10, 2, 1, 0, 0, 0, istanbul), "electronics", 1, 1000}}},
+	// D70: 10,001 TL in four orders over the last 12 months, the last 50 days ago.
+	{name: "loyal", city: "Antalya", sms: true, email: true, signedUp: daysAgo(500),
+		orders: []event{{daysAgo(50), "home", 1, 3000}, {daysAgo(120), "home", 1, 3000}, {daysAgo(200), "home", 1, 3000}, {daysAgo(300), "home", 1, 1001}}},
+	// Exactly 10,000 TL in four orders over 12 months, plus an older 5,000 TL order.
+	{name: "exact", city: "Antalya", sms: true, email: true, signedUp: daysAgo(500),
+		orders: []event{{daysAgo(50), "home", 1, 2500}, {daysAgo(120), "home", 1, 2500}, {daysAgo(200), "home", 1, 2500}, {daysAgo(300), "home", 1, 2500}, {daysAgo(400), "home", 1, 5000}}},
 }
 
 func fixtureDB(t *testing.T) *pgxpool.Pool {
@@ -143,8 +149,28 @@ func TestCount_MatchesHandComputed(t *testing.T) {
 			rule("no_order", "within", `{"last_days": 30}`)}, "sms", "abandoner"},
 		{"win-back (last order >90d)", []audience.Rule{rule("last_order", "before", `{"last_days": 90}`)}, "email", "lapsed"},
 		{"recent order (≤7d)", []audience.Rule{rule("last_order", "after", `{"last_days": 7}`)}, "sms", "recent"},
-		{"VIP by spend", []audience.Rule{rule("total_spend", "gte", `10000`)}, "sms", "vip"},
-		{"VIP by order count", []audience.Rule{rule("order_count", "gte", `3`)}, "sms", "vip"},
+		{"VIP by spend", []audience.Rule{rule("total_spend", "gte", `10000`)}, "sms", "exact loyal vip"},
+		{"VIP by order count", []audience.Rule{rule("order_count", "gte", `3`)}, "sms", "exact loyal vip"},
+		// D70: strict comparisons, windowed totals, calendar months, signed up before.
+		{"spend at least 15,000", []audience.Rule{rule("total_spend", "gte", `15000`)}, "sms", "exact"},
+		{"spend over 15,000", []audience.Rule{rule("total_spend", "gt", `15000`)}, "sms", ""},
+		{"fewer than 1 order", []audience.Rule{rule("order_count", "lt", `1`)}, "email", "bigcart inactive"},
+		{"more than 4 orders", []audience.Rule{rule("order_count", "gt", `4`)}, "sms", "exact"},
+		{"spend under 200", []audience.Rule{rule("total_spend", "lt", `200`), rule("order_count", "gte", `1`)}, "sms", "category"},
+		{"cart over 7,500", []audience.Rule{rule("cart_value", "gt", `7500`)}, "sms", ""},
+		{"spend in 12 months ≥ 12,000 (older orders left out)", []audience.Rule{rule("spend_in_window", "gte", `{"amount": 12000, "last_months": 12}`)}, "sms", "vip"},
+		{"spend in 12 months ≥ 10,000", []audience.Rule{rule("spend_in_window", "gte", `{"amount": 10000, "last_months": 12}`)}, "sms", "exact loyal vip"},
+		{"spend in 12 months > 10,000", []audience.Rule{rule("spend_in_window", "gt", `{"amount": 10000, "last_months": 12}`)}, "sms", "loyal vip"},
+		{"spend in 30 days ≤ 100, with orders", []audience.Rule{rule("spend_in_window", "lte", `{"amount": 100, "last_days": 30}`), rule("order_count", "gte", `1`)}, "sms", "abandoner category exact loyal recent"},
+		{"4+ orders in 12 months", []audience.Rule{rule("orders_in_window", "gte", `{"count": 4, "last_months": 12}`)}, "sms", "exact loyal"},
+		{"fewer than 2 orders in 12 months, with orders", []audience.Rule{rule("orders_in_window", "lt", `{"count": 2, "last_months": 12}`), rule("order_count", "gte", `1`)}, "sms", "abandoner category oct1 oct2early"},
+		{"orders since 1 Oct", []audience.Rule{rule("orders_in_window", "gte", `{"count": 1, "from": "2026-10-01"}`)}, "sms", "category oct1 oct2early recent vip"},
+		{"signed up more than 7 days ago, carted ≤7d", []audience.Rule{rule("signed_up", "before", `{"last_days": 7}`), rule("cart_added", "within", `{"last_days": 7}`)}, "sms", "abandoner bigcart category"},
+		{"over 10,000 TL in 12 months, 4+ orders, none in 45 days, not new", []audience.Rule{
+			rule("spend_in_window", "gt", `{"amount": 10000, "last_months": 12}`),
+			rule("orders_in_window", "gte", `{"count": 4, "last_months": 12}`),
+			rule("no_order", "within", `{"last_days": 45}`),
+			rule("signed_up", "before", `{"last_days": 7}`)}, "sms", "loyal"},
 		{"small spenders", []audience.Rule{rule("total_spend", "lte", `300`), rule("order_count", "gte", `1`)}, "sms", "abandoner category"},
 		{"never ordered", []audience.Rule{rule("order_count", "lte", `0`)}, "email", "bigcart inactive"},
 		{"books ordered ≤30d", []audience.Rule{rule("ordered_category", "in", `{"categories": ["books"], "last_days": 30}`)}, "sms", "category recent"},
@@ -163,6 +189,27 @@ func TestCount_MatchesHandComputed(t *testing.T) {
 				t.Fatalf("want %v, got %v", names(tc.want), got)
 			}
 		})
+	}
+}
+
+// Validate's canonical output is what gets stored and built: it must select
+// the same users as the rules it came from (D70's rebuilt values included).
+func TestBuild_ValidatedRulesSelectTheSame(t *testing.T) {
+	pool := fixtureDB(t)
+	rules := []audience.Rule{
+		rule("spend_in_window", "gt", `{"last_months": 12, "amount": 10000.0}`),
+		rule("orders_in_window", "gte", `{"last_months": 12, "count": 4}`),
+		rule("signed_up", "before", `{"last_days": 7}`),
+	}
+	valid, errs := audience.Validate(rules, audience.Catalog{})
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if string(valid[0].Value) != `{"amount":10000,"last_months":12}` || string(valid[1].Value) != `{"count":4,"last_months":12}` {
+		t.Fatalf("canonical values: %s %s", valid[0].Value, valid[1].Value)
+	}
+	if got, want := matching(t, pool, valid, "sms", now), matching(t, pool, rules, "sms", now); !slices.Equal(got, want) || !slices.Equal(got, []string{"loyal"}) {
+		t.Fatalf("validated rules select %v, raw rules %v, want [loyal]", got, want)
 	}
 }
 

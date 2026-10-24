@@ -34,11 +34,24 @@ func TestValidate_AcceptsEveryCatalogRule(t *testing.T) {
 		rule("carted_category", "in", `{"categories": ["electronics", "home"], "from": "2026-10-01"}`),
 		rule("cart_value", "gte", `5000`),
 		rule("signed_up", "within", `{"last_days": 7}`),
+		rule("signed_up", "before", `{"last_days": 7}`),
+		rule("order_count", "gt", `3`),
+		rule("order_count", "lt", `10`),
+		rule("total_spend", "gt", `10000`),
+		rule("total_spend", "lt", `500`),
+		rule("cart_value", "gt", `100`),
+		rule("spend_in_window", "gt", `{"amount": 10000, "last_months": 12}`),
+		rule("spend_in_window", "lte", `{"amount": 500.5, "from": "2026-01-01", "to": "2026-06-30"}`),
+		rule("orders_in_window", "gte", `{"count": 4, "last_days": 365}`),
+		rule("orders_in_window", "lt", `{"count": 2, "last_months": 1}`),
+		// Explicit null window keys mean "not set".
+		rule("no_order", "within", `{"last_days": 45, "last_months": null, "from": null, "to": null}`),
 	}
 
-	_, errs := audience.Validate(rules, catalog)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	for _, part := range [][]audience.Rule{rules[:13], rules[13:]} { // at most 20 rules per audience
+		if _, errs := audience.Validate(part, catalog); len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
 	}
 }
 
@@ -69,6 +82,25 @@ func TestValidate_Rejects(t *testing.T) {
 		{"negative count", rule("order_count", "gte", `-1`), "between 0 and 10000"},
 		{"last_order before with to", rule("last_order", "before", `{"from": "2026-01-01", "to": "2026-02-01"}`), "to"},
 		{"language reserved", rule("language", "in", `["tr"]`), "reserved"},
+		{"months=0", rule("cart_added", "within", `{"last_months": 0}`), "between 1 and 12"},
+		{"months=13", rule("cart_added", "within", `{"last_months": 13}`), "between 1 and 12"},
+		{"months not integer", rule("cart_added", "within", `{"last_months": 1.5}`), "value"},
+		{"months and days", rule("cart_added", "within", `{"last_months": 1, "last_days": 3}`), "either"},
+		{"months with to", rule("cart_added", "within", `{"last_months": 1, "to": "2026-10-01"}`), "either"},
+		{"signed_up before with to", rule("signed_up", "before", `{"from": "2026-01-01", "to": "2026-02-01"}`), "to"},
+		{"cart_value lt", rule("cart_value", "lt", `100`), "operator"},
+		{"spend window without amount", rule("spend_in_window", "gte", `{"last_months": 12}`), "amount"},
+		{"spend window without window", rule("spend_in_window", "gte", `{"amount": 100}`), "either"},
+		{"spend window negative", rule("spend_in_window", "gte", `{"amount": -1, "last_days": 30}`), "between 0 and 1000000"},
+		{"spend window as number", rule("spend_in_window", "gte", `100`), "value"},
+		{"orders window without count", rule("orders_in_window", "gte", `{"last_days": 30}`), "count"},
+		{"orders window count not integer", rule("orders_in_window", "gte", `{"count": 4.5, "last_days": 30}`), "value"},
+		{"orders window count too big", rule("orders_in_window", "gte", `{"count": 10001, "last_days": 30}`), "between 0 and 10000"},
+		{"spend window null amount", rule("spend_in_window", "gte", `{"amount": null, "last_days": 30}`), "amount"},
+		{"months and from", rule("cart_added", "within", `{"last_months": 1, "from": "2026-10-01"}`), "either"},
+		{"repeated key", rule("cart_added", "within", `{"last_days": 30, "last_days": 90}`), "repeated key"},
+		{"repeated nested key", rule("ordered_category", "in", `{"categories": ["books"], "last_days": 30, "categories": ["home"]}`), "repeated key"},
+		{"orders window unknown key", rule("orders_in_window", "gte", `{"count": 1, "amount": 5, "last_days": 30}`), "value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,12 +170,17 @@ func TestFixedWindowStarts(t *testing.T) {
 		rule("cart_added", "within", `{"last_days": 30}`),
 		rule("signed_up", "within", `{"from": "2026-11-01", "to": null}`),
 		rule("ordered_category", "in", `{"categories": ["books"], "from": "2026-10-01", "to": "2026-10-05"}`),
+		rule("spend_in_window", "gte", `{"amount": 100, "from": "2026-09-01"}`),
+		rule("orders_in_window", "gte", `{"count": 1, "last_months": 3}`),
+		// "before" a future date is everyone so far, not an empty window.
+		rule("signed_up", "before", `{"from": "2026-12-01"}`),
+		rule("last_order", "before", `{"from": "2026-12-01"}`),
 	}
 
 	starts, err := audience.FixedWindowStarts(rules, istanbul)
 
-	want := []time.Time{time.Date(2026, 11, 1, 0, 0, 0, 0, istanbul), time.Date(2026, 10, 1, 0, 0, 0, 0, istanbul)}
-	if err != nil || len(starts) != 2 || !starts[0].Equal(want[0]) || !starts[1].Equal(want[1]) {
+	want := []time.Time{time.Date(2026, 11, 1, 0, 0, 0, 0, istanbul), time.Date(2026, 10, 1, 0, 0, 0, 0, istanbul), time.Date(2026, 9, 1, 0, 0, 0, 0, istanbul)}
+	if err != nil || len(starts) != 3 || !starts[0].Equal(want[0]) || !starts[1].Equal(want[1]) || !starts[2].Equal(want[2]) {
 		t.Fatalf("want %v, got %v (%v)", want, starts, err)
 	}
 }
@@ -153,14 +190,16 @@ func TestFixedWindowStarts(t *testing.T) {
 func TestFields_DescribeWhatValidateAccepts(t *testing.T) {
 	samples := map[string][]string{
 		audience.ValueCities:           {`["Ankara"]`},
-		audience.ValueWindow:           {`{"last_days":30}`, `{"from":"2026-10-01"}`},
+		audience.ValueWindow:           {`{"last_days":30}`, `{"last_months":12}`, `{"from":"2026-10-01"}`},
+		audience.ValueAmountWindow:     {`{"amount":250.5,"last_months":12}`, `{"amount":0,"from":"2026-10-01"}`},
+		audience.ValueCountWindow:      {`{"count":4,"last_days":90}`},
 		audience.ValueCategoriesWindow: {`{"categories":["books"],"last_days":30}`, `{"categories":["books"],"from":"2026-10-01"}`},
 		audience.ValueCount:            {`3`},
 		audience.ValueAmount:           {`250.5`},
 	}
 	fields := audience.Fields()
-	if len(fields) != 10 {
-		t.Fatalf("want the 10 catalog fields, got %d", len(fields))
+	if len(fields) != 12 {
+		t.Fatalf("want the 12 catalog fields, got %d", len(fields))
 	}
 	for i, f := range fields {
 		if i > 0 && fields[i-1].Field >= f.Field {
@@ -190,7 +229,7 @@ func TestFieldsAndLimits_AreCopies(t *testing.T) {
 	if f := audience.Fields()[0]; f.Ops[0] == "changed" {
 		t.Fatalf("Fields shares its operator slices: %+v", f)
 	}
-	if audience.Limits()["max_rules"] != 20 {
+	if l := audience.Limits(); l["max_rules"] != 20 || l["max_months"] != 12 {
 		t.Fatal("Limits shares its map")
 	}
 	if _, errs := audience.Validate([]audience.Rule{rule("cart_added", "within", `{"last_days":30}`)}, catalog); len(errs) > 0 {

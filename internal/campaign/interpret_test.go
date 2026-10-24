@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -244,6 +245,22 @@ func TestInterpret_TruncatedAnswerIsRetried(t *testing.T) {
 	s = &scripted{errs: []error{llm.ErrTruncated, llm.ErrTruncated}, outputs: []string{"", ""}}
 	if _, err := interpret(t, s, "brief"); !errors.Is(err, ErrAIInvalid) || len(s.calls) != 2 {
 		t.Fatalf("truncated twice: want ErrAIInvalid after 2 calls, got %v after %d", err, len(s.calls))
+	}
+}
+
+// A rule value the model wrote as broken JSON text is an invalid answer
+// (D15, D70): retried once with the problem, then ErrAIInvalid.
+func TestInterpret_InvalidRuleValueIsRetried(t *testing.T) {
+	t.Parallel()
+	bad := &llm.InvalidAnswerError{Problems: []string{"rule 0: value is not valid JSON text"}}
+	s := &scripted{errs: []error{bad}, outputs: []string{"", output(goodRules, "null", "null")}}
+	if got, err := interpret(t, s, "brief"); err != nil || len(s.calls) != 2 || len(got.Rules) != 2 || !slices.Equal(s.calls[1].Errors, bad.Problems) {
+		t.Fatalf("invalid then valid: want success after 2 calls with the problem sent back, got %v after %d (%v)", err, len(s.calls), s.calls)
+	}
+
+	s = &scripted{errs: []error{bad, bad}, outputs: []string{"", ""}}
+	if _, err := interpret(t, s, "brief"); !errors.Is(err, ErrAIInvalid) || len(s.calls) != 2 {
+		t.Fatalf("invalid twice: want ErrAIInvalid after 2 calls, got %v after %d", err, len(s.calls))
 	}
 }
 

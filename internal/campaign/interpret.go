@@ -77,7 +77,10 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 		cancel()
 		var got Interpretation
 		var problems []string
+		var invalid *llm.InvalidAnswerError
 		switch {
+		case errors.As(err, &invalid):
+			problems = invalid.Problems
 		case errors.Is(err, llm.ErrTruncated):
 			problems = []string{"the answer was cut off; keep it short"}
 		case err != nil:

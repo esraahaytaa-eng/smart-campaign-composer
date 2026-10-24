@@ -160,8 +160,8 @@ func (c cityIn) value() any            { return c.cities }
 func (c cityIn) sql(b *builder) string { return "u.city = ANY(" + b.arg(c.cities) + ")" }
 
 type timeRule struct {
-	field string
-	w     window
+	field, op string
+	w         window
 }
 
 func (t timeRule) value() any { return t.w }
@@ -172,6 +172,10 @@ func (t timeRule) sql(b *builder) string {
 	case "no_order":
 		return "NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND " + b.inWindow("o.ordered_at", t.w) + ")"
 	default: // signed_up
+		if t.op == "before" {
+			start, _ := t.w.bounds(b.now, b.loc)
+			return "u.signed_up_at < " + b.arg(start)
+		}
 		return b.inWindow("u.signed_up_at", t.w)
 	}
 }
@@ -219,18 +223,46 @@ type compare struct {
 	n         any // int64 or float64
 }
 
+var comparisons = map[string]string{"gte": ">=", "lte": "<=", "gt": ">", "lt": "<"}
+
 func (c compare) value() any { return c.n }
 func (c compare) sql(b *builder) string {
-	op := ">="
-	if c.op == "lte" {
-		op = "<="
+	return aggregates[c.field] + " " + comparisons[c.op] + " " + b.arg(c.n)
+}
+
+// windowTotal compares the user's spend or order count inside a window (D70).
+type windowTotal struct {
+	field, op string
+	n         any // float64 amount or int64 count
+	w         window
+}
+
+func (c windowTotal) value() any {
+	if n, ok := c.n.(int64); ok {
+		return struct {
+			Count int64 `json:"count"`
+			window
+		}{n, c.w}
 	}
-	return aggregates[c.field] + " " + op + " " + b.arg(c.n)
+	return struct {
+		Amount float64 `json:"amount"`
+		window
+	}{c.n.(float64), c.w}
+}
+
+func (c windowTotal) sql(b *builder) string {
+	total := "count(*)"
+	if c.field == "spend_in_window" {
+		total = "coalesce(sum(o.total_amount), 0)"
+	}
+	return "(SELECT " + total + " FROM orders o WHERE o.user_id = u.id AND " + b.inWindow("o.ordered_at", c.w) + ") " +
+		comparisons[c.op] + " " + b.arg(c.n)
 }
 
 // FixedWindowStarts returns the start of every fixed-date window in the rules,
 // resolved in loc. A campaign sent before such a start would evaluate an
-// empty window (T9 rejects that at approval).
+// empty window (T9 rejects that at approval). "before" a date is left out:
+// before a future date is everyone so far, not an empty window.
 func FixedWindowStarts(rules []Rule, loc *time.Location) ([]time.Time, error) {
 	var starts []time.Time
 	for i, r := range rules {
@@ -241,11 +273,19 @@ func FixedWindowStarts(rules []Rule, loc *time.Location) ([]time.Time, error) {
 		var w window
 		switch v := c.(type) {
 		case timeRule:
+			if v.op == "before" {
+				continue
+			}
 			w = v.w
 		case lastOrder:
+			if v.op == "before" {
+				continue
+			}
 			w = v.w
 		case categoryRule:
 			w = v.v.window
+		case windowTotal:
+			w = v.w
 		default:
 			continue
 		}

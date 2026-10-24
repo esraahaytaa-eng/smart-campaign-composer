@@ -45,6 +45,8 @@ export default () =>
     check((await page.locator('.chip-label').allTextContents()).some((c) => c.startsWith('Added to cart since 1 Oct 2026')), 'a fixed-date rule reads "since 1 Oct 2026"')
 
     await page.getByRole('button', { name: '+ Add rule' }).click()
+    const menu = await page.locator('.add-menu').boundingBox()
+    check(menu && menu.y >= 0 && menu.y + menu.height <= page.viewportSize().height, 'the "+ Add rule" menu fits on screen and scrolls')
     await page.getByRole('menuitem', { name: 'Number of orders: at least' }).click()
     await dialog.getByRole('button', { name: 'Apply' }).click()
     await dialog.waitFor({ state: 'detached' })

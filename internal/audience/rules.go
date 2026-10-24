@@ -38,6 +38,7 @@ type Catalog struct {
 const (
 	maxRules  = 20
 	maxDays   = 365
+	maxMonths = 12
 	maxCount  = 10_000
 	maxAmount = 1_000_000
 )
@@ -49,22 +50,26 @@ var fieldOps = map[string][]string{
 	"city":             {"in"},
 	"cart_added":       {"within"},
 	"no_order":         {"within"},
-	"order_count":      {"gte", "lte"},
-	"total_spend":      {"gte", "lte"},
+	"order_count":      {"gte", "lte", "gt", "lt"},
+	"total_spend":      {"gte", "lte", "gt", "lt"},
 	"last_order":       {"before", "after"},
 	"ordered_category": {"in"},
 	"carted_category":  {"in"},
-	"cart_value":       {"gte"},
-	"signed_up":        {"within"},
+	"cart_value":       {"gte", "gt"},
+	"signed_up":        {"within", "before"},
+	"spend_in_window":  {"gte", "lte", "gt", "lt"}, // D70
+	"orders_in_window": {"gte", "lte", "gt", "lt"},
 }
 
 // Value types of the rule fields, as the chip editor shows them (D39).
 const (
 	ValueCities           = "cities"            // ["İstanbul", ...]
-	ValueWindow           = "window"            // {"last_days": N} or {"from": "YYYY-MM-DD", "to"?: ...}
+	ValueWindow           = "window"            // {"last_days": N}, {"last_months": N} or {"from": "YYYY-MM-DD", "to"?: ...}
 	ValueCategoriesWindow = "categories_window" // a window plus "categories": [...]
 	ValueCount            = "count"             // whole number
 	ValueAmount           = "amount"            // number
+	ValueAmountWindow     = "amount_window"     // a window plus "amount": number
+	ValueCountWindow      = "count_window"      // a window plus "count": whole number
 )
 
 // fieldValues is each field's value type; parse decodes exactly these shapes.
@@ -72,13 +77,15 @@ var fieldValues = map[string]string{
 	"city":             ValueCities,
 	"cart_added":       ValueWindow,
 	"no_order":         ValueWindow,
-	"signed_up":        ValueWindow,
+	"signed_up":        ValueWindow, // "before" takes no "to"
 	"last_order":       ValueWindow, // "before" takes no "to"
 	"ordered_category": ValueCategoriesWindow,
 	"carted_category":  ValueCategoriesWindow,
 	"order_count":      ValueCount,
 	"total_spend":      ValueAmount,
 	"cart_value":       ValueAmount,
+	"spend_in_window":  ValueAmountWindow,
+	"orders_in_window": ValueCountWindow,
 }
 
 // FieldSpec describes one rule field for the API catalog (D39).
@@ -99,10 +106,10 @@ func Fields() []FieldSpec {
 }
 
 // Limits are the bounds Validate enforces, as a fresh map: max_count is for
-// order_count, max_amount for total_spend and cart_value.
+// order counts, max_amount for spend and cart value amounts.
 func Limits() map[string]any {
 	return map[string]any{
-		"max_rules": maxRules, "max_days": maxDays, "max_count": maxCount, "max_amount": maxAmount,
+		"max_rules": maxRules, "max_days": maxDays, "max_months": maxMonths, "max_count": maxCount, "max_amount": maxAmount,
 		"min_date": minDate.Format(time.DateOnly),
 	}
 }
@@ -176,17 +183,7 @@ func parse(r Rule, cat *Catalog) (condition, error) {
 		cities, err := canonical(cities, catalogCities(cat), "city", foldTurkish)
 		return cityIn{cities}, err
 
-	case "cart_added", "no_order", "signed_up":
-		var w window
-		if err := decode(r, &w); err != nil {
-			return nil, err
-		}
-		if err := w.check(); err != nil {
-			return nil, err
-		}
-		return timeRule{r.Field, w}, nil
-
-	case "last_order":
+	case "cart_added", "no_order", "signed_up", "last_order":
 		var w window
 		if err := decode(r, &w); err != nil {
 			return nil, err
@@ -195,9 +192,50 @@ func parse(r Rule, cat *Catalog) (condition, error) {
 			return nil, err
 		}
 		if r.Op == "before" && w.To != nil {
-			return nil, errors.New(`last_order before takes no "to" date`)
+			return nil, fmt.Errorf(`%s before takes no "to" date`, r.Field)
 		}
-		return lastOrder{r.Op, w}, nil
+		if r.Field == "last_order" {
+			return lastOrder{r.Op, w}, nil
+		}
+		return timeRule{r.Field, r.Op, w}, nil
+
+	case "spend_in_window":
+		var v struct {
+			Amount *float64 `json:"amount"`
+			window
+		}
+		if err := decode(r, &v); err != nil {
+			return nil, err
+		}
+		if v.Amount == nil {
+			return nil, errors.New("spend_in_window needs an amount")
+		}
+		if *v.Amount < 0 || *v.Amount > maxAmount {
+			return nil, fmt.Errorf("%s must be between 0 and %d", r.Field, maxAmount)
+		}
+		if err := v.check(); err != nil {
+			return nil, err
+		}
+		return windowTotal{r.Field, r.Op, *v.Amount, v.window}, nil
+
+	case "orders_in_window":
+		var v struct {
+			Count *int64 `json:"count"`
+			window
+		}
+		if err := decode(r, &v); err != nil {
+			return nil, err
+		}
+		if v.Count == nil {
+			return nil, errors.New("orders_in_window needs a count")
+		}
+		if *v.Count < 0 || *v.Count > maxCount {
+			return nil, fmt.Errorf("%s must be between 0 and %d", r.Field, maxCount)
+		}
+		if err := v.check(); err != nil {
+			return nil, err
+		}
+		return windowTotal{r.Field, r.Op, *v.Count, v.window}, nil
 
 	case "ordered_category", "carted_category":
 		var v categoryWindow
@@ -233,8 +271,11 @@ func parse(r Rule, cat *Catalog) (condition, error) {
 	}
 }
 
-// decode reads exactly one JSON value and rejects unknown keys.
+// decode reads exactly one JSON value and rejects unknown and repeated keys.
 func decode(r Rule, v any) error {
+	if err := repeatedKey(json.NewDecoder(bytes.NewReader(r.Value))); errors.Is(err, errRepeatedKey) {
+		return fmt.Errorf("invalid value for %s %s: %v", r.Field, r.Op, err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(r.Value))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(v)
@@ -247,25 +288,73 @@ func decode(r Rule, v any) error {
 	return nil
 }
 
-// window is either the last N days, counted back from when the rule is
-// evaluated, or fixed calendar dates in the campaign's time zone (D14, D30).
+var errRepeatedKey = errors.New("repeated key")
+
+// repeatedKey walks one JSON value and reports a key repeated in an object,
+// compared without case like Go's decoding: {"last_days": 30, "last_days": 90}
+// would otherwise silently mean 90. Syntax errors are left to the decoder.
+func repeatedKey(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch tok {
+	case json.Delim('{'):
+		seen := map[string]bool{}
+		for dec.More() {
+			key, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			k := strings.ToLower(key.(string))
+			if seen[k] {
+				return fmt.Errorf("%w %q", errRepeatedKey, key)
+			}
+			seen[k] = true
+			if err := repeatedKey(dec); err != nil {
+				return err
+			}
+		}
+	case json.Delim('['):
+		for dec.More() {
+			if err := repeatedKey(dec); err != nil {
+				return err
+			}
+		}
+	default:
+		return nil
+	}
+	_, err = dec.Token() // the closing delimiter
+	return err
+}
+
+// window is the last N days or calendar months, counted back from when the
+// rule is evaluated, or fixed calendar dates in the campaign's time zone
+// (D14, D30, D70).
 type window struct {
-	LastDays *int    `json:"last_days,omitempty"`
-	From     *string `json:"from,omitempty"`
-	To       *string `json:"to,omitempty"` // inclusive; null means "until now"
+	LastDays   *int    `json:"last_days,omitempty"`
+	LastMonths *int    `json:"last_months,omitempty"`
+	From       *string `json:"from,omitempty"`
+	To         *string `json:"to,omitempty"` // inclusive; null means "until now"
 }
 
 func (w window) check() error {
-	if (w.LastDays == nil) == (w.From == nil) {
-		return errors.New(`use either last_days or from/to`)
+	set := 0
+	for _, p := range []bool{w.LastDays != nil, w.LastMonths != nil, w.From != nil} {
+		if p {
+			set++
+		}
 	}
-	if w.LastDays != nil {
-		if *w.LastDays < 1 || *w.LastDays > maxDays {
-			return fmt.Errorf("last_days must be between 1 and %d", maxDays)
-		}
-		if w.To != nil {
-			return errors.New(`use either last_days or from/to`)
-		}
+	if set != 1 || (w.From == nil && w.To != nil) {
+		return errors.New(`use either last_days, last_months or from/to`)
+	}
+	if w.LastDays != nil && (*w.LastDays < 1 || *w.LastDays > maxDays) {
+		return fmt.Errorf("last_days must be between 1 and %d", maxDays)
+	}
+	if w.LastMonths != nil && (*w.LastMonths < 1 || *w.LastMonths > maxMonths) {
+		return fmt.Errorf("last_months must be between 1 and %d", maxMonths)
+	}
+	if w.From == nil {
 		return nil
 	}
 	from, err := parseDate(*w.From)
@@ -301,6 +390,9 @@ func (w window) bounds(now time.Time, loc *time.Location) (time.Time, *time.Time
 	if w.LastDays != nil {
 		return now.Add(-time.Duration(*w.LastDays) * 24 * time.Hour), nil
 	}
+	if w.LastMonths != nil {
+		return monthsBack(now.In(loc), *w.LastMonths), nil
+	}
 	start, _ := time.ParseInLocation(time.DateOnly, *w.From, loc)
 	if w.To == nil {
 		return start, nil
@@ -308,6 +400,14 @@ func (w window) bounds(now time.Time, loc *time.Location) (time.Time, *time.Time
 	end, _ := time.ParseInLocation(time.DateOnly, *w.To, loc)
 	end = end.AddDate(0, 0, 1)
 	return start, &end
+}
+
+// monthsBack is t moved n calendar months back; a day the target month lacks
+// becomes its last day (31 March → 28 February), unlike time.AddDate.
+func monthsBack(t time.Time, n int) time.Time {
+	y, m, d := t.Date()
+	lastDay := time.Date(y, m-time.Month(n)+1, 0, 0, 0, 0, 0, t.Location()).Day()
+	return time.Date(y, m-time.Month(n), min(d, lastDay), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
 }
 
 type categoryWindow struct {

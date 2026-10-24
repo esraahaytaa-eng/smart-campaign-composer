@@ -243,6 +243,11 @@ h1 {
   padding: 6px;
   z-index: 10;
 }
+/* Global, not scoped: the menu renders in a portal, outside the component. */
+.add-menu {
+  max-height: min(320px, var(--reka-dropdown-menu-content-available-height, 320px));
+  overflow: auto;
+}
 .menu-label {
   padding: 8px 10px 6px;
   font-size: 12px;
