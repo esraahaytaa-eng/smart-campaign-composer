@@ -120,20 +120,17 @@ func login(pool *pgxpool.Pool, th *throttle) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "email and password are required")
 			return
 		}
-		// Checked before the password, so a locked-out guesser learns nothing.
+		// Counted before the password is checked, so a locked-out guesser learns
+		// nothing. The address first: a blocked address adds no email keys.
 		emailKey, addrKey := "email:"+strings.ToLower(strings.TrimSpace(in.Email)), "addr:"+clientAddr(r)
-		for _, k := range []string{emailKey, addrKey} {
-			if ok, wait := th.allowed(k); !ok {
+		for _, k := range []string{addrKey, emailKey} {
+			if ok, wait := th.take(k); !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 				writeError(w, http.StatusTooManyRequests, "too many failed sign-ins; try again later")
 				return
 			}
 		}
-		fail := func() {
-			th.failed(emailKey)
-			th.failed(addrKey)
-			writeError(w, http.StatusUnauthorized, errInvalidLogin)
-		}
+		fail := func() { writeError(w, http.StatusUnauthorized, errInvalidLogin) }
 
 		var m marketer
 		var hash string

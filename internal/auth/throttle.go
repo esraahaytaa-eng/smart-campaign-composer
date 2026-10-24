@@ -7,9 +7,10 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// throttle limits failed sign-ins per key (an email or a client address,
-// D55): a burst of n failures, then one more per window/n. A success resets
-// the key. In memory, per api process.
+// throttle limits sign-in attempts per key (an email or a client address,
+// D55): a burst of n, then one more per window/n. An attempt is counted
+// before the password is checked, so parallel requests can't slip past;
+// a success resets the key. In memory, per api process.
 type throttle struct {
 	mu     sync.Mutex
 	n      int
@@ -20,31 +21,16 @@ type throttle struct {
 
 type entry struct {
 	lim  *rate.Limiter
-	last time.Time // last failure
+	last time.Time // last attempt
 }
 
 func newThrottle(n int, window time.Duration, now func() time.Time) *throttle {
 	return &throttle{n: n, window: window, now: now, keys: map[string]*entry{}}
 }
 
-// allowed reports whether key may try again, and if not, how long to wait.
-func (t *throttle) allowed(key string) (bool, time.Duration) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	e := t.keys[key]
-	if e == nil {
-		return true, 0
-	}
-	now := t.now()
-	tokens := e.lim.TokensAt(now)
-	if tokens >= 1 {
-		return true, 0
-	}
-	return false, time.Duration((1 - tokens) * float64(t.window/time.Duration(t.n)))
-}
-
-// failed records a failed sign-in for key.
-func (t *throttle) failed(key string) {
+// take counts an attempt for key and reports whether it may go ahead, and if
+// not, how long to wait.
+func (t *throttle) take(key string) (bool, time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := t.now()
@@ -60,8 +46,11 @@ func (t *throttle) failed(key string) {
 		e = &entry{lim: rate.NewLimiter(rate.Every(t.window/time.Duration(t.n)), t.n)}
 		t.keys[key] = e
 	}
-	e.lim.AllowN(now, 1)
-	e.last = now
+	if e.lim.AllowN(now, 1) {
+		e.last = now
+		return true, 0
+	}
+	return false, time.Duration((1 - e.lim.TokensAt(now)) * float64(t.window/time.Duration(t.n)))
 }
 
 // reset clears key after a successful sign-in.
