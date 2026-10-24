@@ -101,7 +101,8 @@ func renderSQL(tpl string) string {
 		if v == LastName {
 			col = "coalesce(u.last_name, '')"
 		}
+		col = fmt.Sprintf("btrim(regexp_replace(%s, '%s', ' ', 'g'), ' ')", col, controlClass)
 		s = fmt.Sprintf("replace(%s, '{{%s}}', %s)", s, v, col)
 	}
-	return fmt.Sprintf("btrim(regexp_replace(%s, ' {2,}', ' ', 'g'), ' ')", s)
+	return fmt.Sprintf(`btrim(regexp_replace(regexp_replace(%s, ' {2,}', ' ', 'g'), ' +([,.!?])', '\1', 'g'), ' ')`, s)
 }

@@ -36,20 +36,25 @@ type UserVars struct {
 	FirstName, LastName, City string
 }
 
+// value is one line of text (D72): control characters become spaces and the
+// ends are trimmed, so a stored line break can't split a subject.
 func (u UserVars) value(v Var) string {
+	raw := u.City
 	switch v {
 	case FirstName:
-		return u.FirstName
+		raw = u.FirstName
 	case LastName:
-		return u.LastName
-	default:
-		return u.City
+		raw = u.LastName
 	}
+	return strings.Trim(controlChars.ReplaceAllString(raw, " "), " ")
 }
 
 var (
 	varToken   = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
 	spaceRuns  = regexp.MustCompile(` {2,}`)
+	// Shared with renderSQL; NUL is left out as Postgres text can't hold it.
+	controlChars = regexp.MustCompile(controlClass)
+	spaceBefore  = regexp.MustCompile(` +([,.!?])`)
 	errSyntax  = errors.New("braces may only be used for {{first_name}}, {{last_name}} or {{city}}")
 	allowedVar = map[string]Var{"first_name": FirstName, "last_name": LastName, "city": City}
 )
@@ -74,9 +79,13 @@ func Parse(tpl string) ([]Var, error) {
 	return vars, nil
 }
 
+const controlClass = `[\x01-\x1f\x7f-\x9f]`
+
 // Render personalizes a valid template: variables are replaced in a fixed
-// order, runs of spaces left by empty values collapse to one, and leading and
-// trailing spaces are trimmed. Line breaks are kept (D13). Values are used as
+// order, runs of spaces left by empty values collapse to one, a space before
+// , . ! or ? is dropped ("Merhaba {{first_name}}," with no name reads
+// "Merhaba,", D72), and leading and trailing spaces are trimmed. Line breaks
+// are kept (D13). Values are used as
 // stored, so a value containing a later token (a first name "{{city}}") is
 // expanded too; renderSQL does exactly the same, keeping the estimate exact.
 func Render(tpl string, u UserVars) string {
@@ -84,7 +93,7 @@ func Render(tpl string, u UserVars) string {
 	for _, v := range renderOrder {
 		s = strings.ReplaceAll(s, "{{"+string(v)+"}}", u.value(v))
 	}
-	return strings.Trim(spaceRuns.ReplaceAllString(s, " "), " ")
+	return strings.Trim(spaceBefore.ReplaceAllString(spaceRuns.ReplaceAllString(s, " "), "$1"), " ")
 }
 
 // Message is one channel's template. SMS has no subject.

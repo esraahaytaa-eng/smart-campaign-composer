@@ -143,6 +143,7 @@ func TestEstimate_TidiesLikeRender(t *testing.T) {
 		"collapse": strings.Repeat("x", 158) + " {{last_name}} y", // 160 after collapsing, 161 without
 		"trim":     "{{last_name}} " + strings.Repeat("x", 160),   // 160 after trimming, 161 without
 		"over":     strings.Repeat("x", 159) + " {{city}}",        // genuinely over
+		"punct":    strings.Repeat("x", 159) + " {{last_name}}!",  // 160 without the space left before "!", 161 with it
 	} {
 		want := 0
 		if utf8.RuneCountInString(content.Render(tpl, u)) > content.SMSLimit {
@@ -153,6 +154,38 @@ func TestEstimate_TidiesLikeRender(t *testing.T) {
 		if err != nil || got.SMS != want {
 			t.Errorf("%s: SQL counted %d, Go render says %d (%v)", name, got.SMS, want, err)
 		}
+	}
+}
+
+// Control characters in a value become spaces, tidied like any space (D72).
+func TestEstimate_CleansValuesLikeRender(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := dbtest.MigratedDB(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO users (first_name, last_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
+		VALUES (E'A\n\nB\t', E'\r', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
+		t.Fatal(err)
+	}
+	where, args, _ := audience.Build([]audience.Rule{{Field: "city", Op: "in", Value: json.RawMessage(`["Ankara"]`)}}, "sms", time.Now(), time.UTC)
+	u := content.UserVars{FirstName: "A\n\nB\t", LastName: "\r", City: "Ankara"}
+
+	for name, tpl := range map[string]string{
+		"inside":   strings.Repeat("x", 156) + " {{first_name}}",   // "A B": 160, "A\n\nB\t": 162
+		"only":     strings.Repeat("x", 159) + " {{last_name}}!",   // 160 once "\r" is a space and tidied
+		"over":     strings.Repeat("x", 157) + " {{first_name}}",   // 161: genuinely over
+	} {
+		want := 0
+		if utf8.RuneCountInString(content.Render(tpl, u)) > content.SMSLimit {
+			want = 1
+		}
+		got, err := content.EstimateOverLimit(ctx, pool, content.Variants{"tr": {SMS: &content.Message{Body: tpl}}}, "tr",
+			map[string]content.Audience{"sms": {Where: where, Args: args}})
+		if err != nil || got.SMS != want {
+			t.Errorf("%s: SQL counted %d, Go render says %d (%v)", name, got.SMS, want, err)
+		}
+	}
+	if got := content.Render(strings.Repeat("x", 156)+" {{first_name}}", u); utf8.RuneCountInString(got) != 160 {
+		t.Errorf("Go render: want 160 characters, got %d (%q)", utf8.RuneCountInString(got), got)
 	}
 }
 

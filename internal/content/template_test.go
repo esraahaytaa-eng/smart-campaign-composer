@@ -60,8 +60,14 @@ func TestRender_EmptyValuesAreTidied(t *testing.T) {
 		u    UserVars
 		want string
 	}{
-		// Only spaces are tidied; "Ali ," reads awkwardly, as D12 accepts.
-		{"Dear {{first_name}} {{last_name}}, hi", UserVars{FirstName: "Ali"}, "Dear Ali , hi"},
+		// An empty value leaves no space before punctuation (D72).
+		{"Dear {{first_name}} {{last_name}}, hi", UserVars{FirstName: "Ali"}, "Dear Ali, hi"},
+		{"Merhaba {{first_name}}, hoş geldin!", UserVars{}, "Merhaba, hoş geldin!"},
+		{"Sizi özledik {{first_name}}! Fırsat mı?", UserVars{}, "Sizi özledik! Fırsat mı?"},
+		{"Hi {{first_name}}. Bye {{last_name}}?", UserVars{}, "Hi. Bye?"},
+		// Values are one line of text: control characters become spaces, then tidied (D72).
+		{"Hi {{first_name}}, ok", UserVars{FirstName: "Ali\r\nVeli\t"}, "Hi Ali Veli, ok"},
+		{"Hi {{first_name}}, ok", UserVars{FirstName: "   "}, "Hi, ok"},
 		{"{{last_name}} {{first_name}} welcome", UserVars{FirstName: "Ali"}, "Ali welcome"},
 		{"Hi  there   {{city}}  ", UserVars{}, "Hi there"},
 		// Line breaks are kept (D13): only spaces are collapsed and trimmed.
