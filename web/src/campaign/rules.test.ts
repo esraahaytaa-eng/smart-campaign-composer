@@ -194,6 +194,11 @@ describe('formProblems', () => {
     [form('order_count', 'gte', { amount: 1.5 }), 'Enter a whole number from 0 to 10,000.'],
     [form('total_spend', 'gte', { amount: 2000000 }), 'Enter an amount from 0 to 1,000,000 TL.'],
     [form('total_spend', 'gte', { amount: Number.NaN }), 'Enter an amount from 0 to 1,000,000 TL.'],
+    // A cleared v-model.number input holds '', which `'' >= 0` lets through.
+    [form('total_spend', 'gte', { amount: '' }), 'Enter an amount from 0 to 1,000,000 TL.'],
+    [form('spend_in_window', 'gte', { amount: '' }), 'Enter an amount from 0 to 1,000,000 TL.'],
+    [form('order_count', 'gte', { amount: '' }), 'Enter a whole number from 0 to 10,000.'],
+    [form('cart_added', 'within', { lastDays: '' }), 'Enter 1 to 365 days.'],
     [form('cart_added', 'within', { timeMode: 'months', lastMonths: 0 }), 'Enter 1 to 12 months.'],
     [form('cart_added', 'within', { timeMode: 'months', lastMonths: 13 }), 'Enter 1 to 12 months.'],
     [form('spend_in_window', 'gte', { amount: -1 }), 'Enter an amount from 0 to 1,000,000 TL.'],

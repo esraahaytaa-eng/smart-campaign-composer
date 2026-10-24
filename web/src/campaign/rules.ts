@@ -229,7 +229,7 @@ export function formProblems(form: RuleForm, catalog: Catalog): string[] {
   if ((type === 'count' || type === 'count_window') && !(Number.isInteger(form.amount) && form.amount >= 0 && form.amount <= max_count)) {
     problems.push(t('problem.count', { max: formatNumber(max_count) }))
   }
-  if ((type === 'amount' || type === 'amount_window') && !(form.amount >= 0 && form.amount <= max_amount)) {
+  if ((type === 'amount' || type === 'amount_window') && !(Number.isFinite(form.amount) && form.amount >= 0 && form.amount <= max_amount)) {
     problems.push(t('problem.amount', { max: formatNumber(max_amount) }))
   }
   return problems
