@@ -255,7 +255,41 @@ func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	h.update(w, ctx, id, *in.Version, `channels = $4`, in.Channels)
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var old []string
+	err = tx.QueryRow(ctx, `SELECT channels FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
+		id, *in.Version).Scan(&old)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	if err != nil {
+		serverError(w, "load channels", err)
+		return
+	}
+	// Kept text that comes back with its channel is reviewed again before it
+	// is sent; the text itself is unchanged (D67).
+	if _, err := tx.Exec(ctx, `UPDATE campaign_languages l SET approved_at = NULL, approved_by = NULL
+		WHERE campaign_id = $1 AND EXISTS (SELECT 1 FROM campaign_content cc WHERE cc.campaign_id = $1
+			AND cc.language = l.language AND cc.channel = ANY($2) AND NOT cc.channel = ANY($3))`, id, in.Channels, old); err != nil {
+		serverError(w, "mark kept text for review", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $2, version = version + 1, updated_at = now() WHERE id = $1`,
+		id, in.Channels); err != nil {
+		serverError(w, "update channels", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
+		return
+	}
+	h.respond(w, ctx, http.StatusOK, id)
 }
 
 // updateRequest replaces a draft's brief and re-interprets it (D40): the rules

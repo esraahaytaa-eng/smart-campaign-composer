@@ -287,10 +287,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D67 — Removing a channel keeps its text
 - **Status:** Accepted · 2026-10-24
-- **Decision:** A removed channel's text stays in every language. It is left out of validation, approval, counts, estimates and delivery while the channel isn't chosen, and choosing the channel again brings it back as it was. Replaces D38's deletion.
-- **Why:** A channel toggle shouldn't lose hand-written or paid-for text (D66).
-- **Rejected:** *Deleting it (D38):* re-adding the channel means writing it again.
-- **Trade-offs:** Hidden text is stored; the content screen marks it "kept, not sent".
+- **Decision:** A removed channel's text stays in every language. It is left out of validation, approval, counts, estimates and delivery while the channel isn't chosen. Choosing the channel again brings the text back unchanged, and each language that has it needs review again (D66): it is sent only after a marketer reapproves it, with no AI call. Replaces D38's deletion.
+- **Why:** A channel toggle shouldn't lose hand-written or paid-for text (D66), and text that was left out when a language was approved must not be sent unreviewed.
+- **Rejected:**
+  - *Deleting it (D38):* re-adding the channel means writing it again.
+  - *Keeping the approval on re-add:* kept text, possibly written for an older brief, could be sent without review.
+- **Trade-offs:** Hidden text is stored; the content screen marks it "kept, not sent". One more approval per language after re-adding a channel.
+- **History:** 2026-10-24 (final T20 review, user's decision): re-adding a channel now clears the affected languages' approval; previously the text came back still approved.
 
 ## Architecture & Technical Decisions
 

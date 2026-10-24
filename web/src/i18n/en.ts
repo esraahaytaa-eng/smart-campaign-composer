@@ -119,7 +119,7 @@ export const en = {
   'campaign.next': { one: 'Next: the AI writes the {channels} message.', other: 'Next: the AI writes the {channels} messages.' },
   'campaign.generate': 'Write the messages →',
   'notice.channelsSaved': 'Channels saved.',
-  'notice.channelTextKept': 'The {channels} text is kept, not sent. It comes back if you add the channel again.',
+  'notice.channelTextKept': 'The {channels} text is kept, not sent. It comes back for your review if you add the channel again.',
   'notice.rulesSaved': 'Audience rules saved.',
   'notice.reinterpreted': 'The AI read the brief again and replaced the audience rules.',
 

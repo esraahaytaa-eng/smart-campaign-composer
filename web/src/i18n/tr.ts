@@ -118,7 +118,7 @@ export const tr: Record<Key, Message> = {
   'campaign.next': { one: 'Sıradaki adım: yapay zekâ {channels} mesajını yazar.', other: 'Sıradaki adım: yapay zekâ {channels} mesajlarını yazar.' },
   'campaign.generate': 'Mesajları yaz →',
   'notice.channelsSaved': 'Kanallar kaydedildi.',
-  'notice.channelTextKept': '{channels} metni saklanıyor ama gönderilmiyor. Kanalı yeniden eklerseniz geri gelir.',
+  'notice.channelTextKept': '{channels} metni saklanıyor ama gönderilmiyor. Kanalı yeniden eklerseniz incelemeniz için geri gelir.',
   'notice.rulesSaved': 'Hedef kitle kuralları kaydedildi.',
   'notice.reinterpreted': 'Yapay zekâ açıklamayı yeniden okudu ve hedef kitle kurallarını değiştirdi.',
 

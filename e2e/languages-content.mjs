@@ -88,7 +88,7 @@ export default () =>
       await page.getByRole('button', { name: 'Both', exact: true }).click()
       await saved()
       c = await t.get(id)
-      check(c.content.tr.email?.subject && c.content.en.email?.subject && c.languages.tr.approved_at !== null, 'choosing email again brings its text back, still approved')
+      check(c.content.tr.email?.subject && c.content.en.email?.subject && c.languages.tr.approved_at === null && c.languages.en.approved_at === null, 'choosing email again brings its text back, to be reviewed again')
       check(writes.length === before, `no setting calls the AI (${writes.length - before} calls)`)
     }
 

@@ -60,6 +60,37 @@ func TestChannels_ReAddRestoresText(t *testing.T) {
 	}
 }
 
+// D67: kept text that comes back with its channel is reviewed again before
+// it is sent; the text is unchanged and no AI is called.
+func TestChannels_ReAddNeedsReview(t *testing.T) {
+	t.Parallel()
+	model := noContentCalls()
+	a := newApp(t, model)
+	d := a.readyDraft() // Turkish approved, version 2
+	a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
+	if got := a.get(d.ID); got.Languages["tr"].ApprovedAt == nil {
+		t.Fatal("removing a channel keeps the approval of what is still sent")
+	}
+
+	code, got := a.putChannels(d.ID, `{"version":3,"channels":["sms","email"]}`)
+
+	if code != http.StatusOK || got.Languages["tr"].ApprovedAt != nil || got.Content["tr"]["email"] == nil {
+		t.Fatalf("want the email text back and Turkish needing review, got %d %+v", code, got.Languages)
+	}
+	if code, _ := a.approve(d.ID, `{"version":4,"send":"now"}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("approval must wait for the language to be reviewed again, got %d", code)
+	}
+	if code := a.approveLanguage(d.ID, "tr", 4); code != http.StatusOK {
+		t.Fatalf("the kept text can be reapproved as it is, got %d", code)
+	}
+	if code, body := a.approve(d.ID, `{"version":4,"send":"now"}`); code != http.StatusOK {
+		t.Fatalf("want approval after the review, got %d %v", code, body)
+	}
+	if len(model.calls) != 0 {
+		t.Fatalf("no AI call, got %d", len(model.calls))
+	}
+}
+
 func TestChannels_AddedOneStartsWithoutContent(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())
