@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/time/rate"
 
 	"smart-campaign-composer/internal/obstest"
@@ -327,31 +328,29 @@ func TestRun_RateLimitNoWindowOver100(t *testing.T) {
 	if sent := f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status = 'sent'`, id); sent != 1003 {
 		t.Fatalf("want all 1,003 messages sent, got %d", sent)
 	}
-	// Checked on both sides: the worker's recorded departures (the guarantee)
-	// and what the provider received.
+	// Checked on both sides: what the cap counted and what the provider received.
 	for _, ch := range []string{"sms", "email"} {
 		rows, _ := f.pool.Query(context.Background(), `SELECT a.started_at FROM delivery_attempts a
 			JOIN messages m ON m.id = a.message_id WHERE m.channel = $1`, ch)
-		var departures []time.Time
-		for rows.Next() {
-			var at time.Time
-			rows.Scan(&at)
-			departures = append(departures, at)
+		departures, err := pgx.CollectRows(rows, pgx.RowTo[time.Time])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var arrivals []time.Time
+		for _, r := range p.requests {
+			if r.channel == ch {
+				arrivals = append(arrivals, r.at)
+			}
+		}
+		if len(departures) != len(arrivals) || len(arrivals) < 500 {
+			t.Fatalf("%s: %d recorded departures for %d requests", ch, len(departures), len(arrivals))
 		}
 		if got := mostInOneSecond(departures); got > 100 {
 			t.Fatalf("%s: %d recorded departures in one second, limit is 100", ch, got)
 		}
-	}
-	for _, ch := range []string{"sms", "email"} {
-		var times []time.Time
-		for _, r := range p.requests {
-			if r.channel == ch {
-				times = append(times, r.at)
-			}
+		if got := mostInOneSecond(arrivals); got > 100 {
+			t.Fatalf("%s: the provider received %d requests in one second, limit is 100", ch, got)
 		}
-		// Logged, not asserted: arrival times also carry network and scheduling
-		// jitter outside the worker; the departure check above is the guarantee.
-		t.Logf("%s: %d requests (incl. retries), at most %d arrived in any 1 s window", ch, len(times), mostInOneSecond(times))
 	}
 }
 
