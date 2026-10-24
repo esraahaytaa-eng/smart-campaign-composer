@@ -133,8 +133,4 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
   font: 600 13px var(--font);
   cursor: pointer;
 }
-.add-menu {
-  max-height: 320px;
-  overflow: auto;
-}
 </style>
