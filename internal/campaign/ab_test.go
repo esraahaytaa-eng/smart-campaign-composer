@@ -1,9 +1,12 @@
 package campaign_test
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
+	"smart-campaign-composer/internal/campaign"
 	"smart-campaign-composer/internal/llm"
 )
 
@@ -200,5 +203,86 @@ func TestAB_ContentFixedAfterApproval(t *testing.T) {
 	}
 	if code := a.putAB(d.ID, 4, false); code != http.StatusConflict {
 		t.Fatalf("turning A/B off after approval: want 409, got %d", code)
+	}
+}
+
+// recordingLLM is the mock AI, remembering what each content call asked for.
+type recordingLLM struct {
+	*llm.Mock
+	calls []llm.ContentInput
+}
+
+func (r *recordingLLM) StreamContent(ctx context.Context, in llm.ContentInput, onText func(string)) (json.RawMessage, error) {
+	r.calls = append(r.calls, in)
+	return r.Mock.StreamContent(ctx, in, onText)
+}
+
+// abOn is a draft with Turkish A approved and A/B on, at version 3.
+func (a *app) abOn() draft {
+	a.t.Helper()
+	d := a.readyDraft()
+	if code := a.putAB(d.ID, 2, true); code != http.StatusOK {
+		a.t.Fatalf("turn on A/B: %d", code)
+	}
+	return d
+}
+
+func TestGenerate_VersionBWritesOnlyB(t *testing.T) {
+	t.Parallel()
+	model := &recordingLLM{Mock: llm.NewMock()}
+	a := newApp(t, model)
+	d := a.abOn()
+	before := a.getAB(d.ID)
+
+	if evs := a.generateBody(d.ID, `{"version":3,"languages":["tr"],"variant":"b"}`); names(evs) != "delta,done" {
+		t.Fatalf("want version B written, got %s", names(evs))
+	}
+	got := a.getAB(d.ID)
+	if len(model.calls) != 1 || model.calls[0].VersionA["tr"].SMS == nil {
+		t.Fatalf("want one AI call given Turkish version A, got %+v", model.calls)
+	}
+	if b := got.ContentB["tr"]["sms"]["body"]; b == "" || b == got.Content["tr"]["sms"]["body"] {
+		t.Fatalf("want a different version B, got %q", b)
+	}
+	if got.Content["tr"]["sms"]["body"] != before.Content["tr"]["sms"]["body"] || *got.DefaultLanguage != "tr" {
+		t.Fatal("version A and the default are unchanged")
+	}
+	if got.Languages["tr"].ApprovedAt != nil {
+		t.Fatal("the language needs review once version B is written")
+	}
+}
+
+func TestGenerate_VersionBRefusedWithoutABOrOnExistingB(t *testing.T) {
+	t.Parallel()
+	model := noContentCalls()
+	a := newApp(t, model)
+	off := a.readyDraft()
+	on := a.abReady() // version B exists
+	for name, c := range map[string]struct {
+		id   int64
+		body string
+		want int
+	}{
+		"A/B off":         {off.ID, `{"version":2,"languages":["tr"],"variant":"b"}`, http.StatusUnprocessableEntity},
+		"B exists":        {on.ID, `{"version":4,"languages":["tr"],"variant":"b"}`, http.StatusConflict},
+		"no version A":    {on.ID, `{"version":4,"languages":["en"],"variant":"b"}`, http.StatusUnprocessableEntity},
+		"unknown version": {on.ID, `{"version":4,"languages":["tr"],"variant":"c"}`, http.StatusUnprocessableEntity},
+	} {
+		if rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(c.id)+"/content", c.body); rec.Code != c.want {
+			t.Errorf("%s: want %d, got %d %s", name, c.want, rec.Code, rec.Body)
+		}
+	}
+	if len(model.calls) != 0 {
+		t.Fatalf("a refusal calls no AI, got %d calls", len(model.calls))
+	}
+}
+
+func TestGenerate_VersionBCountsTowardLimit(t *testing.T) {
+	t.Parallel()
+	a := newAppWith(t, llm.NewMock(), func(h *campaign.Handler) { h.AICalls = campaign.NewAICallLimit(2) }) // the brief, then B
+	d := a.abOn()
+	a.generateBody(d.ID, `{"version":3,"languages":["tr"],"variant":"b","replace":true}`)
+	if rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":4,"languages":["tr"],"variant":"b","replace":true}`); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("want the second call limited, got %d", rec.Code)
 	}
 }

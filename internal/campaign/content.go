@@ -39,6 +39,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		Languages       []content.Lang `json:"languages"`
 		DefaultLanguage content.Lang   `json:"default_language"` // optional: the default to set
 		Replace         bool           `json:"replace"`          // rewrite languages that have text
+		Variant         string         `json:"variant"`          // "b": write an A/B test's version B (D68)
 	}
 	if !decodeBody(w, r, &in) || !h.editableDraft(w, r.Context(), id, in.Version) {
 		return
@@ -53,9 +54,10 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	var isResend bool
 	var def *string
 	var written []content.Lang
+	var abTest bool
 	if err := h.Pool.QueryRow(r.Context(), `SELECT request_text, channels, version, parent_campaign_id IS NOT NULL, default_language,
-			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id)
-		FROM campaigns c WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend, &def, &written); err != nil {
+			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id), ab_test
+		FROM campaigns c WHERE id = $1`, id).Scan(&brief, &channels, &version, &isResend, &def, &written, &abTest); err != nil {
 		serverError(w, "load campaign", err)
 		return
 	}
@@ -66,6 +68,39 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	// Checked before any AI call, so a refusal costs nothing (D63).
 	if slices.Contains(written, content.LegacyLang) {
 		writeError(w, http.StatusUnprocessableEntity, "set the language of the existing text before writing another language")
+		return
+	}
+	var versionA content.Variants
+	switch in.Variant {
+	case "", "a":
+	case "b":
+		if !abTest {
+			writeError(w, http.StatusUnprocessableEntity, "turn on the A/B test to write version B")
+			return
+		}
+		a, err := h.loadContent(r.Context(), id, "a")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		b, err := h.loadContent(r.Context(), id, "b")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		versionA = content.Variants{}
+		for _, l := range in.Languages {
+			c, ok := a[l]
+			if !ok {
+				writeError(w, http.StatusUnprocessableEntity, "write version A in "+content.LanguageName(l)+" first")
+				return
+			}
+			versionA[l] = content.ForChannels(c, channels)
+		}
+		written = slices.Collect(maps.Keys(b)) // what replace protects: existing version B
+		in.DefaultLanguage = ""                // writing B never changes the default
+	default:
+		writeError(w, http.StatusUnprocessableEntity, "unknown version: "+in.Variant)
 		return
 	}
 	if !in.Replace {
@@ -100,7 +135,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	}
 	send := startSSE(w)
 
-	input := llm.ContentInput{Text: brief, Channels: channels, Languages: in.Languages, Resend: isResend}
+	input := llm.ContentInput{Text: brief, Channels: channels, Languages: in.Languages, Resend: isResend, VersionA: versionA}
 	var fields []string
 	for _, l := range in.Languages {
 		for _, f := range contentFields {
@@ -140,7 +175,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		llmCalls.WithLabelValues("content", "ok").Inc()
-		newVersion, err := h.saveContent(r.Context(), id, *in.Version, contentSave{a: v, def: *def, generated: true})
+		newVersion, err := h.saveContent(r.Context(), id, *in.Version, toSave(versionA != nil, v, *def))
 		switch {
 		case r.Context().Err() != nil:
 			return
@@ -276,6 +311,15 @@ func (h *Handler) updateContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.respond(w, r.Context(), http.StatusOK, id)
+}
+
+// toSave is the AI's text as saveContent writes it: version B for an A/B
+// test (versionB), else version A.
+func toSave(versionB bool, v content.Variants, def content.Lang) contentSave {
+	if versionB {
+		return contentSave{b: v, def: def, generated: true}
+	}
+	return contentSave{a: v, def: def, generated: true}
 }
 
 // contentSave is what saveContent writes. A nil version is left unchanged.
