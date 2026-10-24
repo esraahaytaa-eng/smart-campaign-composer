@@ -37,8 +37,9 @@ func (h *Handler) approveLanguage(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 	// The row lock makes a concurrent content save wait, so the text approved is the text read.
 	var channels []string
-	err = tx.QueryRow(ctx, `SELECT channels FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
-		id, *in.Version).Scan(&channels)
+	var abTest bool
+	err = tx.QueryRow(ctx, `SELECT channels, ab_test FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
+		id, *in.Version).Scan(&channels, &abTest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusConflict, errStale.Error())
 		return
@@ -47,7 +48,7 @@ func (h *Handler) approveLanguage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "lock draft", err)
 		return
 	}
-	v, err := h.loadContent(ctx, id)
+	v, err := h.loadContent(ctx, id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
@@ -62,7 +63,20 @@ func (h *Handler) approveLanguage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "this campaign has no content in that language")
 		return
 	}
-	if errs := content.ValidateVariants(content.Variants{lang: v[lang]}, channels, lang); len(errs) > 0 {
+	errs := content.ValidateVariants(content.Variants{lang: v[lang]}, channels, lang)
+	if abTest {
+		b, err := h.loadContent(ctx, id, "b")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		one := content.Variants{}
+		if c, ok := b[lang]; ok {
+			one[lang] = c
+		}
+		errs = append(errs, content.ValidateVersionB(content.Variants{lang: v[lang]}, one, channels, true)...)
+	}
+	if len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}

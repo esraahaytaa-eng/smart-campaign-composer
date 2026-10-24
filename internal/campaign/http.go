@@ -52,6 +52,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/campaigns/{id}", h.deleteDraft)
 	mux.HandleFunc("PUT /api/campaigns/{id}/rules", h.updateRules)
 	mux.HandleFunc("PUT /api/campaigns/{id}/channels", h.updateChannels)
+	mux.HandleFunc("PUT /api/campaigns/{id}/ab", h.updateABTest)
 	mux.HandleFunc("PUT /api/campaigns/{id}/request", h.updateRequest)
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
@@ -97,6 +98,10 @@ type campaignJSON struct {
 	// that aren't chosen (kept, not sent: D67), and each language's review state.
 	Content   content.Variants               `json:"content"`
 	Languages map[content.Lang]languageState `json:"languages,omitempty"`
+	// An A/B test's version B per language (D68); content is version A. Kept
+	// while the test is off, like a removed channel's text.
+	ABTest   bool             `json:"ab_test"`
+	ContentB content.Variants `json:"content_b,omitempty"`
 	// Drafts only: languages suggested by the audience (never a restriction)
 	// and who would get which language's text now.
 	Recommendation *recommendation                           `json:"recommendation,omitempty"`
@@ -105,7 +110,7 @@ type campaignJSON struct {
 
 const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
 	created_at, updated_at, parent_campaign_id, approval_estimate, approved_by, approved_at, cancelled_by, cancelled_at,
-	audience_built_at, completed_at, default_language`
+	audience_built_at, completed_at, default_language, ab_test`
 
 func scanCampaign(row pgx.Row) (campaignJSON, error) {
 	var c campaignJSON
@@ -116,7 +121,7 @@ func scanCampaign(row pgx.Row) (campaignJSON, error) {
 func scanInto(row pgx.Row, c *campaignJSON, extra ...any) error {
 	return row.Scan(append([]any{&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
 		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &c.ParentCampaignID, &c.ApprovalEstimate,
-		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt, &c.DefaultLanguage}, extra...)...)
+		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt, &c.DefaultLanguage, &c.ABTest}, extra...)...)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -283,6 +288,66 @@ func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $2, version = version + 1, updated_at = now() WHERE id = $1`,
 		id, in.Channels); err != nil {
 		serverError(w, "update channels", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
+		return
+	}
+	h.respond(w, ctx, http.StatusOK, id)
+}
+
+// updateABTest turns a draft's A/B test on or off (D68). Version B's text is
+// kept while it is off; turning it on again, each language with that text
+// needs review, since it was left out when the language was approved.
+func (h *Handler) updateABTest(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version *int  `json:"version"`
+		Enabled *bool `json:"enabled"`
+	}
+	ctx := r.Context()
+	if !decodeBody(w, r, &in) || !h.editableDraft(w, ctx, id, in.Version) ||
+		h.isResend(w, ctx, id, "a resend sends one version to the skipped recipients") {
+		return
+	}
+	if in.Enabled == nil {
+		writeError(w, http.StatusUnprocessableEntity, "enabled is required")
+		return
+	}
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var was, legacy bool
+	err = tx.QueryRow(ctx, `SELECT ab_test, EXISTS (SELECT 1 FROM campaign_languages WHERE campaign_id = $1 AND language = $3)
+		FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`, id, *in.Version, content.LegacyLang).Scan(&was, &legacy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	if err != nil {
+		serverError(w, "load campaign", err)
+		return
+	}
+	if *in.Enabled && legacy {
+		writeError(w, http.StatusUnprocessableEntity, "set the language of the existing text before comparing two versions")
+		return
+	}
+	if *in.Enabled && !was {
+		if _, err := tx.Exec(ctx, `UPDATE campaign_languages l SET approved_at = NULL, approved_by = NULL WHERE campaign_id = $1
+			AND EXISTS (SELECT 1 FROM campaign_content cc WHERE cc.campaign_id = $1 AND cc.language = l.language AND cc.variant = 'b')`, id); err != nil {
+			serverError(w, "mark version B for review", err)
+			return
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET ab_test = $2, version = version + 1, updated_at = now() WHERE id = $1`, id, *in.Enabled); err != nil {
+		serverError(w, "update A/B test", err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -517,7 +582,11 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 		serverError(w, "load campaign", err)
 		return
 	}
-	if c.Content, err = h.loadContent(ctx, id); err != nil {
+	if c.Content, err = h.loadContent(ctx, id, "a"); err != nil {
+		serverError(w, "load content", err)
+		return
+	}
+	if c.ContentB, err = h.loadContent(ctx, id, "b"); err != nil {
 		serverError(w, "load content", err)
 		return
 	}

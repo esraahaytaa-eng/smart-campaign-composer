@@ -143,7 +143,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cont, err := h.loadContent(ctx, id)
+	cont, err := h.loadContent(ctx, id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
@@ -152,7 +152,16 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "write the messages before approving")
 		return
 	}
-	if errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage); len(errs) > 0 {
+	errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage)
+	if c.ABTest {
+		b, err := h.loadContent(ctx, id, "b")
+		if err != nil {
+			serverError(w, "load content", err)
+			return
+		}
+		errs = append(errs, content.ValidateVersionB(cont, b, c.Channels, true)...)
+	}
+	if len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}
@@ -318,7 +327,7 @@ func (h *Handler) estimate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "the audience is fixed once sending has started")
 		return
 	}
-	cont, err := h.loadContent(r.Context(), id)
+	cont, err := h.loadContent(r.Context(), id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return

@@ -124,7 +124,7 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q, lang string, page int) (recipientsResponse, error) {
 	out := recipientsResponse{AsOf: h.Now(), Groups: map[string]map[string]int{}, Reasons: map[string]int{},
 		Page: page, PageSize: recipientsPageSize, Recipients: []recipientJSON{}}
-	v, err := h.loadContent(ctx, id) // fixed after approval (D11)
+	v, err := h.loadContent(ctx, id, "a") // fixed after approval (D11)
 	if err != nil {
 		return out, err
 	}
