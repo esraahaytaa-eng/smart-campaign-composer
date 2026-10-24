@@ -152,12 +152,14 @@ func (e *InvalidAnswerError) Error() string {
 
 // decodeRuleValues turns each rule's value text into the JSON value itself.
 // Text that is not exactly one JSON value is an InvalidAnswerError; nothing is
-// guessed or dropped. An answer that is not the schema's object is returned as
-// is, for the caller's strict decoding to report.
+// guessed or dropped. An unsupported answer, whose rules the caller ignores,
+// and an answer that is not the schema's object are returned as they are, for
+// the caller's strict decoding to handle.
 func decodeRuleValues(raw json.RawMessage) (json.RawMessage, error) {
 	var answer map[string]json.RawMessage
 	var rules []map[string]json.RawMessage
-	if json.Unmarshal(raw, &answer) != nil || json.Unmarshal(answer["rules"], &rules) != nil || len(rules) == 0 {
+	if json.Unmarshal(raw, &answer) != nil || string(answer["unsupported"]) == "true" ||
+		json.Unmarshal(answer["rules"], &rules) != nil || len(rules) == 0 {
 		return raw, nil
 	}
 	var problems []string

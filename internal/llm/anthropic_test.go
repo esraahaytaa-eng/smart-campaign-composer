@@ -216,6 +216,12 @@ func TestDecodeRuleValues(t *testing.T) {
 	if got, err := decodeRuleValues(json.RawMessage(unsupported)); err != nil || string(got) != unsupported {
 		t.Fatalf("an answer without rules must pass unchanged, got %s (%v)", got, err)
 	}
+	// An unsupported answer is passed on as it is, rules and all: the caller
+	// ignores its rules and shows the reason.
+	withRules := `{"unsupported":true,"reason":"Age is not in the catalog.","rules":[{"field":"city","op":"in","value":"İstanbul"}],"suggested_send_at":null,"schedule_note":null}`
+	if got, err := decodeRuleValues(json.RawMessage(withRules)); err != nil || string(got) != withRules {
+		t.Fatalf("an unsupported answer must pass unchanged, got %s (%v)", got, err)
+	}
 	// Not the schema at all: left to the caller's strict decoding, which reports it.
 	if got, err := decodeRuleValues(json.RawMessage(`not json`)); err != nil || string(got) != `not json` {
 		t.Fatalf("got %s (%v)", got, err)

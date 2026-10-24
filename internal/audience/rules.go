@@ -271,8 +271,11 @@ func parse(r Rule, cat *Catalog) (condition, error) {
 	}
 }
 
-// decode reads exactly one JSON value and rejects unknown keys.
+// decode reads exactly one JSON value and rejects unknown and repeated keys.
 func decode(r Rule, v any) error {
+	if err := repeatedKey(json.NewDecoder(bytes.NewReader(r.Value))); errors.Is(err, errRepeatedKey) {
+		return fmt.Errorf("invalid value for %s %s: %v", r.Field, r.Op, err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(r.Value))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(v)
@@ -283,6 +286,46 @@ func decode(r Rule, v any) error {
 		return fmt.Errorf("invalid value for %s %s: %v", r.Field, r.Op, err)
 	}
 	return nil
+}
+
+var errRepeatedKey = errors.New("repeated key")
+
+// repeatedKey walks one JSON value and reports a key repeated in an object,
+// compared without case like Go's decoding: {"last_days": 30, "last_days": 90}
+// would otherwise silently mean 90. Syntax errors are left to the decoder.
+func repeatedKey(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch tok {
+	case json.Delim('{'):
+		seen := map[string]bool{}
+		for dec.More() {
+			key, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			k := strings.ToLower(key.(string))
+			if seen[k] {
+				return fmt.Errorf("%w %q", errRepeatedKey, key)
+			}
+			seen[k] = true
+			if err := repeatedKey(dec); err != nil {
+				return err
+			}
+		}
+	case json.Delim('['):
+		for dec.More() {
+			if err := repeatedKey(dec); err != nil {
+				return err
+			}
+		}
+	default:
+		return nil
+	}
+	_, err = dec.Token() // the closing delimiter
+	return err
 }
 
 // window is the last N days or calendar months, counted back from when the

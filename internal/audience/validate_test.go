@@ -44,7 +44,7 @@ func TestValidate_AcceptsEveryCatalogRule(t *testing.T) {
 		rule("spend_in_window", "lte", `{"amount": 500.5, "from": "2026-01-01", "to": "2026-06-30"}`),
 		rule("orders_in_window", "gte", `{"count": 4, "last_days": 365}`),
 		rule("orders_in_window", "lt", `{"count": 2, "last_months": 1}`),
-		// The AI's schema sends every window form, the unused ones null.
+		// Explicit null window keys mean "not set".
 		rule("no_order", "within", `{"last_days": 45, "last_months": null, "from": null, "to": null}`),
 	}
 
@@ -98,6 +98,8 @@ func TestValidate_Rejects(t *testing.T) {
 		{"orders window count too big", rule("orders_in_window", "gte", `{"count": 10001, "last_days": 30}`), "between 0 and 10000"},
 		{"spend window null amount", rule("spend_in_window", "gte", `{"amount": null, "last_days": 30}`), "amount"},
 		{"months and from", rule("cart_added", "within", `{"last_months": 1, "from": "2026-10-01"}`), "either"},
+		{"repeated key", rule("cart_added", "within", `{"last_days": 30, "last_days": 90}`), "repeated key"},
+		{"repeated nested key", rule("ordered_category", "in", `{"categories": ["books"], "last_days": 30, "categories": ["home"]}`), "repeated key"},
 		{"orders window unknown key", rule("orders_in_window", "gte", `{"count": 1, "amount": 5, "last_days": 30}`), "value"},
 	}
 	for _, tc := range cases {
