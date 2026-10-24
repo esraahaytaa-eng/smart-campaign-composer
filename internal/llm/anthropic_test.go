@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -418,6 +419,36 @@ func TestAnthropicContent_StreamsTextAndRequestShape(t *testing.T) {
 	}
 	if got.header.Get("anthropic-beta") != "" || got.url != "/v1/messages" {
 		t.Errorf("beta use: header %q, url %s", got.header.Get("anthropic-beta"), got.url)
+	}
+}
+
+// Each real call logs its timing and token use, never the prompt or the
+// answer, so a slow generation can be split into waiting and writing (D72).
+func TestAnthropicContent_LogsTimingAndTokens(t *testing.T) {
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	_, url := fakeStream(t, []string{`{"tr":{"sms":{"body":"Merhaba {{first_name}}"}}}`}, "end_turn")
+
+	if _, _, err := streamVia(t, url, ContentInput{Text: "gizli brief", Channels: []string{"sms"}, Languages: []string{"tr"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var line map[string]any
+	if err := json.Unmarshal([]byte(logs.String()), &line); err != nil {
+		t.Fatalf("want one JSON log line, got %q", logs.String())
+	}
+	for _, k := range []string{"seconds", "first_text_seconds", "input_tokens", "output_tokens", "text_chars"} {
+		if _, ok := line[k].(float64); !ok {
+			t.Errorf("log is missing number %s: %v", k, line)
+		}
+	}
+	if line["msg"] != "claude call" || line["operation"] != "content" || line["output_tokens"] != 5.0 || line["stop_reason"] != "end_turn" {
+		t.Errorf("log: %v", line)
+	}
+	if strings.Contains(logs.String(), "gizli") || strings.Contains(logs.String(), "Merhaba") {
+		t.Errorf("the log must not contain the brief or the answer: %s", logs.String())
 	}
 }
 

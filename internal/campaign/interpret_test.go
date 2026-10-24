@@ -264,6 +264,18 @@ func TestInterpret_InvalidRuleValueIsRetried(t *testing.T) {
 	}
 }
 
+func TestInterpret_RecordsCallDurations(t *testing.T) {
+	calls := func() float64 { return obstest.Value(t, "scc_llm_call_duration_seconds", "operation", "interpret") }
+	c := calls()
+
+	interpret(t, &scripted{outputs: []string{output(badRules, "null", "null"), output(goodRules, "null", "null")}}, "brief")
+	interpret(t, &scripted{err: errors.New("503 overloaded")}, "brief")
+
+	if calls()-c != 3 {
+		t.Fatalf("want 3 call durations, got +%v", calls()-c)
+	}
+}
+
 func TestInterpret_RecordsCallMetrics(t *testing.T) {
 	value := func(result string) float64 {
 		return obstest.Value(t, "scc_llm_calls_total", "operation", "interpret", "result", result)

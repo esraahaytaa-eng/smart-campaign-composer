@@ -49,6 +49,18 @@ var llmCalls = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "scc_llm_calls_total", Help: "AI calls by operation (interpret, content) and result.",
 }, []string{"operation", "result"})
 
+// AI call timing (D72): the whole call, and for streamed content the wait
+// before the first text, which is what the marketer feels most.
+var (
+	aiBuckets   = []float64{0.5, 1, 2, 4, 8, 15, 30, 60}
+	llmDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "scc_llm_call_duration_seconds", Help: "AI call duration by operation, every result included.", Buckets: aiBuckets,
+	}, []string{"operation"})
+	llmFirstText = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "scc_llm_first_text_seconds", Help: "Wait from a streamed AI call's start to its first text.", Buckets: aiBuckets,
+	}, []string{"operation"})
+)
+
 // resultOf labels a failed AI call: cancelled if the client left, else error.
 func resultOf(ctx context.Context) string {
 	if ctx.Err() != nil {
@@ -73,7 +85,9 @@ func Interpret(ctx context.Context, model llm.LLM, in llm.InterpretInput, timeou
 	in.Errors = nil
 	for range 2 {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
+		start := time.Now()
 		raw, err := model.InterpretRequest(callCtx, in)
+		llmDuration.WithLabelValues("interpret").Observe(time.Since(start).Seconds())
 		cancel()
 		var got Interpretation
 		var problems []string

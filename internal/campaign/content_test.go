@@ -275,6 +275,23 @@ func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
 	}
 }
 
+// Each AI call's duration and its wait for the first text are recorded, so
+// slow generations can be split into waiting and writing (D72).
+func TestGenerate_RecordsCallDurations(t *testing.T) {
+	calls := func() float64 { return obstest.Value(t, "scc_llm_call_duration_seconds", "operation", "content") }
+	first := func() float64 { return obstest.Value(t, "scc_llm_first_text_seconds", "operation", "content") }
+	c, f := calls(), first()
+
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}})
+	a.generate(a.newDraft().ID, 1)
+	b := newApp(t, &contentLLM{Mock: llm.NewMock(), err: errors.New("503 overloaded")})
+	b.generate(b.newDraft().ID, 1)
+
+	if calls()-c != 3 || first()-f != 2 {
+		t.Fatalf("want 3 call durations (failed calls too) and 2 first-text waits, got +%v, +%v", calls()-c, first()-f)
+	}
+}
+
 func TestGenerate_RecordsCallMetrics(t *testing.T) {
 	value := func(result string) float64 {
 		return obstest.Value(t, "scc_llm_calls_total", "operation", "content", "result", result)

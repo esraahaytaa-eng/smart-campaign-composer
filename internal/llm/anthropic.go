@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -27,9 +28,25 @@ func NewAnthropic(apiKey, model string, opts ...option.RequestOption) *Anthropic
 	return &Anthropic{client: anthropic.NewClient(opts...), model: model}
 }
 
+// logCall records one call's timing and token use (D72), never its prompt or
+// answer. Output tokens include thinking, so comparing them with text_chars
+// shows how much of the wait was spent thinking.
+func logCall(op string, start time.Time, firstText time.Duration, msg anthropic.Message, chars int, err error) {
+	attrs := []any{"operation", op, "seconds", time.Since(start).Seconds(),
+		"input_tokens", msg.Usage.InputTokens, "output_tokens", msg.Usage.OutputTokens, "stop_reason", string(msg.StopReason)}
+	if op == "content" {
+		attrs = append(attrs, "first_text_seconds", firstText.Seconds(), "text_chars", chars)
+	}
+	if err != nil {
+		attrs = append(attrs, "err", err.Error())
+	}
+	slog.Info("claude call", attrs...)
+}
+
 const refusalReason = "The AI declined this request. Rephrase it or build the rules by hand."
 
 func (a *Anthropic) InterpretRequest(ctx context.Context, in InterpretInput) (json.RawMessage, error) {
+	start := time.Now()
 	msg, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     a.model,
 		MaxTokens: 16000,
@@ -43,8 +60,10 @@ func (a *Anthropic) InterpretRequest(ctx context.Context, in InterpretInput) (js
 		},
 	})
 	if err != nil {
+		logCall("interpret", start, 0, anthropic.Message{}, 0, err)
 		return nil, fmt.Errorf("claude: %w", err)
 	}
+	logCall("interpret", start, 0, *msg, 0, nil)
 	switch msg.StopReason {
 	case anthropic.StopReasonRefusal: // no fallback model (D15): the marketer sees "unsupported"
 		return unsupported(refusalReason), nil

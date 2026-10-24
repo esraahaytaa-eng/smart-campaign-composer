@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 
@@ -18,6 +19,8 @@ var ErrRefused = errors.New("claude declined the request")
 
 // StreamContent streams Claude's JSON answer piece by piece (D21, D34).
 func (a *Anthropic) StreamContent(ctx context.Context, in ContentInput, onText func(string)) (json.RawMessage, error) {
+	start := time.Now()
+	var firstText time.Duration
 	stream := a.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 		Model:     a.model,
 		MaxTokens: 16000,
@@ -41,12 +44,17 @@ func (a *Anthropic) StreamContent(ctx context.Context, in ContentInput, onText f
 		}
 		if delta, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
 			if t, ok := delta.Delta.AsAny().(anthropic.TextDelta); ok {
+				if text.Len() == 0 {
+					firstText = time.Since(start)
+				}
 				text.WriteString(t.Text)
 				onText(t.Text)
 			}
 		}
 	}
-	if err := stream.Err(); err != nil {
+	err := stream.Err()
+	logCall("content", start, firstText, msg, text.Len(), err)
+	if err != nil {
 		return nil, fmt.Errorf("claude: %w", err)
 	}
 	switch msg.StopReason {

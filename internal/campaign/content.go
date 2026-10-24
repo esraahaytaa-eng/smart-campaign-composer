@@ -145,7 +145,15 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(r.Context(), h.Timeout)
 		streamer := llm.NewFieldStreamer(fields, func(d llm.Delta) { send("delta", d) })
-		raw, err := h.model().StreamContent(ctx, input, streamer.Write)
+		start, gotText := time.Now(), false
+		raw, err := h.model().StreamContent(ctx, input, func(text string) {
+			if !gotText {
+				gotText = true
+				llmFirstText.WithLabelValues("content").Observe(time.Since(start).Seconds())
+			}
+			streamer.Write(text)
+		})
+		llmDuration.WithLabelValues("content").Observe(time.Since(start).Seconds())
 		cancel()
 		if r.Context().Err() != nil {
 			llmCalls.WithLabelValues("content", "cancelled").Inc()
