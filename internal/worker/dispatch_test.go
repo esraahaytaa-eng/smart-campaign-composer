@@ -54,6 +54,13 @@ func (p *fakeProvider) serve(t *testing.T) string {
 	return srv.URL
 }
 
+// count is how many requests arrived so far; safe while the server runs.
+func (p *fakeProvider) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.requests)
+}
+
 func status(code int, header ...string) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		for i := 0; i+1 < len(header); i += 2 {

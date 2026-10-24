@@ -60,8 +60,8 @@ func TestRun_SecondWorkerWaitsThenTakesOver(t *testing.T) {
 	go func() { bDone <- b.Run(bctx) }()
 
 	waitFor(t, 10*time.Second, "the first campaign is sent", f.allSent(first))
-	if len(pb.requests) != 0 {
-		t.Fatalf("the second worker sent %d requests while the first was running", len(pb.requests))
+	if n := pb.count(); n != 0 {
+		t.Fatalf("the second worker sent %d requests while the first was running", n)
 	}
 
 	stopA()
@@ -70,7 +70,7 @@ func TestRun_SecondWorkerWaitsThenTakesOver(t *testing.T) {
 	}
 	f.exec(`UPDATE campaigns SET send_at = now() WHERE id = $1`, second)
 	waitFor(t, 10*time.Second, "the second worker takes over", f.allSent(second))
-	if len(pb.requests) == 0 {
+	if pb.count() == 0 {
 		t.Fatal("the second campaign must be sent by the second worker")
 	}
 	stopB()
@@ -116,7 +116,7 @@ func TestRun_FirstSendWaitsAWindowAfterTakingTheLock(t *testing.T) {
 	done := make(chan error)
 	start := time.Now()
 	go func() { done <- w.Run(ctx) }()
-	waitFor(t, 10*time.Second, "a request", func() bool { p.mu.Lock(); defer p.mu.Unlock(); return len(p.requests) > 0 })
+	waitFor(t, 10*time.Second, "a request", func() bool { return p.count() > 0 })
 	stop()
 	<-done
 
