@@ -27,7 +27,8 @@ keywords = ["@"]
   regexes = [
     '''(?i)@example\.(?:com|org|net)$''',
     '''(?i)^marketer@marketer\.com$''',
-    '''(?i)@(?:company|sirket)\.com$''',
+    '''(?i)^(?:you|name)@company\.com$''', # the UI's placeholders only: company.com
+    '''(?i)^(?:siz|ad)@sirket\.com$''',     # and sirket.com are real domains
     '''(?i)^noreply@anthropic\.com$''',
     '''(?i)@users\.noreply\.github\.com$''',
   ]
@@ -45,12 +46,14 @@ regex = '''\+\d{1,3}[ .\-]?\(?\d{3}\)?[ .\-]?\d{3}[ .\-]?\d{2}[ .\-]?\d{2}\b|\b0
 [[rules]]
 id = "dotenv-file"
 description = "A .env file must never be committed"
-path = '''(?:^|/)\.env(?:\.[A-Za-z0-9]+)?$'''
+path = '''(?:^|/)(?:\.env(?:rc)?(?:\.[A-Za-z0-9_\-]+)*|[^/]+\.env)$''' # .env, .env.production.local, .envrc, prod.env
 
   [[rules.allowlists]]
   paths = ['''(?:^|/)\.env\.example$''']
 
+# Matched against the finding itself, not its line, so a key next to a
+# checksum is still reported.
 [allowlist]
 description = "Go module checksums (go.sum lines quoted in docs and session exports, sometimes cut off)"
-regexTarget = "line"
-regexes = ['''\sh1:[A-Za-z0-9+/]{8,}''']
+regexTarget = "match"
+regexes = ['''h1:[A-Za-z0-9+/]{8,}''']

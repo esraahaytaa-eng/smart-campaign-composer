@@ -31,13 +31,20 @@ expect phone1 phone-number lead.txt "Call +90 532 $(echo 123) 45 67 before noon.
 expect phone2 phone-number lead2.txt "telefon: 0532 $(echo 987) 65 43"
 expect phone3 phone-number lead3.json "{\"phone\":\"+49151$(echo 12345678)\"}"
 expect env dotenv-file .env "LOG_LEVEL=debug"
+expect env2 dotenv-file .env.production.local "LOG_LEVEL=debug"
+expect env3 dotenv-file prod.env "LOG_LEVEL=debug"
+expect env4 dotenv-file .envrc "export LOG_LEVEL=debug"
+# Only the UI's own placeholders at these real domains are allowed.
+expect mail3 email-address crm.txt "Owner: mehmet.kaya${at}company.com"
+# A Go checksum on the same line must not hide a key next to it.
+expect key3 anthropic-api-key notes.txt "example.com/mod v1.0.0 h1:uiha35bPI8zGxUpS+qJ7Ux/2hD/2k5Qo3G5L2hUQFgQ= ANTHROPIC_API_KEY=$key"
 
 # Allowed: the project's fictional seed and test data, documented demo login,
 # placeholders and masked contacts. None of these may be reported.
 mkdir -p "$WORK/allowed/repo/internal/db" "$WORK/allowed/repo/docs"
 cat >"$WORK/allowed/repo/docs/allowed.md" <<'EOF'
 Sign in as marketer@marketer.com (local demo only). Fixtures use a@example.com,
-ayse.demir.17@example.com and placeholders like you@company.com or ad@sirket.com.
+ayse.demir.17@example.com and the UI's placeholders you@company.com, name@company.com, siz@sirket.com, ad@sirket.com.
 Masked contacts look like +90 555 ••• •• 17 and ays•••@example.com; sign-in is case-insensitive (Marketer@Example.COM).
 A non-Turkish test number from the range reserved for fiction: +447700900078.
 Commits end with Co-Authored-By: Claude <noreply@anthropic.com>.

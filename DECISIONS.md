@@ -424,6 +424,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Enforces the standing rule (D50) mechanically instead of relying on memory.
 - **Rejected:** *A grep script:* misses key formats gitleaks knows. *A scanner as an app dependency:* not needed; it runs in Docker.
 - **Trade-offs:** False positives need allow-list entries; the hook is per clone.
+- **History:** 2026-10-24 (PR #7 review). Tighter rules, each proven by the self-test: a Go checksum no longer hides other findings on its line; only the UI's four placeholder addresses at company.com/sirket.com are allowed; `.env.*.*`, `.envrc` and `*.env` files are caught. The history scan finds the same single item as before.
 
 ### D52 — CI with GitHub Actions
 - **Status:** Accepted · 2026-10-23
