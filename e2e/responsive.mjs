@@ -6,6 +6,7 @@ import { BASE, CART_BRIEF, suite } from './lib.mjs'
 
 const SIZES = [
   [1440, 900],
+  [1280, 720],
   [1024, 768],
   [768, 1024],
   [375, 812],
@@ -68,8 +69,15 @@ export default () =>
     await page.goto(BASE + '/campaigns')
     await page.getByRole('button', { name: 'Türkçe' }).click()
     await page.getByRole('heading', { name: 'Kampanyalar' }).waitFor()
-    for (const [width, height] of [[1440, 900], [1024, 768], [375, 812]]) {
+    for (const [width, height] of [[1440, 900], [1280, 720], [1024, 768], [375, 812]]) {
       await page.setViewportSize({ width, height })
+      if (width >= 1280) {
+        // the narrower desktop columns still fit their longest Turkish values on one line
+        const cramped = await page.locator('[role=row]:not(.header) [role=cell]:not(.name)').evaluateAll((cells) =>
+          cells.filter((c) => c.scrollWidth > c.clientWidth + 1 || c.getBoundingClientRect().height > 40).map((c) => c.textContent.trim()),
+        )
+        check(cramped.length === 0, `${width}px Turkish: every list cell fits on one line (${[...new Set(cramped)].join(', ')})`)
+      }
       const badge = page.locator('.mode-badge')
       check((await badge.boundingBox()).height < 30, `${width}px Turkish: the mode badge stays on one line`)
       const sideways = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)

@@ -346,7 +346,8 @@ async function cancel(c: Campaign) {
 }
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 2.4fr) 110px 130px 110px 170px 220px;
+  /* Sized to the longest English or Turkish value (two action buttons); the title takes the rest. */
+  grid-template-columns: minmax(0, 1fr) 100px 110px 95px 165px 170px;
   gap: 12px;
   align-items: center;
   padding: 12px 16px;
