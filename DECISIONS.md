@@ -596,8 +596,8 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - **Recipient pages (F3):** sort on `messages.last_attempt_at`, written by the worker with the result; texts read only for the skipped group; the group count is the total when nothing filters it.
 - **Why:** Measured: a claim cost grew with the due backlog (1.7 ms at 6,000, 7.6 ms at 30,000; now 0.06 ms at both), and recipient pages looked up 5,100 attempts per request (23 ms; now 9 ms). The rest closes correctness gaps the tests didn't catch.
 - **Rejected:** *A shared rate limiter (Redis or Postgres):* a round trip per message for a limit one process already enforces. *Exiting when the lock is lost:* relies on a restart policy. *Re-checking before the cap wait:* a cancel during that wait would be missed. *Sorting recipients by `updated_at`:* changes the order of skipped and pending rows (D47). *An index on `last_attempt_at`:* an extra write per result for ~3 ms.
-- **Trade-offs:** A failed lock connection is noticed within about 1–3 s; until then, if the database already freed the lock, a second worker could send at the same time. A message failed for missing text shows the reason "retries exhausted". `last_attempt_at` duplicates `delivery_attempts`; only the worker writes attempts, and it keeps both.
-- **History:** 2026-10-24: approved by the engineer.
+- **Trade-offs:** A failed lock connection is noticed within about 1–3 s; until then, if the database already freed the lock, a second worker could send at the same time. A worker that takes the lock waits one cap window (about 1 s) before sending, so a handover can't put 200 requests in a second. A vanished host keeps the lock until the server's keepalives drop its session (about 25 s), and sending pauses meanwhile. A message failed for missing text shows the reason "retries exhausted". `last_attempt_at` duplicates `delivery_attempts`; only the worker writes attempts, and it keeps both.
+- **History:** 2026-10-24: approved by the engineer. 2026-10-24 (branch review): the handover wait and the lock connection's keepalives were added.
 
 ## Open Questions
 
