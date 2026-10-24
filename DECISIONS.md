@@ -264,11 +264,12 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **History:** 2026-10-24 (Task 7): clarified, with the engineer's approval, that a resend doesn't copy the original messages' languages but resolves its own.
 
 ### D65 — A/B testing is not built
-- **Status:** Deferred · 2026-10-24
+- **Status:** Superseded by D68 · 2026-10-24
 - **Decision:** No A/B variants in T20. The evaluation is recorded in the README.
 - **Why:** The app records delivery but no outcome (opens, clicks, orders after a send), so a winner can't be measured. Building it would double the content model on top of languages (D64).
 - **Rejected:** *A delivery-only A/B report:* looks finished, answers nothing.
 - **Trade-offs:** A CASE.md optional feature stays unbuilt. It needs outcome events, split assignment and a significance rule first.
+- **History:** 2026-10-24 (T21 planning, user's decision): superseded by D68, an optional A/B test whose report shows real delivery data only and names no winner.
 
 ### D66 — Each language is reviewed and approved on its own; content is never overwritten silently
 - **Status:** Accepted · 2026-10-24
@@ -294,6 +295,29 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - *Keeping the approval on re-add:* kept text, possibly written for an older brief, could be sent without review.
 - **Trade-offs:** Hidden text is stored; the content screen marks it "kept, not sent". One more approval per language after re-adding a channel.
 - **History:** 2026-10-24 (final T20 review, user's decision): re-adding a channel now clears the affected languages' approval; previously the text came back still approved.
+
+### D68 — Optional A/B test with a delivery-only report
+- **Status:** Accepted · 2026-10-24
+- **Decision:**
+  - **Versions:** a campaign can compare two versions, A and B, of its whole message (SMS and email). Off by default; not on resends (D31). Existing content is version A.
+  - **Languages:** the recipient's language is chosen first (D64), then the version. With A/B on, every selected language needs both versions for the chosen channels.
+  - **Split:** fixed when the audience is built, 50/50 per language: each language's unique recipients are ordered by `md5(campaign:user)` and alternated A, B. One version per recipient on every channel. Stored on the message; retries reuse it.
+  - **Approval:** per language (D66), covering both versions. Editing either version, a new brief (D66) or re-adding a channel with kept text (D67) sets the language to needs review. Turning A/B on sets languages with kept B text to needs review; turning it off keeps B's text, not sent (as D67).
+  - **AI cost:** B is written only on request ("Write version B with AI", selected languages only, never touching A), by hand, or copied from A (no AI call). Rewriting B asks first (D66).
+  - **Report:** per version and channel, real delivery data only: recipients, sent, failed, skipped by reason, waiting or retrying, SMS segments. It states that the app records no opens, clicks or orders, and names no winner.
+- **Why:** Gives CASE.md's optional A/B testing an honest, fair split that real outcomes can join later (orders after sending, then clicks), without an analytics system now.
+- **Rejected:**
+  - *Simulated clicks or conversions:* the "result" would be the simulator's settings; looks real, means nothing.
+  - *Random or hash-parity split:* small audiences split badly (10 recipients: 3/7 or worse 34% of the time).
+  - *Per-channel split:* a recipient could get A by SMS and B by email.
+  - *Choosing the version at send time:* a retry could change it.
+  - *Approval per version:* twice the clicks for little gain.
+  - *Two separate campaigns:* no shared split or report.
+  - *Orders-based conversion now:* needs an attribution-window rule; a later decision.
+- **Trade-offs:**
+  - The report can't say which version works better.
+  - The split is exact per language; per channel it can differ slightly, as consent and contact details differ.
+  - An A/B campaign roughly doubles the AI's content cost for the languages it writes B in, and doubles the text to review.
 
 ## Architecture & Technical Decisions
 
@@ -568,5 +592,5 @@ Proposed 2026-10-23 after the step 7 measurements (`docs/performance.md`). Q1, Q
 
 ## Deferred
 
-- **Optional features from `CASE.md`:** A/B testing, messages in the user's language (a `language` field will be seeded now), CI pipeline. Scheduled sending moved into scope (D29). Resend to skipped recipients moved into scope (D31). Messages in the user's language moved into scope (D64); A/B testing stays deferred (D65).
+- **Optional features from `CASE.md`:** A/B testing, messages in the user's language (a `language` field will be seeded now), CI pipeline. Scheduled sending moved into scope (D29). Resend to skipped recipients moved into scope (D31). Messages in the user's language moved into scope (D64); A/B testing moved into scope as a delivery-only comparison (D68, superseding D65).
 - **Archiving campaigns** (2026-10-22): hiding finished campaigns from the list. Deleting drafts (D37) removes most of the clutter; it can be added later without changing D37.
