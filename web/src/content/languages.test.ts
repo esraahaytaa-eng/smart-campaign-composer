@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { audienceByLanguage, languageName, orderLanguages } from './languages'
+import { audienceByLanguage, languageName, orderLanguages, startingDefault, toWrite } from './languages'
 
 const catalog = [
   { code: 'tr', name: 'Türkçe' },
@@ -50,5 +50,33 @@ describe('audienceByLanguage', () => {
 
   it('is empty without counts', () => {
     expect(audienceByLanguage(undefined, ['sms'], [], catalog)).toEqual([])
+  })
+})
+
+// The default before one is saved: the saved one, the audience's suggestion,
+// then the first catalog language. An empty audience suggests none (D64).
+describe('startingDefault', () => {
+  it('keeps the saved default', () => {
+    expect(startingDefault('en', 'tr', catalog)).toBe('en')
+  })
+
+  it('takes the suggestion without a saved default', () => {
+    expect(startingDefault(null, 'en', catalog)).toBe('en')
+  })
+
+  it('falls back to the catalog when the audience suggests nothing', () => {
+    expect(startingDefault(null, '', catalog)).toBe('tr')
+    expect(startingDefault(null, undefined, catalog)).toBe('tr')
+  })
+})
+
+// What "Write with AI" writes: ticked languages without saved text (D66).
+describe('toWrite', () => {
+  it('lists the ticked languages without saved text', () => {
+    expect(toWrite(['tr', 'en'], { tr: {} })).toEqual(['en'])
+  })
+
+  it('writes nothing until legacy text has its language set (D64)', () => {
+    expect(toWrite(['und', 'en'], { und: {} })).toEqual([])
   })
 })

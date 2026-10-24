@@ -9,7 +9,7 @@ import { briefTitle } from '../campaign/title'
 import { LEGACY, type Campaign, type Catalog, type Channel, type Content, type Lang } from '../campaign/types'
 import { render, samplesFor } from '../content/preview'
 import { fromContent, fromVariants, generationOutcome, hasUnsavedChanges, languagesToReplace, toSave, type Draft } from '../content/editing'
-import { languageName, orderLanguages } from '../content/languages'
+import { languageName, orderLanguages, startingDefault, toWrite } from '../content/languages'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessageField from '../components/MessageField.vue'
 import MessagePreview from '../components/MessagePreview.vue'
@@ -60,7 +60,7 @@ function fromCampaign(c: Campaign, only?: Lang[]) {
     drafts.value = fresh
     if (!c.content) for (const l of c.recommendation?.languages ?? []) drafts.value[l] = fromContent(null)
   }
-  defaultLanguage.value = c.default_language ?? c.recommendation?.default ?? catalog.value[0]?.code ?? 'tr'
+  defaultLanguage.value = startingDefault(c.default_language, c.recommendation?.default, catalog.value)
   drafts.value[defaultLanguage.value] ??= fromContent(null)
   if (!drafts.value[active.value]) active.value = defaultLanguage.value
 }
@@ -251,9 +251,7 @@ const aiProblem = ref<string | null>(null) // the stream's own error text (Engli
 let stop: AbortController | null = null
 const regenerateConfirm = ref<Lang[] | null>(null)
 
-// Languages ticked without saved text: what "Write with AI" writes. Legacy
-// text has no language the AI could write in.
-const missing = computed(() => tabs.value.filter((l) => l !== LEGACY && !saved.value?.[l]))
+const missing = computed(() => toWrite(tabs.value, saved.value))
 
 // Ask before the AI replaces anything: saved text or text not saved yet (D66).
 function askToWrite(langs: Lang[]) {
@@ -396,7 +394,7 @@ const statusText = computed(() => {
           <p v-for="m in otherErrors" :key="m">{{ m }}</p>
         </div>
 
-        <fieldset class="card section languages" :disabled="streaming || locked">
+        <fieldset v-if="!drafts[LEGACY]" class="card section languages" :disabled="streaming || locked">
           <legend class="section-title">{{ t('content.languages') }}</legend>
           <p class="muted">{{ t('content.languagesHint') }} {{ t('content.languagesCost') }}</p>
           <div class="language-options">

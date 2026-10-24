@@ -64,6 +64,10 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Checked before any AI call, so a refusal costs nothing (D63).
+	if slices.Contains(written, content.LegacyLang) {
+		writeError(w, http.StatusUnprocessableEntity, "set the language of the existing text before writing another language")
+		return
+	}
 	if !in.Replace {
 		var existing []string
 		for _, l := range in.Languages {

@@ -48,6 +48,18 @@ func TestGenerate_RefusesUnd(t *testing.T) {
 	}
 }
 
+// A legacy draft gets its language set first: writing a catalog language next
+// to the unlabelled text would leave content that can never be saved (D64).
+func TestGenerate_RefusesLanguageNextToUnd(t *testing.T) {
+	t.Parallel()
+	model := noContentCalls()
+	a := newApp(t, model)
+	d := a.legacyDraft()
+	if rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":1,"languages":["tr"]}`); rec.Code != http.StatusUnprocessableEntity || len(model.calls) != 0 {
+		t.Fatalf("want 422 without an AI call, got %d after %d calls", rec.Code, len(model.calls))
+	}
+}
+
 // The 5% recommendation is a suggestion only: a language nobody in the
 // audience speaks can still be written (user clarification, D64).
 func TestGenerate_AcceptsLanguageWithNoSpeakers(t *testing.T) {

@@ -34,3 +34,16 @@ export function audienceByLanguage(counts: Counts | undefined, channels: Channel
       recommended: recommended.includes(l),
     }))
 }
+
+// The default before one is saved: the saved one, the audience's suggestion,
+// then the first catalog language. An empty audience suggests '' (D64).
+export function startingDefault(saved: Lang | null | undefined, suggested: Lang | undefined, catalog: Catalog['languages']): Lang {
+  return saved || suggested || catalog[0]?.code || 'tr'
+}
+
+// What "Write with AI" writes: ticked languages without saved text. Legacy
+// text gets its language set first; the AI can't write next to it (D64).
+export function toWrite(tabs: Lang[], saved: Partial<Record<Lang, unknown>> | null | undefined): Lang[] {
+  if (tabs.includes(LEGACY)) return []
+  return tabs.filter((l) => !saved?.[l])
+}
