@@ -335,6 +335,17 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - P5 (recipient details p95 ≤ 50 ms) is still missed back to back (78.9 ms, one run; T20: 51–73 ms); each request also reads B's text. Met with realistic pauses, as before.
 - **History:** 2026-10-24 (T21 review): the report's metrics corrected to what was built (no SMS segments; uncertain and cancelled added); the B estimate and P5 limitations recorded.
 
+### D71 — One-step creation: languages on the audience step, AI writing starts by itself
+- **Status:** Accepted · 2026-10-24
+- **Decision:**
+  - For a new draft without text (not a resend, D48), the marketer ticks the languages on the audience step (pre-ticked with the suggestion, D64).
+  - "Write the messages with AI →" opens the content step and starts the usual streamed writing once for those languages, never replacing text (D66). "Write them myself →" opens it with no AI call.
+  - The start signal is removed from the URL before writing starts, so reload, Back, Forward or a second visit never start it again; a campaign with saved text never starts it.
+  - Everything else is unchanged: Stop, failures save nothing (D34, D15), error codes, and the explicit AI buttons for rewriting, added languages and version B (D68).
+- **Why:** Saves a step and a click on the common path while keeping a manual path and adding no AI call.
+- **Rejected:** *Writing on the audience step:* a second streaming UI. *Starting whenever the content step has no text:* every visit could cost an AI call. *Storing the chosen languages on the server:* a new field for a one-time choice.
+- **Trade-offs:** The choice travels in the URL; the same link opened twice at once can start a second request, which the server refuses with 409 (D66); text is never overwritten.
+
 ## Architecture & Technical Decisions
 
 ### D17 — PostgreSQL 16
