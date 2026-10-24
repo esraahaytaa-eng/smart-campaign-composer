@@ -34,7 +34,9 @@ func (f *fixture) later() int64 {
 }
 
 func (f *fixture) allSent(id int64) func() bool {
-	return func() bool { return f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status <> 'sent'`, id) == 0 && f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1`, id) > 0 }
+	return func() bool {
+		return f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status <> 'sent'`, id) == 0 && f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1`, id) > 0
+	}
 }
 
 // Audit F5: the 100/s limit lives in one process, so a second worker waits
