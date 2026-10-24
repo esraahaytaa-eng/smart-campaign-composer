@@ -6,19 +6,21 @@ import { addableRules, defaultForm, formProblems, fromForm, ruleErrors, ruleLabe
 const catalog: Catalog = {
   fields: [
     { field: 'cart_added', ops: ['within'], value: 'window' },
-    { field: 'cart_value', ops: ['gte'], value: 'amount' },
+    { field: 'cart_value', ops: ['gte', 'gt'], value: 'amount' },
     { field: 'carted_category', ops: ['in'], value: 'categories_window' },
     { field: 'city', ops: ['in'], value: 'cities' },
     { field: 'last_order', ops: ['before', 'after'], value: 'window' },
     { field: 'no_order', ops: ['within'], value: 'window' },
-    { field: 'order_count', ops: ['gte', 'lte'], value: 'count' },
+    { field: 'order_count', ops: ['gte', 'lte', 'gt', 'lt'], value: 'count' },
     { field: 'ordered_category', ops: ['in'], value: 'categories_window' },
-    { field: 'signed_up', ops: ['within'], value: 'window' },
-    { field: 'total_spend', ops: ['gte', 'lte'], value: 'amount' },
+    { field: 'orders_in_window', ops: ['gte', 'lte', 'gt', 'lt'], value: 'count_window' },
+    { field: 'signed_up', ops: ['within', 'before'], value: 'window' },
+    { field: 'spend_in_window', ops: ['gte', 'lte', 'gt', 'lt'], value: 'amount_window' },
+    { field: 'total_spend', ops: ['gte', 'lte', 'gt', 'lt'], value: 'amount' },
   ],
   cities: ['Ankara', 'İstanbul', 'İzmir'],
   categories: ['books', 'fashion'],
-  limits: { max_rules: 20, max_days: 365, max_count: 10000, max_amount: 1000000, min_date: '2000-01-01' },
+  limits: { max_rules: 20, max_days: 365, max_months: 12, max_count: 10000, max_amount: 1000000, min_date: '2000-01-01' },
   languages: [{ code: 'tr', name: 'Türkçe' }, { code: 'en', name: 'English' }],
 }
 
@@ -42,6 +44,25 @@ describe('ruleLabel', () => {
     [rule('total_spend', 'gte', 10000), 'Spent at least 10,000 TL in total'],
     [rule('total_spend', 'lte', 499.5), 'Spent at most 499.50 TL in total'],
     [rule('cart_value', 'gte', 5000), 'At least 5,000 TL in the cart'],
+    // D70
+    [rule('cart_value', 'gt', 5000), 'More than 5,000 TL in the cart'],
+    [rule('order_count', 'gt', 3), 'More than 3 orders'],
+    [rule('order_count', 'lt', 1), 'Fewer than 1 order'],
+    [rule('total_spend', 'gt', 10000), 'Spent more than 10,000 TL in total'],
+    [rule('total_spend', 'lt', 500), 'Spent less than 500 TL in total'],
+    [rule('cart_added', 'within', { last_months: 1 }), 'Added to cart in the last month (counted from send time)'],
+    [rule('spend_in_window', 'gt', { amount: 10000, last_months: 12 }), 'Spent more than 10,000 TL in the last 12 months (counted from send time)'],
+    [rule('spend_in_window', 'gte', { amount: 500, from: '2026-10-01' }), 'Spent at least 500 TL since 1 Oct 2026'],
+    [rule('spend_in_window', 'lte', { amount: 100, last_days: 30 }), 'Spent at most 100 TL in the last 30 days (counted from send time)'],
+    [rule('spend_in_window', 'lt', { amount: 100, last_days: 30 }), 'Spent less than 100 TL in the last 30 days (counted from send time)'],
+    [rule('orders_in_window', 'gte', { count: 4, last_months: 12 }), 'At least 4 orders in the last 12 months (counted from send time)'],
+    [rule('orders_in_window', 'lte', { count: 1, last_days: 30 }), 'At most 1 order in the last 30 days (counted from send time)'],
+    [rule('orders_in_window', 'gt', { count: 2, last_days: 30 }), 'More than 2 orders in the last 30 days (counted from send time)'],
+    [rule('orders_in_window', 'lt', { count: 2, last_days: 30 }), 'Fewer than 2 orders in the last 30 days (counted from send time)'],
+    [rule('signed_up', 'before', { last_days: 7 }), 'Signed up more than 7 days ago (counted from send time)'],
+    [rule('signed_up', 'before', { last_months: 1 }), 'Signed up more than 1 month ago (counted from send time)'],
+    [rule('signed_up', 'before', { from: '2026-10-01' }), 'Signed up before 1 Oct 2026'],
+    [rule('last_order', 'before', { last_months: 6 }), 'Last order more than 6 months ago (counted from send time)'],
   ])('%j reads "%s"', (r, label) => {
     expect(ruleLabel(r)).toBe(label)
   })
@@ -61,6 +82,13 @@ describe('chip ↔ rule mapping', () => {
     rule('order_count', 'lte', 3),
     rule('total_spend', 'gte', 10000),
     rule('cart_value', 'gte', 5000),
+    rule('cart_value', 'gt', 5000),
+    rule('cart_added', 'within', { last_months: 3 }),
+    rule('signed_up', 'before', { last_days: 7 }),
+    rule('signed_up', 'before', { from: '2026-10-01' }),
+    rule('spend_in_window', 'gt', { amount: 10000, last_months: 12 }),
+    rule('spend_in_window', 'lte', { amount: 99.5, from: '2026-01-01', to: '2026-06-30' }),
+    rule('orders_in_window', 'gte', { count: 4, last_days: 90 }),
   ])('round-trips %j', (r) => {
     expect(fromForm(toForm(r, catalog), catalog)).toEqual(r)
   })
@@ -73,6 +101,23 @@ describe('chip ↔ rule mapping', () => {
 
     form.timeMode = 'last'
     expect(fromForm(form, catalog)).toEqual(rule('cart_added', 'within', { last_days: 30 }))
+  })
+
+  it('switches a time rule to calendar months', () => {
+    const form = toForm(rule('spend_in_window', 'gte', { amount: 100, last_days: 30 }), catalog)
+    form.timeMode = 'months'
+    form.lastMonths = 12
+    expect(fromForm(form, catalog)).toEqual(rule('spend_in_window', 'gte', { amount: 100, last_months: 12 }))
+  })
+
+  it('never sends an end date for "signed up before"', () => {
+    const form = toForm(rule('signed_up', 'within', { from: '2026-09-01', to: '2026-09-30' }), catalog)
+    form.op = 'before'
+    expect(fromForm(form, catalog)).toEqual(rule('signed_up', 'before', { from: '2026-09-01' }))
+  })
+
+  it('starts a new order count in a period at 1 order in the last 30 days', () => {
+    expect(fromForm(defaultForm('orders_in_window', 'gte', catalog), catalog)).toEqual(rule('orders_in_window', 'gte', { count: 1, last_days: 30 }))
   })
 
   it('drops an end date the marketer cleared', () => {
@@ -101,7 +146,7 @@ describe('addableRules', () => {
     expect(offered).not.toContain('city in')
     expect(offered).not.toContain('order_count gte')
     expect(offered).toContain('order_count lte')
-    expect(offered).toHaveLength(13 - 2)
+    expect(offered).toHaveLength(27 - 2)
   })
 
   it('offers nothing at the rule limit', () => {
@@ -149,6 +194,11 @@ describe('formProblems', () => {
     [form('order_count', 'gte', { amount: 1.5 }), 'Enter a whole number from 0 to 10,000.'],
     [form('total_spend', 'gte', { amount: 2000000 }), 'Enter an amount from 0 to 1,000,000 TL.'],
     [form('total_spend', 'gte', { amount: Number.NaN }), 'Enter an amount from 0 to 1,000,000 TL.'],
+    [form('cart_added', 'within', { timeMode: 'months', lastMonths: 0 }), 'Enter 1 to 12 months.'],
+    [form('cart_added', 'within', { timeMode: 'months', lastMonths: 13 }), 'Enter 1 to 12 months.'],
+    [form('spend_in_window', 'gte', { amount: -1 }), 'Enter an amount from 0 to 1,000,000 TL.'],
+    [form('orders_in_window', 'gte', { amount: 1.5 }), 'Enter a whole number from 0 to 10,000.'],
+    [form('orders_in_window', 'gte', { lastDays: 400 }), 'Enter 1 to 365 days.'],
   ])('%j: %s', (f, problem) => {
     expect(formProblems(f, catalog)).toEqual([problem])
   })
@@ -169,6 +219,18 @@ describe('Turkish chip labels', () => {
     [rule('order_count', 'gte', 3), 'En az 3 sipariş'],
     [rule('total_spend', 'gte', 10000), 'Toplam harcaması en az 10.000 TL'],
     [rule('cart_value', 'gte', 499.5), 'Sepet tutarı en az 499,50 TL'],
+    [rule('cart_value', 'gt', 5000), 'Sepet tutarı 5.000 TL’den fazla'],
+    [rule('order_count', 'gt', 3), '3 siparişten fazla'],
+    [rule('order_count', 'lt', 1), '1 siparişten az'],
+    [rule('total_spend', 'gt', 10000), 'Toplam harcaması 10.000 TL’den fazla'],
+    [rule('total_spend', 'lt', 500), 'Toplam harcaması 500 TL’den az'],
+    [rule('spend_in_window', 'gt', { amount: 10000, last_months: 12 }), 'Son 12 ay içinde (gönderim zamanına göre) 10.000 TL’den fazla harcadı'],
+    [rule('spend_in_window', 'gte', { amount: 500, last_days: 30 }), 'Son 30 gün içinde (gönderim zamanına göre) en az 500 TL harcadı'],
+    [rule('orders_in_window', 'gte', { count: 4, last_months: 12 }), 'Son 12 ay içinde (gönderim zamanına göre) en az 4 sipariş verdi'],
+    [rule('orders_in_window', 'lt', { count: 2, last_days: 30 }), 'Son 30 gün içinde (gönderim zamanına göre) 2 siparişten az verdi'],
+    [rule('signed_up', 'before', { last_days: 7 }), 'Üyeliği 7 günden daha eski (gönderim zamanına göre)'],
+    [rule('signed_up', 'before', { from: '2026-10-01' }), '1 Eki 2026 tarihinden önce üye oldu'],
+    [rule('last_order', 'before', { last_months: 6 }), 'Son siparişi 6 aydan daha eski (gönderim zamanına göre)'],
   ])('%j reads "%s"', async (r, label) => {
     await setLocale('tr')
     expect(ruleLabel(r)).toBe(label)

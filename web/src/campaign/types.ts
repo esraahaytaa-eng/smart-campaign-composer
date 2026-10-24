@@ -45,12 +45,12 @@ export type Campaign = {
   completed_at?: string | null
 }
 
-export type ValueType = 'cities' | 'window' | 'categories_window' | 'count' | 'amount'
+export type ValueType = 'cities' | 'window' | 'categories_window' | 'count' | 'amount' | 'amount_window' | 'count_window'
 
 export type Catalog = {
   fields: { field: string; ops: string[]; value: ValueType }[]
   cities: string[]
   categories: string[]
-  limits: { max_rules: number; max_days: number; max_count: number; max_amount: number; min_date: string }
+  limits: { max_rules: number; max_days: number; max_months: number; max_count: number; max_amount: number; min_date: string }
   languages: { code: Lang; name: string }[]
 }

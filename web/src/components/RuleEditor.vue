@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import type { Catalog } from '../campaign/types'
-import { formProblems, ruleTitle, valueType, type RuleForm } from '../campaign/rules'
+import { beforeOnly, formProblems, ruleTitle, valueType, type RuleForm } from '../campaign/rules'
 import { t, type Key } from '../i18n'
 
 // The chip editor (D9). The parent saves on apply; serverErrors are the
@@ -25,9 +25,11 @@ const type = computed(() => (draft.value ? valueType(draft.value.field, props.ca
 const ops = computed(() => props.catalog.fields.find((f) => f.field === draft.value?.field)?.ops ?? [])
 const problems = computed(() => (draft.value ? formProblems(draft.value, props.catalog) : []))
 const shownProblems = computed(() => (tried.value ? problems.value : []).concat(props.serverErrors ?? []))
-const hasTime = computed(() => type.value === 'window' || type.value === 'categories_window')
-const noEndDate = computed(() => draft.value?.field === 'last_order' && draft.value.op === 'before')
-const opLabel: Record<string, Key> = { gte: 'op.gte', lte: 'op.lte', before: 'op.before', after: 'op.after' }
+const hasTime = computed(() => ['window', 'categories_window', 'amount_window', 'count_window'].includes(type.value ?? ''))
+const noEndDate = computed(() => !!draft.value && beforeOnly(draft.value.field, draft.value.op))
+const moreThan = computed<Key>(() => (draft.value?.field === 'signed_up' ? 'editor.signedUpMoreThan' : 'editor.moreThan'))
+const counted = computed(() => type.value === 'count' || type.value === 'count_window')
+const opLabel: Record<string, Key> = { gte: 'op.gte', lte: 'op.lte', gt: 'op.gt', lt: 'op.lt', before: 'op.before', after: 'op.after' }
 
 function toggle(list: string[], value: string) {
   const i = list.indexOf(value)
@@ -77,7 +79,7 @@ function apply() {
             <legend>{{ t('editor.when') }}</legend>
             <label class="choice">
               <input v-model="draft.timeMode" type="radio" value="last" />
-              {{ t(noEndDate ? 'editor.moreThan' : 'editor.inTheLast') }}
+              {{ t(noEndDate ? moreThan : 'editor.inTheLast') }}
               <input
                 v-model.number="draft.lastDays"
                 class="input small days"
@@ -88,6 +90,20 @@ function apply() {
                 :disabled="draft.timeMode !== 'last'"
               />
               {{ t(noEndDate ? 'editor.daysAgo' : 'editor.days') }}
+            </label>
+            <label class="choice">
+              <input v-model="draft.timeMode" type="radio" value="months" />
+              {{ t(noEndDate ? moreThan : 'editor.inTheLast') }}
+              <input
+                v-model.number="draft.lastMonths"
+                class="input small days"
+                type="number"
+                min="1"
+                :max="catalog.limits.max_months"
+                :aria-label="t('editor.numberOfMonths')"
+                :disabled="draft.timeMode !== 'months'"
+              />
+              {{ t(noEndDate ? 'editor.monthsAgo' : 'editor.months') }}
             </label>
             <p class="hint">{{ t('editor.lastHint') }}</p>
             <label class="choice">
@@ -109,15 +125,15 @@ function apply() {
             <p class="hint">{{ t('editor.sinceHint') }}</p>
           </fieldset>
 
-          <label v-if="type === 'count' || type === 'amount'" class="row">
-            <span>{{ t(type === 'count' ? 'editor.orders' : 'editor.amount') }}</span>
+          <label v-if="type === 'count' || type === 'amount' || type === 'count_window' || type === 'amount_window'" class="row">
+            <span>{{ t(counted ? 'editor.orders' : 'editor.amount') }}</span>
             <input
               v-model.number="draft.amount"
               class="input small"
               type="number"
               min="0"
-              :step="type === 'count' ? 1 : 'any'"
-              :max="type === 'count' ? catalog.limits.max_count : catalog.limits.max_amount"
+              :step="counted ? 1 : 'any'"
+              :max="counted ? catalog.limits.max_count : catalog.limits.max_amount"
             />
           </label>
 
