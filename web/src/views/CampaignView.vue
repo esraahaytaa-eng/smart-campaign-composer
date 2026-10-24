@@ -314,7 +314,14 @@ function reload() {
           </div>
 
           <aside class="side">
-            <AudiencePanel :counts="campaign.counts" :channels="campaign.channels" :change="change" :resend="isResend" />
+            <AudiencePanel
+              :counts="campaign.counts"
+              :channels="campaign.channels"
+              :change="change"
+              :resend="isResend"
+              :languages="catalog.languages"
+              :recommended="campaign.recommendation?.languages"
+            />
           </aside>
         </div>
 

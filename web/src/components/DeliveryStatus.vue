@@ -119,7 +119,7 @@ function refresh() {
 }
 
 // Each count opens recipient details for its group (board 5).
-const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, q: '', page: 1 }) })
+const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, language: '', q: '', page: 1 }) })
 // A summary count opens the first of its groups that has messages.
 const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels.map((c) => c.status.groups) ?? [], order))
 </script>

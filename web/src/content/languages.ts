@@ -1,4 +1,4 @@
-import type { Catalog, Lang } from '../campaign/types'
+import type { Catalog, Channel, Counts, Lang } from '../campaign/types'
 import { LEGACY } from '../campaign/types'
 import { t } from '../i18n'
 
@@ -15,4 +15,22 @@ export function orderLanguages(langs: Lang[], def: Lang | null, catalog: Catalog
     return l === def ? -1 : i === -1 ? catalog.length : i
   }
   return [...langs].sort((a, b) => rank(a) - rank(b))
+}
+
+// The audience step's rows: each language its audience speaks, in catalog
+// order, counted on the chosen channels (null when a channel isn't chosen),
+// and whether it is suggested. A suggestion only, never a restriction (D64).
+export function audienceByLanguage(counts: Counts | undefined, channels: Channel[], recommended: Lang[], catalog: Catalog['languages']) {
+  const by = counts?.by_language ?? {}
+  return orderLanguages(Object.keys(by), null, catalog)
+    .filter((l) => by[l]!.total > 0)
+    .map((l) => ({
+      code: l,
+      name: languageName(l, catalog),
+      total: by[l]!.total,
+      share: Math.round((by[l]!.total / counts!.total) * 100),
+      sms: channels.includes('sms') ? by[l]!.sms : null,
+      email: channels.includes('email') ? by[l]!.email : null,
+      recommended: recommended.includes(l),
+    }))
 }

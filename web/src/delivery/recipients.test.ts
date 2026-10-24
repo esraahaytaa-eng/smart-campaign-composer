@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { LocationQuery } from 'vue-router'
 import { attemptView, pageInfo, readQuery, recipientsPath, rowDetail, tabCounts, writeQuery, type Attempt, type Recipient, type RecipientsQuery } from './recipients'
 
-const base: RecipientsQuery = { group: 'failed', channel: 'all', q: '', page: 1 }
+const base: RecipientsQuery = { group: 'failed', channel: 'all', language: '', q: '', page: 1 }
 
 describe('readQuery / writeQuery', () => {
   it('round-trips through the URL query, leaving defaults out', () => {
-    const q: RecipientsQuery = { group: 'skipped', channel: 'sms', q: 'ayşe', page: 3 }
-    expect(writeQuery(q)).toEqual({ recipients: 'skipped', channel: 'sms', q: 'ayşe', page: '3' })
+    const q: RecipientsQuery = { group: 'skipped', channel: 'sms', language: 'en', q: 'ayşe', page: 3 }
+    expect(writeQuery(q)).toEqual({ recipients: 'skipped', channel: 'sms', language: 'en', q: 'ayşe', page: '3' })
     expect(readQuery(writeQuery(q) as LocationQuery)).toEqual(q)
     expect(writeQuery(base)).toEqual({ recipients: 'failed' })
     expect(readQuery({ recipients: 'failed' })).toEqual(base)
@@ -20,6 +20,7 @@ describe('readQuery / writeQuery', () => {
 
   it('falls back to defaults for invalid values instead of failing', () => {
     expect(readQuery({ recipients: 'sent', channel: 'fax', page: '-2' })).toEqual({ ...base, group: 'sent' })
+    expect(readQuery({ recipients: 'sent', language: 'Türkçe!' })?.language).toBe('') // not a language code
     expect(readQuery({ recipients: 'sent', page: 'x' })?.page).toBe(1)
     expect(readQuery({ recipients: 'sent', q: 'a'.repeat(80) })?.q).toHaveLength(50)
     expect(readQuery({ recipients: 'sent', page: '5000' })?.page).toBe(1000) // the API's limit
@@ -33,8 +34,8 @@ describe('readQuery / writeQuery', () => {
 describe('recipientsPath', () => {
   it('sends only the filters that are set, encoded', () => {
     expect(recipientsPath(7, base)).toBe('/api/campaigns/7/recipients?group=failed&page=1')
-    expect(recipientsPath(7, { group: 'sent', channel: 'email', q: 'a&b ş', page: 2 })).toBe(
-      '/api/campaigns/7/recipients?group=sent&channel=email&q=a%26b+%C5%9F&page=2',
+    expect(recipientsPath(7, { group: 'sent', channel: 'email', language: 'en', q: 'a&b ş', page: 2 })).toBe(
+      '/api/campaigns/7/recipients?group=sent&channel=email&language=en&q=a%26b+%C5%9F&page=2',
     )
   })
 })
@@ -79,7 +80,7 @@ describe('pageInfo', () => {
 
 const attempt = (a: Partial<Attempt>): Attempt => ({ attempt_no: 1, started_at: '2026-10-23T10:00:00Z', finished_at: null, outcome: 'accepted', http_status: 200, ...a })
 const recipient = (r: Partial<Recipient>): Recipient => ({
-  id: 1, name: 'Ayşe Demir', contact: '+90 555 ••• •• 17', channel: 'sms', group: 'sent', reason: null, detail: null, next_attempt_at: null, attempts: [], ...r,
+  id: 1, name: 'Ayşe Demir', contact: '+90 555 ••• •• 17', channel: 'sms', language: 'tr', group: 'sent', reason: null, detail: null, next_attempt_at: null, attempts: [], ...r,
 })
 
 describe('rowDetail', () => {

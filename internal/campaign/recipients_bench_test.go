@@ -152,9 +152,9 @@ func BenchmarkRecipients(b *testing.B) {
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
-			explain(c.name, func() { h.listRecipients(ctx, id, c.group, c.channel, c.q, c.page) })
+			explain(c.name, func() { h.listRecipients(ctx, id, c.group, c.channel, c.q, "", c.page) })
 			for b.Loop() {
-				out, err := h.listRecipients(ctx, id, c.group, c.channel, c.q, c.page)
+				out, err := h.listRecipients(ctx, id, c.group, c.channel, c.q, "", c.page)
 				if err != nil || (c.group == "sent" && c.q == "" && out.Total != counts.sent) {
 					b.Fatalf("%v, total %d", err, out.Total)
 				}
