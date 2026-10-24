@@ -170,9 +170,9 @@ func TestEstimate_CleansValuesLikeRender(t *testing.T) {
 	u := content.UserVars{FirstName: "A\n\nB\t", LastName: "\r", City: "Ankara"}
 
 	for name, tpl := range map[string]string{
-		"inside":   strings.Repeat("x", 156) + " {{first_name}}",   // "A B": 160, "A\n\nB\t": 162
-		"only":     strings.Repeat("x", 159) + " {{last_name}}!",   // 160 once "\r" is a space and tidied
-		"over":     strings.Repeat("x", 157) + " {{first_name}}",   // 161: genuinely over
+		"inside": strings.Repeat("x", 156) + " {{first_name}}", // "A B": 160, "A\n\nB\t": 162
+		"only":   strings.Repeat("x", 159) + " {{last_name}}!", // 160 once "\r" is a space and tidied
+		"over":   strings.Repeat("x", 157) + " {{first_name}}", // 161: genuinely over
 	} {
 		want := 0
 		if utf8.RuneCountInString(content.Render(tpl, u)) > content.SMSLimit {

@@ -50,13 +50,13 @@ func (u UserVars) value(v Var) string {
 }
 
 var (
-	varToken   = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
-	spaceRuns  = regexp.MustCompile(` {2,}`)
+	varToken  = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
+	spaceRuns = regexp.MustCompile(` {2,}`)
 	// Shared with renderSQL; NUL is left out as Postgres text can't hold it.
 	controlChars = regexp.MustCompile(controlClass)
 	spaceBefore  = regexp.MustCompile(` +([,.!?])`)
-	errSyntax  = errors.New("braces may only be used for {{first_name}}, {{last_name}} or {{city}}")
-	allowedVar = map[string]Var{"first_name": FirstName, "last_name": LastName, "city": City}
+	errSyntax    = errors.New("braces may only be used for {{first_name}}, {{last_name}} or {{city}}")
+	allowedVar   = map[string]Var{"first_name": FirstName, "last_name": LastName, "city": City}
 )
 
 // Parse returns the variables a template uses, in order of first use. Only the
