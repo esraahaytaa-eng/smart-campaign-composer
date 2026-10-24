@@ -97,6 +97,17 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** A small, known set is easy to validate and makes D3's length estimate possible.
 - **Rejected:** *`first_name` only:* too limiting. *A default value per variable:* an extra UI field and validation path.
 - **Trade-offs:** A message can read awkwardly when a value is missing.
+- **History:** 2026-10-24: tidying also drops the space an empty value leaves before punctuation, and values are cleaned to one line (D72).
+
+### D72 — AI text greets each recipient by name; values render safely
+- **Status:** Accepted · 2026-10-24
+- **Decision:**
+  - **AI text:** the prompt asks for a natural greeting with `{{first_name}}` in the SMS and the email body ("Merhaba {{first_name}},"), "you" instead of segment labels ("loyal customers"), never a variable as a label or adjective, `{{city}}` only where a city fits, and no `{{last_name}}` (missing for some recipients). An AI SMS or email body without `{{first_name}}` is invalid and retried once (D15). The marketer's own text stays free (D12); saved drafts are not touched.
+  - **Rendering (send, estimate and preview alike):** a recipient's value becomes one line (control characters become spaces, ends trimmed), and a space left before `,` `.` `!` `?` is dropped, so "Merhaba {{first_name}}," with no name reads "Merhaba,". The SQL estimate stays exact (D3).
+  - **Timing:** every AI call records its duration (`scc_llm_call_duration_seconds`) and, for streamed content, the wait for the first text (`scc_llm_first_text_seconds`); the real client logs time, tokens and text length per call, never the prompt or answer. No model, effort or thinking change until a measured, approved comparison.
+- **Why:** Generated messages addressed segments ("valued customers") and once used the name as an adjective; a stored line break could split a subject; a slow generation couldn't be split into waiting and writing.
+- **Rejected:** *A fallback word per variable (`{{first_name|there}}`):* a parser change in three renderers, and no first name is empty today. *Requiring `{{first_name}}` in marketer text:* manual content stays optional and free. *Requiring it in the subject:* not every subject reads well with a name.
+- **Trade-offs:** A missing name can cost one AI retry. The punctuation rule also applies to the marketer's fixed text ("Hi !" becomes "Hi!"). The check can't tell a natural greeting from an awkward one; the prompt carries that.
 
 ### D13 — Plain-text email body with a length cap
 - **Status:** Accepted · 2026-10-21
@@ -425,6 +436,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** The standard format, readable by any monitoring tool, with histograms.
 - **Rejected:** *Custom JSON:* a format no tool reads, and no histograms. *expvar:* no labels.
 - **Trade-offs:** One more dependency.
+- **History:** 2026-10-24: AI call duration and first-text wait histograms added (D72).
 
 ### D27 — `make test` runs in Docker
 - **Status:** Accepted · 2026-10-21
