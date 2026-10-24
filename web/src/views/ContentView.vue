@@ -10,6 +10,7 @@ import { LEGACY, type Campaign, type Catalog, type Channel, type Content, type L
 import { render, samplesFor } from '../content/preview'
 import { fromContent, fromVariants, generationOutcome, hasUnsavedChanges, languagesToReplace, toSave, type Draft } from '../content/editing'
 import { languageName, orderLanguages, startingDefault, toWrite } from '../content/languages'
+import { copyAToB, missingB, toSaveB } from '../content/variants'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessageField from '../components/MessageField.vue'
 import MessagePreview from '../components/MessagePreview.vue'
@@ -32,6 +33,9 @@ const saveError = ref<unknown>(null)
 const notice = ref<{ key: Key; name?: string } | null>(null)
 // One draft per language (D64); the tab shown edits drafts[active].
 const drafts = ref<Record<Lang, Draft>>({})
+// An A/B test's version B per language (D68), and which version the tab edits.
+const draftsB = ref<Record<Lang, Draft>>({})
+const showB = ref(false)
 const defaultLanguage = ref<Lang>('')
 const active = ref<Lang>('')
 const fieldErrors = ref<Record<string, string[]>>({})
@@ -46,23 +50,36 @@ const isDraft = computed(() => campaign.value?.status === 'draft')
 const channels = computed<Channel[]>(() => campaign.value?.channels ?? [])
 const uses = (c: Channel) => channels.value.includes(c)
 const saved = computed(() => campaign.value?.content ?? null)
+const abTest = computed(() => !!campaign.value?.ab_test)
+const savedB = computed(() => campaign.value?.content_b ?? null)
+const editingB = computed(() => abTest.value && showB.value)
+const LETTERS = ['A', 'B'] as const // i18n-ignore: version names, the same in every language
+const letter = computed(() => LETTERS[editingB.value ? 1 : 0])
 const name = (l: Lang) => languageName(l, catalog.value)
 const tabs = computed(() => orderLanguages(Object.keys(drafts.value), defaultLanguage.value, catalog.value))
-const draft = computed(() => drafts.value[active.value] ?? fromContent(null))
+const draft = computed(() => (editingB.value ? draftsB.value[active.value] : drafts.value[active.value]) ?? fromContent(null))
 
 // Without saved text, the languages the audience suggests are pre-ticked;
 // they are a suggestion, never a restriction (D64). only: after the AI wrote
 // these languages, take just their text, so edits elsewhere are kept.
-function fromCampaign(c: Campaign, only?: Lang[]) {
-  const fresh = fromVariants(c.content)
-  if (only) for (const l of only) drafts.value[l] = fresh[l] ?? fromContent(null)
+function fromCampaign(c: Campaign, only?: Lang[], variant: 'a' | 'b' = 'a') {
+  const fresh = fromVariants(variant === 'b' ? (c.content_b ?? null) : c.content)
+  const target = variant === 'b' ? draftsB : drafts
+  if (only) for (const l of only) target.value[l] = fresh[l] ?? fromContent(null)
   else {
     drafts.value = fresh
+    draftsB.value = fromVariants(c.content_b ?? null)
     if (!c.content) for (const l of c.recommendation?.languages ?? []) drafts.value[l] = fromContent(null)
   }
   defaultLanguage.value = startingDefault(c.default_language, c.recommendation?.default, catalog.value)
   drafts.value[defaultLanguage.value] ??= fromContent(null)
   if (!drafts.value[active.value]) active.value = defaultLanguage.value
+  withB()
+}
+
+// Every language has a version B draft to edit while the test is on.
+function withB() {
+  if (abTest.value) for (const l of Object.keys(drafts.value)) draftsB.value[l] ??= fromContent(null)
 }
 
 async function refreshEstimate() {
@@ -86,10 +103,19 @@ load()
 
 // The content to save: the chosen channels of every complete language.
 const content = () => toSave(drafts.value, saved.value, channels.value, defaultLanguage.value)
-const complete = () => content() !== null
+// Version B to save, for the languages version A keeps; undefined without a test.
+const contentB = () => (abTest.value ? toSaveB(draftsB.value, savedB.value, channels.value, Object.keys(content() ?? {})) : undefined)
+const complete = () => content() !== null && contentB() !== null
+const unsavedB = () => {
+  if (!abTest.value) return false
+  const kept = Object.fromEntries(Object.entries(draftsB.value).filter(([l]) => drafts.value[l]))
+  return hasUnsavedChanges(kept, savedB.value, channels.value)
+}
 const unsaved = () =>
   !!campaign.value &&
-  (hasUnsavedChanges(drafts.value, saved.value, channels.value) || (saved.value !== null && campaign.value.default_language !== defaultLanguage.value))
+  (hasUnsavedChanges(drafts.value, saved.value, channels.value) ||
+    unsavedB() ||
+    (saved.value !== null && campaign.value.default_language !== defaultLanguage.value))
 
 // Autosave when a field loses focus, after a pause in typing, and before
 // leaving; the content is read when the save runs. Returns whether nothing
@@ -111,9 +137,10 @@ async function commit(quiet = false): Promise<boolean> {
     // cleared or saved meanwhile is never sent.
     await saver.save(async (v) => {
       const c = content()
-      if (!c || !unsaved()) return campaign.value!
+      const b = contentB()
+      if (!c || b === null || !unsaved()) return campaign.value!
       sent = true
-      return campaigns.setContent(id, v, c, defaultLanguage.value)
+      return campaigns.setContent(id, v, c, defaultLanguage.value, b)
     })
     if (!sent) {
       if (!complete() && !quiet) incomplete.value = true
@@ -141,7 +168,7 @@ async function commit(quiet = false): Promise<boolean> {
 // Typing pause: save without waiting for the field to lose focus.
 let pause: ReturnType<typeof setTimeout> | undefined
 watch(
-  drafts,
+  [drafts, draftsB],
   () => {
     clearTimeout(pause)
     pause = setTimeout(() => commit(true), 1500)
@@ -170,6 +197,7 @@ const recommended = (l: Lang) => campaign.value?.recommendation?.languages.inclu
 function toggle(l: Lang, on: boolean) {
   if (on) {
     drafts.value[l] ??= fromContent(null)
+    withB()
     active.value = l
   } else if (saved.value?.[l]) removeConfirm.value = l
   else remove(l)
@@ -178,6 +206,7 @@ function toggle(l: Lang, on: boolean) {
 function remove(l: Lang) {
   removeConfirm.value = null
   delete drafts.value[l]
+  delete draftsB.value[l]
   if (active.value === l) active.value = defaultLanguage.value
   commit()
 }
@@ -195,6 +224,25 @@ function setLanguage(to: Lang) {
   if (defaultLanguage.value === LEGACY) defaultLanguage.value = to
   active.value = to
   commit()
+}
+
+// Turning the A/B test on or off saves edits first; version B's text is
+// kept while it is off (D68).
+async function setAB(on: boolean) {
+  if (!(await commit())) return
+  saveError.value = null
+  try {
+    await saver.save((v) => campaigns.setAB(id, v, on))
+    withB()
+    showB.value = on && showB.value
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return
+    if (saver.state.value !== 'conflict') saveError.value = err
+  }
+}
+
+function copyA() {
+  draftsB.value[active.value] = copyAToB(drafts.value[active.value] ?? fromContent(null))
 }
 
 // The marketer approves each language's text as it is: saved first, never
@@ -251,15 +299,23 @@ const aiProblem = ref<string | null>(null) // the stream's own error text (Engli
 let stop: AbortController | null = null
 const regenerateConfirm = ref<Lang[] | null>(null)
 
-const missing = computed(() => toWrite(tabs.value, saved.value))
+// Version B is written only for languages with saved version A and no B yet.
+const missing = computed(() =>
+  editingB.value
+    ? missingB(Object.keys(saved.value ?? {}), savedB.value).filter((l) => !languagesToReplace([l], draftsB.value, null, channels.value).length)
+    : toWrite(tabs.value, saved.value),
+)
+const writingB = ref(false)
 
 // Ask before the AI replaces anything: saved text or text not saved yet (D66).
 function askToWrite(langs: Lang[]) {
-  if (languagesToReplace(langs, drafts.value, saved.value, channels.value).length) regenerateConfirm.value = langs
+  const [d, s] = editingB.value ? [draftsB.value, savedB.value] : [drafts.value, saved.value]
+  if (languagesToReplace(langs, d, s, channels.value).length) regenerateConfirm.value = langs
   else write(langs, false)
 }
 
 async function write(langs: Lang[], replace: boolean) {
+  const b = editingB.value
   regenerateConfirm.value = null
   // Other languages' edits are saved first, so they survive the AI's save.
   await commit(true)
@@ -269,6 +325,7 @@ async function write(langs: Lang[], replace: boolean) {
   live.value = {}
   retrying.value = false
   writing.value = langs
+  writingB.value = b
   streaming.value = true
   stop = new AbortController()
   const signal = stop.signal
@@ -282,7 +339,7 @@ async function write(langs: Lang[], replace: boolean) {
         await streamContent(
           id,
           version,
-          { languages: langs, default_language: defaultLanguage.value, replace },
+          b ? { languages: langs, replace, variant: 'b' } : { languages: langs, default_language: defaultLanguage.value, replace },
           (e) => {
             const data = e.data as Record<string, unknown>
             if (e.event === 'delta') live.value[data.field as string] = (live.value[data.field as string] ?? '') + (data.text as string)
@@ -306,7 +363,7 @@ async function write(langs: Lang[], replace: boolean) {
     })
     unsavedGeneration.value = result.outcome !== 'done'
     if (result.outcome === 'done') {
-      fromCampaign(campaign.value!, langs)
+      fromCampaign(campaign.value!, langs, b ? 'b' : 'a')
       notice.value = { key: 'content.done' }
       fieldErrors.value = {}
       await refreshEstimate()
@@ -327,15 +384,19 @@ function reload() {
 type Field = 'sms.body' | 'email.subject' | 'email.body'
 // While the AI writes this tab's language, the fields show its text so far.
 const shown = (field: Field, value: string) =>
-  streaming.value && writing.value.includes(active.value) ? (live.value[`${active.value}.${field}`] ?? '') : value
-const errorsFor = (...fields: string[]) => fields.flatMap((f) => fieldErrors.value[`${active.value}.${f}`] ?? [])
+  streaming.value && writing.value.includes(active.value) && writingB.value === editingB.value ? (live.value[`${active.value}.${field}`] ?? '') : value
+// Version B's errors are prefixed "b." (D68).
+const fieldKey = (f: string) => `${editingB.value ? 'b.' : ''}${active.value}.${f}` // i18n-ignore: API field names
+const errorsFor = (...fields: string[]) => fields.flatMap((f) => fieldErrors.value[fieldKey(f)] ?? [])
 // Errors that belong to no field on this tab: another language, or the whole set.
 const otherErrors = computed(() =>
   Object.entries(fieldErrors.value)
-    .filter(([f]) => !['sms', 'sms.body', 'email', 'email.subject', 'email.body'].some((x) => f === `${active.value}.${x}`))
+    .filter(([f]) => !['sms', 'sms.body', 'email', 'email.subject', 'email.body'].some((x) => f === fieldKey(x)))
     .flatMap(([f, msgs]) => {
-      const l = f.split('.')[0]!
-      return msgs.map((m) => (drafts.value[l] || l === LEGACY ? `${name(l)}: ${m}` : m))
+      const b = f.startsWith('b.') // i18n-ignore: API field names
+      const l = f.split('.')[b ? 1 : 0]!
+      const label = b ? `${name(l)} · ${t('ab.version', { v: LETTERS[1] })}` : name(l)
+      return msgs.map((m) => (drafts.value[l] || l === LEGACY ? `${label}: ${m}` : m))
     }),
 )
 const samples = computed(() => samplesFor(active.value))
@@ -344,7 +405,7 @@ const previewContent = computed<Content>(() => ({
   sms: { body: shown('sms.body', draft.value.sms.body) },
   email: { subject: shown('email.subject', draft.value.email.subject), body: shown('email.body', draft.value.email.body) },
 }))
-const over = computed(() => estimate.value?.over_limit?.by_language?.[active.value] ?? null)
+const over = computed(() => (editingB.value ? estimate.value?.over_limit_b : estimate.value?.over_limit)?.by_language?.[active.value] ?? null)
 const kept = computed(() => channelsKeepingText(['sms', 'email'], channels.value, saved.value))
 // A resend's original, in the language shown, else the original's default.
 const original = computed(() => parent.value?.content?.[active.value] ?? parent.value?.content?.[parent.value.default_language ?? ''] ?? null)
@@ -410,6 +471,13 @@ const statusText = computed(() => {
               <span v-if="recommended(l.code)" class="tag">{{ t('content.recommended') }}</span>
             </label>
           </div>
+          <template v-if="!campaign.parent_campaign_id">
+            <label class="language-option ab-switch">
+              <input type="checkbox" :checked="abTest" @change="setAB(($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('ab.switch') }}</span>
+            </label>
+            <p class="muted">{{ t('ab.switchHint') }}</p>
+          </template>
         </fieldset>
 
         <div v-if="streaming || aiProblem || notice?.key === 'content.stopped' || notice?.key === 'content.done' || missing.length" class="ai-bar" :class="{ busy: streaming }">
@@ -420,11 +488,12 @@ const statusText = computed(() => {
             {{ t('content.aiError') }} {{ t('error.details', { message: aiProblem }) }}
           </span>
           <span v-else-if="notice?.key === 'content.stopped' || notice?.key === 'content.done'">{{ t(notice.key) }}</span>
+          <span v-else-if="missing.length && editingB">{{ t('ab.writesB', { names: names(missing) }) }}</span>
           <span v-else-if="missing.length">{{ !campaign.content ? t('content.empty') : '' }} {{ t('content.writesLanguages', { names: names(missing) }) }}</span>
           <span v-else />
           <button v-if="streaming" type="button" class="btn btn-sm" @click="stop?.abort()">{{ t('content.stop') }}</button>
           <button v-else-if="missing.length" type="button" class="btn btn-sm btn-soft" :disabled="locked" @click="askToWrite(missing)">
-            {{ t('content.generate') }}
+            {{ t(editingB ? 'ab.generateB' : 'content.generate') }}
           </button>
         </div>
 
@@ -441,12 +510,18 @@ const statusText = computed(() => {
             {{ name(l) }}
             <span v-if="l === defaultLanguage" class="tag">{{ t('content.lang.default') }}</span>
             <span class="state">{{ t(`content.lang.${stateOf(l)}`) }}</span>
+            <span v-if="abTest && saved?.[l] && !savedB?.[l]" class="tag">{{ t('ab.missingB') }}</span>
           </button>
         </div>
 
         <div class="columns">
           <div class="main">
             <section class="card section lang-panel" :aria-label="name(active)">
+              <div v-if="abTest" class="tabs versions" role="group" :aria-label="t('ab.report.version')">
+                <button v-for="(v, i) in LETTERS" :key="v" type="button" class="tab" :class="{ current: (i === 1) === showB }" :aria-pressed="(i === 1) === showB" @click="showB = i === 1">
+                  {{ t('ab.version', { v }) }}
+                </button>
+              </div>
               <p v-if="stateOf(active) === 'outdated'" role="alert" class="alert alert-warning">{{ t('content.lang.outdatedHint') }}</p>
               <p v-if="active === defaultLanguage" class="muted">{{ t('content.lang.defaultHint') }}</p>
               <template v-if="active === LEGACY">
@@ -464,14 +539,18 @@ const statusText = computed(() => {
                   v-if="saved?.[active] && stateOf(active) !== 'approved'"
                   type="button"
                   class="btn btn-sm btn-primary"
-                  :disabled="streaming || locked"
+                  :disabled="streaming || locked || (abTest && !savedB?.[active])"
                   @click="approve(active)"
                 >
                   {{ t('content.lang.approve', { name: name(active) }) }}
                 </button>
-                <button v-if="active !== LEGACY && saved?.[active]" type="button" class="btn btn-sm btn-soft" :disabled="streaming || locked" @click="askToWrite([active])">
+                <button v-if="!editingB && active !== LEGACY && saved?.[active]" type="button" class="btn btn-sm btn-soft" :disabled="streaming || locked" @click="askToWrite([active])">
                   {{ t('content.lang.rewrite', { name: name(active) }) }}
                 </button>
+                <button v-if="editingB && savedB?.[active]" type="button" class="btn btn-sm btn-soft" :disabled="streaming || locked" @click="askToWrite([active])">
+                  {{ t('ab.rewriteB', { name: name(active) }) }}
+                </button>
+                <button v-if="editingB" type="button" class="btn btn-sm" :disabled="streaming || locked" @click="copyA">{{ t('ab.copyA') }}</button>
                 <button
                   v-if="active !== defaultLanguage && active !== LEGACY && saved?.[active]"
                   type="button"
@@ -482,6 +561,8 @@ const statusText = computed(() => {
                   {{ t('content.lang.makeDefault') }}
                 </button>
               </div>
+              <p v-if="abTest && saved?.[active] && !savedB?.[active]" class="muted">{{ t('ab.writeBFirst') }}</p>
+              <p v-else-if="abTest" class="muted">{{ t('ab.approveCovers', { name: name(active) }) }}</p>
             </section>
             <section v-if="parent && original" class="card section original">
               <p>{{ t('resend.contentLead', { title: briefTitle(parent.request_text), channel: t(`channel.inline.${campaign.channels[0]!}`) }) }}</p>
@@ -495,7 +576,7 @@ const statusText = computed(() => {
               </details>
             </section>
             <section v-if="uses('sms')" class="card section" aria-labelledby="sms-title">
-              <h2 id="sms-title" class="section-title">{{ t('channel.sms') }} · {{ name(active) }}</h2>
+              <h2 id="sms-title" class="section-title">{{ t('channel.sms') }} · {{ name(active) }}<template v-if="abTest"> · {{ t('ab.version', { v: letter }) }}</template></h2>
               <MessageField
                 id="sms-body"
                 v-model="draft.sms.body"
@@ -516,7 +597,7 @@ const statusText = computed(() => {
             </section>
 
             <section v-if="uses('email')" class="card section" aria-labelledby="email-title">
-              <h2 id="email-title" class="section-title">{{ t('channel.email') }} · {{ name(active) }}</h2>
+              <h2 id="email-title" class="section-title">{{ t('channel.email') }} · {{ name(active) }}<template v-if="abTest"> · {{ t('ab.version', { v: letter }) }}</template></h2>
               <MessageField
                 id="email-subject"
                 v-model="draft.email.subject"
@@ -758,6 +839,9 @@ const statusText = computed(() => {
 }
 .tab.outdated .state {
   color: #5a3a0a;
+}
+.versions {
+  margin: -4px 0 4px;
 }
 .lang-panel p {
   margin: 0;

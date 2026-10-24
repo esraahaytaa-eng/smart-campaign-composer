@@ -44,3 +44,15 @@ describe('approvalBlockers', () => {
     expect(approvalBlockers({ ...ready, channels: ['sms'], content: { tr: { sms: { body: 'x' }, email: { subject: '', body: '' } } }, languages: { tr: ok } })).toEqual([])
   })
 })
+
+// D68: an A/B test needs version B in every language; without a test it is ignored.
+describe('approvalBlockers with an A/B test', () => {
+  it('waits for version B in every language', () => {
+    expect(approvalBlockers({ ...ready, abTest: true, contentB: { tr: both } })).toEqual(['missingVersionB'])
+    expect(approvalBlockers({ ...ready, abTest: true, contentB: { tr: both, en: both } })).toEqual([])
+  })
+
+  it('ignores kept version B text while the test is off', () => {
+    expect(approvalBlockers({ ...ready, abTest: false, contentB: {} })).toEqual([])
+  })
+})

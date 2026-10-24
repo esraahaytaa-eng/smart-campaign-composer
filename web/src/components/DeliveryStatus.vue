@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { variantRows } from '../content/variants'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { campaigns, loadCatalog } from '../campaign/client'
 import { ruleLabel } from '../campaign/rules'
@@ -268,6 +269,34 @@ const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels
                 <span class="label"><span :class="['dot', r.group]" aria-hidden="true" />{{ t(`group.${r.group}`) }} <span class="muted">{{ groupSub(r.group, r.reasons) }}</span></span>
                 <strong>{{ formatNumber(r.count) }}</strong>
               </RouterLink>
+            </div>
+            <div v-if="variantRows(c.status.by_variant).length" class="versions-report">
+              <h3 class="small-title">{{ t('ab.report.title') }}</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">{{ t('ab.report.version') }}</th>
+                    <th scope="col">{{ t('ab.report.recipients') }}</th>
+                    <th scope="col">{{ t('ab.report.sent') }}</th>
+                    <th scope="col">{{ t('ab.report.failed') }}</th>
+                    <th scope="col">{{ t('ab.report.skipped') }}</th>
+                    <th scope="col">{{ t('ab.report.tooLong') }}</th>
+                    <th scope="col">{{ t('ab.report.waiting') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="r in variantRows(c.status.by_variant)" :key="r.variant">
+                    <th scope="row">{{ t('ab.version', { v: r.variant.toUpperCase() }) }}</th>
+                    <td>{{ formatNumber(r.audience) }}</td>
+                    <td>{{ formatNumber(r.sent) }}</td>
+                    <td>{{ formatNumber(r.failed) }}</td>
+                    <td>{{ formatNumber(r.skipped) }}</td>
+                    <td>{{ formatNumber(r.tooLong) }}</td>
+                    <td>{{ formatNumber(r.waiting) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="muted small">{{ t('ab.report.note') }}</p>
             </div>
             <p class="muted small">
               <!-- "In the last 5 minutes" only means something while sending. -->
@@ -583,5 +612,26 @@ a.stat:hover .kicker {
   .channels {
     grid-template-columns: 1fr;
   }
+}
+.versions-report {
+  overflow-x: auto;
+}
+.versions-report table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.versions-report th,
+.versions-report td {
+  text-align: right;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.versions-report th:first-child {
+  text-align: left;
+}
+.small-title {
+  font-size: 13px;
+  margin: 8px 0 4px;
 }
 </style>
