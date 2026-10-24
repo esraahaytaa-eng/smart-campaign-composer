@@ -1,11 +1,13 @@
 // What still stops approval. Sending always needs an explicit choice of when,
 // a confirmation that the marketer reviewed it, and a second confirm (D29).
-import type { Channel, Content } from '../campaign/types'
+import type { Channel, Lang, LanguageState, Variants } from '../campaign/types'
 import type { ScheduleProblem } from './schedule'
 
 export type ApprovalState = {
   channels: Channel[]
-  content: Content | null
+  content: Variants | null
+  defaultLanguage: Lang | null
+  languages: Record<Lang, LanguageState>
   audience: number
   when: 'now' | 'later' | null
   at: string | null
@@ -19,6 +21,8 @@ export type Blocker =
   | 'noAudience'
   | 'missingSms'
   | 'missingEmail'
+  | 'missingDefault'
+  | 'unapprovedLanguage'
   | 'scheduleInvalid'
   | 'scheduleTooSoon'
   | 'scheduleTooLate'
@@ -26,8 +30,14 @@ export type Blocker =
 export function approvalBlockers(s: ApprovalState): Blocker[] {
   const out: Blocker[] = []
   const blank = (v?: string) => !v || v.trim() === ''
-  if (s.channels.includes('sms') && blank(s.content?.sms?.body)) out.push('missingSms')
-  if (s.channels.includes('email') && (blank(s.content?.email?.subject) || blank(s.content?.email?.body))) out.push('missingEmail')
+  const all = Object.values(s.content ?? {})
+  if (all.length === 0) all.push({})
+  if (s.channels.includes('sms') && all.some((c) => blank(c.sms?.body))) out.push('missingSms')
+  if (s.channels.includes('email') && all.some((c) => blank(c.email?.subject) || blank(c.email?.body))) out.push('missingEmail')
+  if (s.content && Object.keys(s.content).length > 0) {
+    if (s.defaultLanguage === null || s.content[s.defaultLanguage] === undefined) out.push('missingDefault')
+    if (Object.keys(s.content).some((l) => !s.languages[l]?.approved_at)) out.push('unapprovedLanguage')
+  }
   if (s.audience <= 0) out.push('noAudience')
   if (s.when === null) out.push('chooseWhen')
   if (s.when === 'later') {

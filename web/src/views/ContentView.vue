@@ -2,13 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
 import { ApiError } from '../api'
-import { campaigns, streamContent, type Estimate } from '../campaign/client'
+import { channelsKeepingText } from '../campaign/channels'
+import { campaigns, loadCatalog, streamContent, type Estimate } from '../campaign/client'
 import { createSaver } from '../campaign/saver'
 import { briefTitle } from '../campaign/title'
-import type { Campaign, Channel, Content } from '../campaign/types'
-import { render, SAMPLES } from '../content/preview'
-import { chosenContent, fromContent, generationOutcome, hasUnsavedChanges, needsOverwriteConfirm, type Draft } from '../content/editing'
-import { contentWasStale, markContentFresh } from '../content/stale'
+import { LEGACY, type Campaign, type Catalog, type Channel, type Content, type Lang } from '../campaign/types'
+import { render, samplesFor } from '../content/preview'
+import { fromContent, fromVariants, generationOutcome, hasUnsavedChanges, languagesToReplace, toSave, type Draft } from '../content/editing'
+import { languageName, orderLanguages } from '../content/languages'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessageField from '../components/MessageField.vue'
 import MessagePreview from '../components/MessagePreview.vue'
@@ -24,14 +25,17 @@ const id = Number(route.params.id) // each campaign gets its own page instance
 
 const campaign = ref<Campaign | null>(null)
 const parent = ref<Campaign | null>(null)
+const catalog = ref<Catalog['languages']>([])
 const estimate = ref<Estimate | null>(null)
 const loadError = ref<unknown>(null)
 const saveError = ref<unknown>(null)
-const notice = ref<Key | null>(null)
-const draft = ref<Draft>(fromContent(null))
+const notice = ref<{ key: Key; name?: string } | null>(null)
+// One draft per language (D64); the tab shown edits drafts[active].
+const drafts = ref<Record<Lang, Draft>>({})
+const defaultLanguage = ref<Lang>('')
+const active = ref<Lang>('')
 const fieldErrors = ref<Record<string, string[]>>({})
 const incomplete = ref(false)
-const stale = ref(contentWasStale(id))
 
 const saver = createSaver<Campaign>(
   () => campaign.value?.version ?? 0,
@@ -41,9 +45,24 @@ const locked = computed(() => saver.state.value === 'conflict')
 const isDraft = computed(() => campaign.value?.status === 'draft')
 const channels = computed<Channel[]>(() => campaign.value?.channels ?? [])
 const uses = (c: Channel) => channels.value.includes(c)
+const saved = computed(() => campaign.value?.content ?? null)
+const name = (l: Lang) => languageName(l, catalog.value)
+const tabs = computed(() => orderLanguages(Object.keys(drafts.value), defaultLanguage.value, catalog.value))
+const draft = computed(() => drafts.value[active.value] ?? fromContent(null))
 
-function fromCampaign(c: Campaign) {
-  draft.value = fromContent(c.content)
+// Without saved text, the languages the audience suggests are pre-ticked;
+// they are a suggestion, never a restriction (D64). only: after the AI wrote
+// these languages, take just their text, so edits elsewhere are kept.
+function fromCampaign(c: Campaign, only?: Lang[]) {
+  const fresh = fromVariants(c.content)
+  if (only) for (const l of only) drafts.value[l] = fresh[l] ?? fromContent(null)
+  else {
+    drafts.value = fresh
+    if (!c.content) for (const l of c.recommendation?.languages ?? []) drafts.value[l] = fromContent(null)
+  }
+  defaultLanguage.value = c.default_language ?? c.recommendation?.default ?? catalog.value[0]?.code ?? 'tr'
+  drafts.value[defaultLanguage.value] ??= fromContent(null)
+  if (!drafts.value[active.value]) active.value = defaultLanguage.value
 }
 
 async function refreshEstimate() {
@@ -52,7 +71,8 @@ async function refreshEstimate() {
 
 async function load() {
   try {
-    const c = await campaigns.get(id)
+    const [c, cat] = await Promise.all([campaigns.get(id), loadCatalog()])
+    catalog.value = cat.languages
     campaign.value = c
     fromCampaign(c)
     // A resend shows its original message for reference (D48).
@@ -64,12 +84,12 @@ async function load() {
 }
 load()
 
-// The content to save: only the chosen channels.
-const chosen = (): Content => chosenContent(draft.value, channels.value)
-const complete = () =>
-  (!uses('sms') || draft.value.sms.body.trim() !== '') &&
-  (!uses('email') || (draft.value.email.subject.trim() !== '' && draft.value.email.body.trim() !== ''))
-const unsaved = () => !!campaign.value && hasUnsavedChanges(draft.value, campaign.value.content, channels.value)
+// The content to save: the chosen channels of every complete language.
+const content = () => toSave(drafts.value, saved.value, channels.value, defaultLanguage.value)
+const complete = () => content() !== null
+const unsaved = () =>
+  !!campaign.value &&
+  (hasUnsavedChanges(drafts.value, saved.value, channels.value) || (saved.value !== null && campaign.value.default_language !== defaultLanguage.value))
 
 // Autosave when a field loses focus, after a pause in typing, and before
 // leaving; the content is read when the save runs. Returns whether nothing
@@ -90,18 +110,17 @@ async function commit(quiet = false): Promise<boolean> {
     // The save may wait in the queue: check again when it runs, so text
     // cleared or saved meanwhile is never sent.
     await saver.save(async (v) => {
-      if (!complete() || !unsaved()) return campaign.value!
+      const c = content()
+      if (!c || !unsaved()) return campaign.value!
       sent = true
-      return campaigns.setContent(id, v, chosen())
+      return campaigns.setContent(id, v, c, defaultLanguage.value)
     })
     if (!sent) {
       if (!complete() && !quiet) incomplete.value = true
       return !unsaved()
     }
     fieldErrors.value = {}
-    notice.value = 'content.saved'
-    stale.value = false
-    markContentFresh(id)
+    notice.value = { key: 'content.saved' }
     await refreshEstimate()
     return !unsaved()
   } catch (err) {
@@ -122,13 +141,75 @@ async function commit(quiet = false): Promise<boolean> {
 // Typing pause: save without waiting for the field to lose focus.
 let pause: ReturnType<typeof setTimeout> | undefined
 watch(
-  draft,
+  drafts,
   () => {
     clearTimeout(pause)
     pause = setTimeout(() => commit(true), 1500)
   },
   { deep: true },
 )
+
+// ---- Languages (D64, D66) ----
+const states = computed(() => campaign.value?.languages ?? {})
+type LangState = 'approved' | 'outdated' | 'needsReview' | 'notWritten'
+function stateOf(l: Lang): LangState {
+  const s = states.value[l]
+  if (!saved.value?.[l] || !s) return 'notWritten'
+  if (s.approved_at) return 'approved'
+  return s.outdated ? 'outdated' : 'needsReview'
+}
+const removeConfirm = ref<Lang | null>(null)
+
+function share(l: Lang): string {
+  const total = campaign.value?.counts?.total ?? 0
+  const n = campaign.value?.counts?.by_language?.[l]?.total ?? 0
+  return total > 0 ? t('content.share', { percent: `${Math.round((n / total) * 100)}%` }) : ''
+}
+const recommended = (l: Lang) => campaign.value?.recommendation?.languages.includes(l) ?? false
+
+function toggle(l: Lang, on: boolean) {
+  if (on) {
+    drafts.value[l] ??= fromContent(null)
+    active.value = l
+  } else if (saved.value?.[l]) removeConfirm.value = l
+  else remove(l)
+}
+
+function remove(l: Lang) {
+  removeConfirm.value = null
+  delete drafts.value[l]
+  if (active.value === l) active.value = defaultLanguage.value
+  commit()
+}
+
+function makeDefault(l: Lang) {
+  defaultLanguage.value = l
+  commit()
+}
+
+// Text from before languages were recorded gets a real language (D64).
+function setLanguage(to: Lang) {
+  if (!to || drafts.value[to]) return
+  drafts.value[to] = drafts.value[LEGACY]!
+  delete drafts.value[LEGACY]
+  if (defaultLanguage.value === LEGACY) defaultLanguage.value = to
+  active.value = to
+  commit()
+}
+
+// The marketer approves each language's text as it is: saved first, never
+// rewritten, no AI call (D66).
+async function approve(l: Lang) {
+  if (!(await commit())) return
+  saveError.value = null
+  try {
+    await saver.save((v) => campaigns.approveLanguage(id, l, v))
+    notice.value = { key: 'content.lang.approved.notice', name: name(l) }
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) return
+    if (saver.state.value !== 'conflict') saveError.value = err
+  }
+}
 
 // Leaving (link, Back, a step, another campaign's content page) saves first;
 // if that can't happen, ask. Another campaign's content page is the same
@@ -164,24 +245,32 @@ const streaming = ref(false)
 // A stopped or failed generation saves nothing (D34), so the header must not say "Saved".
 const unsavedGeneration = ref(false)
 const retrying = ref(false)
-const live = ref<Record<string, string>>({})
+const writing = ref<Lang[]>([])
+const live = ref<Record<string, string>>({}) // by field, e.g. "en.sms.body"
 const aiProblem = ref<string | null>(null) // the stream's own error text (English) as details
 let stop: AbortController | null = null
-const regenerateConfirm = ref(false)
+const regenerateConfirm = ref<Lang[] | null>(null)
 
-// Ask before the AI replaces anything: saved content or text not saved yet.
-function askToWrite() {
-  if (needsOverwriteConfirm(draft.value, campaign.value?.content ?? null, channels.value)) regenerateConfirm.value = true
-  else write()
+// Languages ticked without saved text: what "Write with AI" writes. Legacy
+// text has no language the AI could write in.
+const missing = computed(() => tabs.value.filter((l) => l !== LEGACY && !saved.value?.[l]))
+
+// Ask before the AI replaces anything: saved text or text not saved yet (D66).
+function askToWrite(langs: Lang[]) {
+  if (languagesToReplace(langs, drafts.value, saved.value, channels.value).length) regenerateConfirm.value = langs
+  else write(langs, false)
 }
 
-async function write() {
-  regenerateConfirm.value = false
+async function write(langs: Lang[], replace: boolean) {
+  regenerateConfirm.value = null
+  // Other languages' edits are saved first, so they survive the AI's save.
+  await commit(true)
   aiProblem.value = null
   saveError.value = null
   notice.value = null
   live.value = {}
   retrying.value = false
+  writing.value = langs
   streaming.value = true
   stop = new AbortController()
   const signal = stop.signal
@@ -195,6 +284,7 @@ async function write() {
         await streamContent(
           id,
           version,
+          { languages: langs, default_language: defaultLanguage.value, replace },
           (e) => {
             const data = e.data as Record<string, unknown>
             if (e.event === 'delta') live.value[data.field as string] = (live.value[data.field as string] ?? '') + (data.text as string)
@@ -218,13 +308,11 @@ async function write() {
     })
     unsavedGeneration.value = result.outcome !== 'done'
     if (result.outcome === 'done') {
-      fromCampaign(campaign.value!)
-      notice.value = 'content.done'
+      fromCampaign(campaign.value!, langs)
+      notice.value = { key: 'content.done' }
       fieldErrors.value = {}
-      stale.value = false
-      markContentFresh(id)
       await refreshEstimate()
-    } else if (result.outcome === 'stopped') notice.value = 'content.stopped'
+    } else if (result.outcome === 'stopped') notice.value = { key: 'content.stopped' }
   } catch (err) {
     if (saver.state.value !== 'conflict') saveError.value = err
   } finally {
@@ -238,19 +326,35 @@ function reload() {
   window.location.reload() // a fresh start also clears the save queue's conflict state
 }
 
-// While the AI writes, the fields show its text so far.
-const shown = (field: 'sms.body' | 'email.subject' | 'email.body', value: string) => (streaming.value ? (live.value[field] ?? '') : value)
-const longest = SAMPLES.find((s) => s.id === 'long')!.vars
-const len = (text: string) => [...render(text, longest)].length
+type Field = 'sms.body' | 'email.subject' | 'email.body'
+// While the AI writes this tab's language, the fields show its text so far.
+const shown = (field: Field, value: string) =>
+  streaming.value && writing.value.includes(active.value) ? (live.value[`${active.value}.${field}`] ?? '') : value
+const errorsFor = (...fields: string[]) => fields.flatMap((f) => fieldErrors.value[`${active.value}.${f}`] ?? [])
+// Errors that belong to no field on this tab: another language, or the whole set.
+const otherErrors = computed(() =>
+  Object.entries(fieldErrors.value)
+    .filter(([f]) => !['sms', 'sms.body', 'email', 'email.subject', 'email.body'].some((x) => f === `${active.value}.${x}`))
+    .flatMap(([f, msgs]) => {
+      const l = f.split('.')[0]!
+      return msgs.map((m) => (drafts.value[l] || l === LEGACY ? `${name(l)}: ${m}` : m))
+    }),
+)
+const samples = computed(() => samplesFor(active.value))
+const len = (text: string) => [...render(text, samples.value.find((s) => s.id === 'long')!.vars)].length
 const previewContent = computed<Content>(() => ({
   sms: { body: shown('sms.body', draft.value.sms.body) },
   email: { subject: shown('email.subject', draft.value.email.subject), body: shown('email.body', draft.value.email.body) },
 }))
-const over = computed(() => estimate.value?.over_limit ?? null)
+const over = computed(() => estimate.value?.over_limit?.by_language?.[active.value] ?? null)
+const kept = computed(() => channelsKeepingText(['sms', 'email'], channels.value, saved.value))
+// A resend's original, in the language shown, else the original's default.
+const original = computed(() => parent.value?.content?.[active.value] ?? parent.value?.content?.[parent.value.default_language ?? ''] ?? null)
+const names = (langs: Lang[]) => langs.map(name).join(', ')
 const statusText = computed(() => {
   if (streaming.value) return t(retrying.value ? 'content.retrying' : 'content.writing')
   if (aiProblem.value) return t('content.aiError')
-  return notice.value ? t(notice.value) : ''
+  return notice.value ? t(notice.value.key, { name: notice.value.name ?? '' }) : ''
 })
 </script>
 
@@ -288,39 +392,112 @@ const statusText = computed(() => {
           <button type="button" class="btn btn-sm" @click="reload">{{ t('campaign.reload') }}</button>
         </div>
         <div v-else-if="saveError" role="alert" class="alert alert-error">{{ errorText(saveError) }}</div>
-        <div v-if="stale" role="alert" class="alert alert-warning">{{ t('campaign.staleContent') }}</div>
+        <div v-if="otherErrors.length" role="alert" class="alert alert-error">
+          <p v-for="m in otherErrors" :key="m">{{ m }}</p>
+        </div>
 
-        <div class="ai-bar" :class="{ busy: streaming }">
+        <fieldset class="card section languages" :disabled="streaming || locked">
+          <legend class="section-title">{{ t('content.languages') }}</legend>
+          <p class="muted">{{ t('content.languagesHint') }} {{ t('content.languagesCost') }}</p>
+          <div class="language-options">
+            <label v-for="l in catalog" :key="l.code" class="language-option">
+              <input
+                type="checkbox"
+                :checked="!!drafts[l.code]"
+                :disabled="l.code === defaultLanguage"
+                @change="toggle(l.code, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ l.name }}</span>
+              <span v-if="share(l.code)" class="muted">{{ share(l.code) }}</span>
+              <span v-if="recommended(l.code)" class="tag">{{ t('content.recommended') }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div v-if="streaming || aiProblem || notice?.key === 'content.stopped' || notice?.key === 'content.done' || missing.length" class="ai-bar" :class="{ busy: streaming }">
           <span v-if="streaming">
             <strong>{{ t(retrying ? 'content.retrying' : 'content.writing') }}</strong> {{ t('content.writingHint') }}
           </span>
           <span v-else-if="aiProblem" class="problem">
             {{ t('content.aiError') }} {{ t('error.details', { message: aiProblem }) }}
           </span>
-          <span v-else-if="notice === 'content.stopped' || notice === 'content.done'">{{ t(notice) }}</span>
-          <span v-else-if="!campaign.content">{{ t('content.empty') }}</span>
+          <span v-else-if="notice?.key === 'content.stopped' || notice?.key === 'content.done'">{{ t(notice.key) }}</span>
+          <span v-else-if="missing.length">{{ !campaign.content ? t('content.empty') : '' }} {{ t('content.writesLanguages', { names: names(missing) }) }}</span>
           <span v-else />
           <button v-if="streaming" type="button" class="btn btn-sm" @click="stop?.abort()">{{ t('content.stop') }}</button>
-          <button v-else type="button" class="btn btn-sm btn-soft" :disabled="locked" @click="askToWrite">
-            {{ t(campaign.content ? 'content.regenerate' : 'content.generate') }}
+          <button v-else-if="missing.length" type="button" class="btn btn-sm btn-soft" :disabled="locked" @click="askToWrite(missing)">
+            {{ t('content.generate') }}
+          </button>
+        </div>
+
+        <div class="tabs" role="group" :aria-label="t('content.languages')">
+          <button
+            v-for="l in tabs"
+            :key="l"
+            type="button"
+            class="tab"
+            :class="[{ current: l === active }, stateOf(l)]"
+            :aria-pressed="l === active"
+            @click="active = l"
+          >
+            {{ name(l) }}
+            <span v-if="l === defaultLanguage" class="tag">{{ t('content.lang.default') }}</span>
+            <span class="state">{{ t(`content.lang.${stateOf(l)}`) }}</span>
           </button>
         </div>
 
         <div class="columns">
           <div class="main">
-            <section v-if="parent" class="card section original">
+            <section class="card section lang-panel" :aria-label="name(active)">
+              <p v-if="stateOf(active) === 'outdated'" role="alert" class="alert alert-warning">{{ t('content.lang.outdatedHint') }}</p>
+              <p v-if="active === defaultLanguage" class="muted">{{ t('content.lang.defaultHint') }}</p>
+              <template v-if="active === LEGACY">
+                <p class="muted">{{ t('content.lang.legacyHint') }}</p>
+                <label class="set-language">
+                  {{ t('content.lang.setLanguage') }}
+                  <select :disabled="streaming || locked" @change="setLanguage(($event.target as HTMLSelectElement).value)">
+                    <option value="">{{ t('content.lang.chooseLanguage') }}</option>
+                    <option v-for="l in catalog.filter((c) => !drafts[c.code])" :key="l.code" :value="l.code">{{ l.name }}</option>
+                  </select>
+                </label>
+              </template>
+              <div class="lang-actions">
+                <button
+                  v-if="saved?.[active] && stateOf(active) !== 'approved'"
+                  type="button"
+                  class="btn btn-sm btn-primary"
+                  :disabled="streaming || locked"
+                  @click="approve(active)"
+                >
+                  {{ t('content.lang.approve', { name: name(active) }) }}
+                </button>
+                <button v-if="active !== LEGACY && saved?.[active]" type="button" class="btn btn-sm btn-soft" :disabled="streaming || locked" @click="askToWrite([active])">
+                  {{ t('content.lang.rewrite', { name: name(active) }) }}
+                </button>
+                <button
+                  v-if="active !== defaultLanguage && active !== LEGACY && saved?.[active]"
+                  type="button"
+                  class="btn btn-sm"
+                  :disabled="streaming || locked"
+                  @click="makeDefault(active)"
+                >
+                  {{ t('content.lang.makeDefault') }}
+                </button>
+              </div>
+            </section>
+            <section v-if="parent && original" class="card section original">
               <p>{{ t('resend.contentLead', { title: briefTitle(parent.request_text), channel: t(`channel.inline.${campaign.channels[0]!}`) }) }}</p>
               <details v-for="ch in campaign.channels" :key="ch">
                 <summary>{{ t('resend.showOriginal', { channel: t(`channel.inline.${ch}`) }) }}</summary>
-                <p v-if="ch === 'sms' && parent.content?.sms" class="original-text">{{ parent.content.sms.body }}</p>
-                <template v-else-if="ch === 'email' && parent.content?.email">
-                  <p class="original-text"><strong>{{ parent.content.email.subject }}</strong></p>
-                  <p class="original-text">{{ parent.content.email.body }}</p>
+                <p v-if="ch === 'sms' && original.sms" class="original-text">{{ original.sms.body }}</p>
+                <template v-else-if="ch === 'email' && original.email">
+                  <p class="original-text"><strong>{{ original.email.subject }}</strong></p>
+                  <p class="original-text">{{ original.email.body }}</p>
                 </template>
               </details>
             </section>
             <section v-if="uses('sms')" class="card section" aria-labelledby="sms-title">
-              <h2 id="sms-title" class="section-title">{{ t('channel.sms') }}</h2>
+              <h2 id="sms-title" class="section-title">{{ t('channel.sms') }} · {{ name(active) }}</h2>
               <MessageField
                 id="sms-body"
                 v-model="draft.sms.body"
@@ -330,7 +507,7 @@ const statusText = computed(() => {
                 :limit="LIMITS.sms"
                 :length="len(shown('sms.body', draft.sms.body))"
                 :readonly="streaming || locked"
-                :errors="[...(fieldErrors['sms'] ?? []), ...(fieldErrors['sms.body'] ?? [])]"
+                :errors="errorsFor('sms', 'sms.body')"
                 variables
                 @commit="commit"
               />
@@ -341,7 +518,7 @@ const statusText = computed(() => {
             </section>
 
             <section v-if="uses('email')" class="card section" aria-labelledby="email-title">
-              <h2 id="email-title" class="section-title">{{ t('channel.email') }}</h2>
+              <h2 id="email-title" class="section-title">{{ t('channel.email') }} · {{ name(active) }}</h2>
               <MessageField
                 id="email-subject"
                 v-model="draft.email.subject"
@@ -349,7 +526,7 @@ const statusText = computed(() => {
                 :limit="LIMITS.subject"
                 :length="len(shown('email.subject', draft.email.subject))"
                 :readonly="streaming || locked"
-                :errors="[...(fieldErrors['email'] ?? []), ...(fieldErrors['email.subject'] ?? [])]"
+                :errors="errorsFor('email', 'email.subject')"
                 variables
                 @commit="commit"
               />
@@ -362,7 +539,7 @@ const statusText = computed(() => {
                 :limit="LIMITS.body"
                 :length="len(shown('email.body', draft.email.body))"
                 :readonly="streaming || locked"
-                :errors="fieldErrors['email.body']"
+                :errors="errorsFor('email.body')"
                 variables
                 @commit="commit"
               />
@@ -371,10 +548,11 @@ const statusText = computed(() => {
                 — {{ t('content.overHint') }}
               </p>
             </section>
+            <p v-for="c in kept" :key="c" class="muted">{{ t('content.keptChannel', { channel: t(`channel.inline.${c}`) }) }}</p>
             <p v-if="incomplete" class="muted" role="status">{{ t('content.incomplete') }}</p>
           </div>
           <aside class="side">
-            <MessagePreview :content="previewContent" :channels="channels" />
+            <MessagePreview :content="previewContent" :channels="channels" :samples="samples" />
           </aside>
         </div>
 
@@ -389,13 +567,22 @@ const statusText = computed(() => {
     </template>
 
     <ConfirmDialog
-      :open="regenerateConfirm"
-      :title="t('content.regenerateTitle')"
+      :open="regenerateConfirm !== null"
+      :title="t('content.regenerateTitle', { names: names(regenerateConfirm ?? []) })"
       :confirm-label="t('content.regenerateAction')"
-      @confirm="write"
-      @close="regenerateConfirm = false"
+      @confirm="write(regenerateConfirm ?? [], true)"
+      @close="regenerateConfirm = null"
     >
-      <p>{{ t('content.regenerateBody') }}</p>
+      <p>{{ t('content.regenerateBody', { names: names(regenerateConfirm ?? []) }) }}</p>
+    </ConfirmDialog>
+    <ConfirmDialog
+      :open="removeConfirm !== null"
+      :title="t('content.removeTitle', { name: removeConfirm ? name(removeConfirm) : '' })"
+      :confirm-label="t('content.removeAction')"
+      @confirm="remove(removeConfirm!)"
+      @close="removeConfirm = null"
+    >
+      <p>{{ t('content.removeBody') }}</p>
     </ConfirmDialog>
   </div>
 </template>
@@ -523,6 +710,71 @@ const statusText = computed(() => {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+.languages {
+  border: 1px solid var(--line);
+  margin: 0;
+}
+.languages legend {
+  padding: 0 4px;
+}
+.language-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.language-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 14px;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tab {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  cursor: pointer;
+}
+.tab.current {
+  border-color: var(--primary);
+  box-shadow: inset 0 -3px 0 var(--primary);
+  font-weight: 650;
+}
+.tab .state {
+  font-size: 12px;
+  color: var(--muted);
+}
+.tab.outdated .state {
+  color: #5a3a0a;
+}
+.lang-panel p {
+  margin: 0;
+}
+.lang-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.set-language {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
 }
 .original p {
   margin: 0;

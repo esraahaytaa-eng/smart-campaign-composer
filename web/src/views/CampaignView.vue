@@ -2,12 +2,12 @@
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../api'
-import { channelsLosingContent } from '../campaign/channels'
+import { channelsKeepingText } from '../campaign/channels'
 import { campaigns, loadCatalog } from '../campaign/client'
 import { defaultForm, fromForm, ruleErrors, ruleKey, toForm, withoutRule, withRule, type RuleForm } from '../campaign/rules'
 import { createSaver } from '../campaign/saver'
 import { briefTitle } from '../campaign/title'
-import { contentWasStale, markContentStale } from '../content/stale'
+import { outdatedLanguages } from '../content/stale'
 import type { Campaign, Catalog, Channel, FieldError, Rule } from '../campaign/types'
 import AudiencePanel from '../components/AudiencePanel.vue'
 import ChannelPicker from '../components/ChannelPicker.vue'
@@ -34,7 +34,8 @@ const saveError = ref<unknown>(null)
 const rulesProblem = ref<Text[]>([])
 const notice = ref<Key | null>(null) // announced politely: what just happened
 const change = ref<number | null>(null)
-const staleContent = ref(contentWasStale(Number(route.params.id)))
+// D40, D66: the server marks each language written for an earlier brief.
+const staleContent = computed(() => outdatedLanguages(campaign.value?.languages).length > 0)
 
 const saver = createSaver<Campaign>(
   () => campaign.value?.version ?? 0,
@@ -83,18 +84,17 @@ async function save(op: (version: number) => Promise<Campaign>, done?: Key, bann
 }
 
 // ---- channels ----
-const channelConfirm = ref<{ next: Channel[]; losing: Channel[] } | null>(null)
+// A removed channel's text is kept, not sent, and comes back with it (D67).
+const keptChannels = ref<Channel[]>([])
 function pickChannels(next: Channel[]) {
   const c = campaign.value!
-  const losing = channelsLosingContent(c.channels, next, c.content)
-  if (losing.length) channelConfirm.value = { next, losing }
-  else applyChannels(next)
-}
-function applyChannels(next: Channel[]) {
-  channelConfirm.value = null
-  const before = campaign.value?.counts?.total
+  const kept = channelsKeepingText(c.channels, next, c.content)
+  const before = c.counts?.total
   save((v) => campaigns.setChannels(id, v, next), 'notice.channelsSaved')
-    .then(() => (change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before))
+    .then(() => {
+      change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before
+      keptChannels.value = kept
+    })
     .catch(() => {})
 }
 const channelName = (c: Channel) => t(c === 'sms' ? 'channel.sms' : 'channel.email')
@@ -191,13 +191,10 @@ async function reinterpret() {
   saveError.value = null
   briefBusy.value = true
   const before = campaign.value?.counts?.total
-  const hadContent = !!campaign.value?.content
   try {
     await saver.save((v) => campaigns.setRequest(id, v, brief.value.trim()))
     notice.value = 'notice.reinterpreted'
     change.value = before === undefined ? null : (campaign.value?.counts?.total ?? 0) - before
-    staleContent.value = hadContent
-    if (hadContent) markContentStale(id) // the content step warns too (D40)
   } catch (err) {
     // Nothing was saved (D15); the new text stays so it can be rephrased.
     briefProblem.value = saver.state.value === 'conflict' ? null : { err, reason: aiReason(err) }
@@ -266,6 +263,9 @@ function reload() {
         <StepBar :current="1" :campaign-id="id" />
         <div v-if="staleContent" role="alert" class="alert alert-warning">
           {{ t('campaign.staleContent') }}
+        </div>
+        <div v-if="keptChannels.length" role="status" class="alert alert-info">
+          {{ t('notice.channelTextKept', { channels: channelList(keptChannels) }) }}
         </div>
 
         <div class="columns">
@@ -338,16 +338,6 @@ function reload() {
       @close="editor = null"
     />
 
-    <ConfirmDialog
-      :open="!!channelConfirm"
-      :title="t('confirm.removeChannel', { channels: channelList(channelConfirm?.losing ?? []) })"
-      :confirm-label="t('confirm.removeChannelAction')"
-      danger
-      @confirm="applyChannels(channelConfirm!.next)"
-      @close="channelConfirm = null"
-    >
-      <p>{{ t('confirm.removeChannelBody', { channels: channelList(channelConfirm?.losing ?? []) }) }}</p>
-    </ConfirmDialog>
 
     <ConfirmDialog
       :open="reinterpretConfirm"

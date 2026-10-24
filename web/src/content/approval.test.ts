@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { approvalBlockers, type ApprovalState } from './approval'
 
+const both = { sms: { body: 'Merhaba {{first_name}}' }, email: { subject: 'Konu', body: 'Merhaba' } }
+const ok = { approved_at: '2026-10-24T10:00:00Z', outdated: false }
 const ready: ApprovalState = {
   channels: ['sms', 'email'],
-  content: { sms: { body: 'Merhaba {{first_name}}' }, email: { subject: 'Konu', body: 'Merhaba' } },
+  content: { tr: both, en: both },
+  defaultLanguage: 'tr',
+  languages: { tr: ok, en: ok },
   audience: 12,
   when: 'now',
   at: null,
@@ -11,7 +15,8 @@ const ready: ApprovalState = {
   scheduleProblem: null,
 }
 
-// Sending always needs an explicit choice and a confirmation (D9, D29).
+// Sending always needs an explicit choice and a confirmation (D9, D29), and
+// every language approved by the marketer (D66).
 describe('approvalBlockers', () => {
   it('is empty when everything is in place', () => {
     expect(approvalBlockers(ready)).toEqual([])
@@ -21,16 +26,21 @@ describe('approvalBlockers', () => {
     [{ when: null }, 'chooseWhen'],
     [{ reviewed: false }, 'confirmReview'],
     [{ audience: 0 }, 'noAudience'],
-    [{ content: { sms: { body: 'x' } } }, 'missingEmail'],
-    [{ content: { email: { subject: 's', body: 'b' } } }, 'missingSms'],
-    [{ content: { sms: { body: '  ' }, email: { subject: 's', body: 'b' } } }, 'missingSms'],
+    [{ content: { tr: both, en: { sms: { body: 'x' } } } }, 'missingEmail'],
+    [{ content: { tr: { email: { subject: 's', body: 'b' } }, en: both } }, 'missingSms'],
+    [{ content: { tr: { sms: { body: '  ' }, email: { subject: 's', body: 'b' } }, en: both } }, 'missingSms'],
+    [{ content: null, defaultLanguage: null, languages: {} }, 'missingSms'],
+    [{ defaultLanguage: null }, 'missingDefault'],
+    [{ defaultLanguage: 'de' }, 'missingDefault'],
+    [{ languages: { tr: ok, en: { approved_at: null, outdated: false } } }, 'unapprovedLanguage'],
+    [{ languages: { tr: ok, en: { approved_at: null, outdated: true } } }, 'unapprovedLanguage'],
     [{ when: 'later', at: null, scheduleProblem: 'invalid' }, 'scheduleInvalid'],
     [{ when: 'later', at: '2026-10-22T12:00:00Z', scheduleProblem: 'tooSoon' }, 'scheduleTooSoon'],
   ])('%j blocks with %s', (patch, blocker) => {
     expect(approvalBlockers({ ...ready, ...patch } as ApprovalState)).toContain(blocker)
   })
 
-  it('needs only the chosen channel', () => {
-    expect(approvalBlockers({ ...ready, channels: ['sms'], content: { sms: { body: 'x' } } })).toEqual([])
+  it('needs only the chosen channel; kept text of another channel is ignored (D67)', () => {
+    expect(approvalBlockers({ ...ready, channels: ['sms'], content: { tr: { sms: { body: 'x' }, email: { subject: '', body: '' } } }, languages: { tr: ok } })).toEqual([])
   })
 })

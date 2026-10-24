@@ -2,7 +2,7 @@
 // cancel it while it sends. The campaign goes to every SMS customer (about
 // 2,100) through the mock SMS provider, which at 100/s takes ~20 s, long
 // enough to watch counts move, pause, resume and cancel before it ends.
-import { ANKARA_BRIEF, BASE, suite } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, suite, putContent } from './lib.mjs'
 
 export default () =>
   suite('live', async (t) => {
@@ -15,7 +15,7 @@ export default () =>
     const cities = (await (await page.request.get(`${BASE}/api/catalog`)).json()).cities
     const rules = await page.request.put(`${BASE}/api/campaigns/${id}/rules`, { data: { version: 1, rules: [{ field: 'city', op: 'in', value: cities }] } })
     check(rules.ok(), `test setup: every city (${cities.length}) as the audience`)
-    await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 2, content: { sms: { body: 'Merhaba {{first_name}}, hafta sonu indirimi!' } } } })
+    await putContent(page, id, 2, { sms: { body: 'Merhaba {{first_name}}, hafta sonu indirimi!' } })
     check((await page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 3, send: 'now' } })).ok(), 'test setup: sent now to every SMS customer')
 
     // mid-send: live, counts moving

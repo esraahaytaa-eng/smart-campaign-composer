@@ -2,7 +2,7 @@
 // campaign and its cancel, and live delivery until completed. The live case
 // really sends, to the mock SMS provider only, to the ~60 SMS customers in
 // Adana, so the run finishes in seconds.
-import { ANKARA_BRIEF, BASE, suite } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, suite, putContent } from './lib.mjs'
 
 const sms = { sms: { body: 'Merhaba {{first_name}}, hafta sonu indirimi başladı!' } }
 
@@ -11,7 +11,7 @@ export default () =>
     const { page, check } = t
     await t.signIn()
     const approve = async (id, send) => {
-      await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: sms } })
+      await putContent(page, id, 1, sms)
       return page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 2, send } })
     }
 
@@ -34,7 +34,7 @@ export default () =>
     // live delivery until completed
     const live = await t.draft(ANKARA_BRIEF, ['sms'])
     await page.request.put(`${BASE}/api/campaigns/${live}/rules`, { data: { version: 1, rules: [{ field: 'city', op: 'in', value: ['Adana'] }] } })
-    await page.request.put(`${BASE}/api/campaigns/${live}/content`, { data: { version: 2, content: sms } })
+    await putContent(page, live, 2, sms)
     const sent = await page.request.post(`${BASE}/api/campaigns/${live}/approve`, { data: { version: 3, send: 'now' } })
     check(sent.ok(), 'test setup: sent now to Adana')
     const streams = []

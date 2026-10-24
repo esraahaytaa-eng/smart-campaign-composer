@@ -1,6 +1,6 @@
 // Content and review & approve (T17), including the T17 review fixes: no
 // lost edits, safe navigation, version conflicts, and explicit approval.
-import { ANKARA_BRIEF, BASE, CART_BRIEF, suite, WELCOME_BRIEF } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, CART_BRIEF, suite, WELCOME_BRIEF, putContent } from './lib.mjs'
 
 const SMS = 'Merhaba {{first_name}}, hafta sonu indirimi başladı!'
 const content = (sms = SMS) => ({ sms: { body: sms }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } })
@@ -20,7 +20,7 @@ export default () =>
     check((await page.locator('#sms-body').getAttribute('readonly')) !== null, 'fields are read-only while the AI writes')
     await bar.getByText('The AI wrote the messages').waitFor({ timeout: 30000 })
     const written = await t.get(id)
-    check(!!written.content?.sms?.body && (await page.locator('#sms-body').inputValue()) === written.content.sms.body, "the AI's messages are saved and shown")
+    check(!!written.content?.tr?.sms?.body && (await page.locator('#sms-body').inputValue()) === written.content.tr.sms.body, "the AI's messages are saved and shown")
     const preview = page.locator('section', { has: page.getByRole('heading', { name: 'Preview' }) })
     check(await preview.getByText('Fictional examples: no real customer data is shown.').isVisible(), 'the preview says its customers are fictional')
     check(await preview.getByText(/segment/).isVisible(), 'SMS encoding and segments are shown')
@@ -33,14 +33,14 @@ export default () =>
     await page.getByText('All changes saved').waitFor()
     await page.waitForTimeout(400)
     const edited = await t.get(id)
-    check(edited.content.sms.body === SMS + ' {{city}}', 'an edit with an inserted variable is saved')
+    check(edited.content.tr.sms.body === SMS + ' {{city}}', 'an edit with an inserted variable is saved')
 
-    await page.getByRole('button', { name: 'Rewrite with AI' }).click()
+    await page.getByRole('button', { name: /^Rewrite .+ with AI$/ }).click()
     await page.getByRole('alertdialog').getByRole('button', { name: 'Rewrite' }).click()
     await page.getByRole('button', { name: 'Stop' }).click()
     await bar.getByText('Stopped. Nothing was saved').waitFor()
     const stopped = await t.get(id)
-    check(stopped.version === edited.version && stopped.content.sms.body === edited.content.sms.body, 'Stop saves nothing')
+    check(stopped.version === edited.version && stopped.content.tr.sms.body === edited.content.tr.sms.body, 'Stop saves nothing')
 
     // Reach the content step the way a marketer does: an in-app link, so Back
     // is a route change the app guards (a full page load would use the
@@ -79,12 +79,12 @@ export default () =>
     // review fix 2: Back right after typing saves the edit (no blur needed)
     {
       const d = await t.draft(CART_BRIEF)
-      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 1, content: content() } })
+      await putContent(page, d, 1, content())
       await viaApp(d)
       await page.locator('#sms-body').fill('Typed and left with Back {{first_name}}')
       await page.goBack()
       await page.getByText('Estimated audience').waitFor()
-      check((await t.get(d)).content.sms.body === 'Typed and left with Back {{first_name}}', 'Back after typing saves the edit first')
+      check((await t.get(d)).content.tr.sms.body === 'Typed and left with Back {{first_name}}', 'Back after typing saves the edit first')
 
       // closing the tab with unsaved typing triggers the browser's leave prompt
       const tab = await t.context.newPage()
@@ -104,23 +104,23 @@ export default () =>
     // review fix 3: a change elsewhere during generation is a conflict, not adopted
     {
       const d = await t.draft(CART_BRIEF)
-      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 1, content: content() } })
+      await putContent(page, d, 1, content())
       await page.goto(`${BASE}/campaigns/${d}/content`)
       await page.locator('#sms-body').waitFor()
-      await page.getByRole('button', { name: 'Rewrite with AI' }).click()
+      await page.getByRole('button', { name: /^Rewrite .+ with AI$/ }).click()
       await page.getByRole('alertdialog').getByRole('button', { name: 'Rewrite' }).click()
       await bar.getByText('The AI is writing the messages…').waitFor()
-      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 2, content: content('OTHER TAB EDIT') } })
+      await putContent(page, d, 2, content('OTHER TAB EDIT'))
       await page.getByText('This draft was changed elsewhere').waitFor({ timeout: 30000 })
       check(true, 'a change elsewhere during generation shows "changed elsewhere"')
-      check((await t.get(d)).content.sms.body === 'OTHER TAB EDIT', "the other tab's edit is kept")
+      check((await t.get(d)).content.tr.sms.body === 'OTHER TAB EDIT', "the other tab's edit is kept")
       check((await page.locator('#sms-body').getAttribute('readonly')) !== null, 'editing stays locked until reload')
     }
 
     // re-review: one edit is one save, and a queued save rechecks its content
     {
       const d = await t.draft(CART_BRIEF)
-      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 1, content: content() } })
+      await putContent(page, d, 1, content())
       await viaApp(d)
       let puts = 0
       const count = (req) => req.method() === 'PUT' && req.url().endsWith(`/campaigns/${d}/content`) && puts++
@@ -158,7 +158,7 @@ export default () =>
     // with no save loop and no dialogs
     {
       const d = await t.draft(CART_BRIEF)
-      await page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version: 1, content: content() } })
+      await putContent(page, d, 1, content())
       await viaApp(d)
       let puts = 0
       let dialogs = 0
@@ -178,6 +178,12 @@ export default () =>
       check(page.url().includes('/login'), 'an expired session leads to sign-in')
       check(puts <= 2 && dialogs === 0, `no save loop and no dialogs (${puts} saves, ${dialogs} dialogs)`)
       await t.context.addCookies(cookies) // signed in again for the rest
+    }
+
+    // every language is approved on the content step (D66; the browser flow is in languages-content)
+    {
+      const c = await t.get(id)
+      for (const lang of Object.keys(c.content)) await page.request.post(`${BASE}/api/campaigns/${id}/languages/${lang}/approve`, { data: { version: c.version } })
     }
 
     // review: the suggestion is preselected and labelled; approval stays explicit
@@ -203,7 +209,7 @@ export default () =>
 
     // review fix 4: a change elsewhere before approving shows "changed elsewhere"
     const before = await t.get(id)
-    await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: before.version, content: content() } })
+    await putContent(page, id, before.version, content())
     await approveBtn.click()
     await page.getByRole('alertdialog').getByRole('button', { name: 'Approve and schedule' }).click()
     await page.getByText('This draft was changed elsewhere').waitFor()
@@ -221,7 +227,7 @@ export default () =>
 
     // no time in the brief: nothing preselected
     const id2 = await t.draft(WELCOME_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${id2}/content`, { data: { version: 1, content: { sms: { body: SMS } } } })
+    await putContent(page, id2, 1, { sms: { body: SMS } })
     await page.goto(`${BASE}/campaigns/${id2}/review`)
     await page.getByRole('heading', { name: 'When should it send?' }).waitFor()
     check(!(await page.getByRole('radio', { name: /Send now/ }).isChecked()) && !(await page.getByRole('radio', { name: /Schedule/ }).isChecked()), 'nothing is preselected without a time')

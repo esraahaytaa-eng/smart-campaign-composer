@@ -7,7 +7,7 @@ import { briefTitle } from '../campaign/title'
 import type { Campaign, Channel } from '../campaign/types'
 import { approvalBlockers, type Blocker } from '../content/approval'
 import { SAMPLES } from '../content/preview'
-import { contentWasStale } from '../content/stale'
+import { outdatedLanguages } from '../content/stale'
 import { browserZone, fromLocalInput, scheduleProblem, suggestion, toLocalInput } from '../content/schedule'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessagePreview from '../components/MessagePreview.vue'
@@ -20,7 +20,7 @@ const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
 // The brief was re-interpreted after the messages were written (D40).
-const stale = contentWasStale(id)
+const stale = computed(() => outdatedLanguages(campaign.value?.languages).length > 0) // D40, D66
 
 const campaign = ref<Campaign | null>(null)
 const estimate = ref<Estimate | null>(null)
@@ -73,6 +73,8 @@ const blockers = computed<Blocker[]>(() =>
     ? approvalBlockers({
         channels: channels.value,
         content: campaign.value.content,
+        defaultLanguage: campaign.value.default_language,
+        languages: campaign.value.languages ?? {},
         audience: counts.value.total,
         when: when.value,
         at: at.value,
@@ -84,6 +86,8 @@ const blockers = computed<Blocker[]>(() =>
 const sample = SAMPLES[0]!.vars
 const rules = computed(() => (campaign.value?.rules ?? []).map(ruleLabel))
 const isResend = computed(() => campaign.value?.parent_campaign_id != null)
+// shortcut: previews the default language only, until the review shows every language.
+const defaultContent = computed(() => campaign.value?.content?.[campaign.value.default_language ?? ''] ?? null)
 const blockerList = ref<HTMLElement>()
 
 async function openConfirm() {
@@ -191,7 +195,7 @@ function reload() {
                   <RouterLink :to="{ name: 'campaign-content', params: { id } }">{{ t('review.editContent') }}</RouterLink>
                 </span>
               </div>
-              <MessagePreview v-if="campaign.content" :content="campaign.content" :channels="channels" />
+              <MessagePreview v-if="defaultContent" :content="defaultContent" :channels="channels" />
               <p v-else class="muted">{{ t('content.empty') }}</p>
               <p v-if="over?.sms" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overSms', { count: formatNumber(over.sms) }) }}</p>
               <p v-if="over?.email" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overEmail', { count: formatNumber(over.email) }) }}</p>

@@ -1,7 +1,8 @@
-import type { Channel, Content } from './types'
+import type { Channel, Variants } from './types'
 
-// channelsLosingContent lists the channels a change would remove that already
-// have content; the backend deletes it (D38), so the composer asks first.
-export function channelsLosingContent(current: Channel[], next: Channel[], content: Content | null): Channel[] {
-  return current.filter((c) => !next.includes(c) && content?.[c] !== undefined)
+// channelsKeepingText lists the channels a change would remove that already
+// have text in some language; the text is kept and comes back with the
+// channel (D67), so the composer says so instead of asking.
+export function channelsKeepingText(current: Channel[], next: Channel[], content: Variants | null): Channel[] {
+  return current.filter((c) => !next.includes(c) && Object.values(content ?? {}).some((v) => v[c] !== undefined))
 }

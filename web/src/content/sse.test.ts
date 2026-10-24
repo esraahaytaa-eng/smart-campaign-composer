@@ -25,6 +25,11 @@ describe('createSSEParser', () => {
     expect(parse(stream.split(''))).toEqual(whole)
   })
 
+  // D64: one stream writes several languages; fields name the language.
+  it('keeps the language in field names', () => {
+    expect(parse(['event: delta\ndata: {"field":"en.sms.body","text":"Hi"}\n\n'])).toEqual([{ event: 'delta', data: { field: 'en.sms.body', text: 'Hi' } }])
+  })
+
   it('accepts CRLF line endings and joins multi-line data', () => {
     expect(parse(['event: retry\r\ndata: {"errors":\r\ndata: ["a"]}\r\n\r\n'])).toEqual([{ event: 'retry', data: { errors: ['a'] } }])
   })

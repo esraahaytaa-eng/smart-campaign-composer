@@ -2,9 +2,18 @@ import { api, ApiError, responseError } from '../api'
 import { createSSEParser, type SSEEvent } from '../content/sse'
 import { recipientsPath, type RecipientsPage, type RecipientsQuery } from '../delivery/recipients'
 import { listPath, type ListPage, type ListQuery } from './list'
-import type { Campaign, Catalog, Channel, Content, Rule } from './types'
+import type { Campaign, Catalog, Channel, ChannelCounts, DeliveryCount, Lang, Rule, Variants } from './types'
 
-export type Estimate = { audience: { total: number; sms: number; email: number }; over_limit: { sms: number; email: number } | null; calculated_at: string }
+type OverLimit = { sms: number; email: number }
+export type Estimate = {
+  audience: ChannelCounts & { by_language?: Record<Lang, ChannelCounts> }
+  over_limit: (OverLimit & { by_language?: Record<Lang, OverLimit> }) | null
+  calculated_at: string
+  delivery?: Partial<Record<Channel, Record<Lang, DeliveryCount>>>
+  recommendation?: { languages: Lang[]; default: Lang }
+}
+// What the AI writes (D64): replace rewrites languages that already have text (D66).
+export type WriteRequest = { languages: Lang[]; default_language?: Lang; replace: boolean }
 
 const path = (id: number, rest = '') => `/api/campaigns/${id}${rest}`
 
@@ -23,8 +32,11 @@ export const campaigns = {
   setRequest: (id: number, version: number, request: string) =>
     api<Campaign>(path(id, '/request'), { method: 'PUT', body: { version, request } }),
   remove: (id: number, version: number) => api<void>(path(id), { method: 'DELETE', body: { version } }),
-  setContent: (id: number, version: number, content: Content) =>
-    api<Campaign>(path(id, '/content'), { method: 'PUT', body: { version, content } }),
+  setContent: (id: number, version: number, content: Variants, defaultLanguage: Lang) =>
+    api<Campaign>(path(id, '/content'), { method: 'PUT', body: { version, default_language: defaultLanguage, content } }),
+  // A language's text approved as it is: no new version, no AI call (D66).
+  approveLanguage: (id: number, lang: Lang, version: number) =>
+    api<Campaign>(path(id, `/languages/${lang}/approve`), { method: 'POST', body: { version } }),
   estimate: (id: number) => api<Estimate>(path(id, '/estimate')),
   recipients: (id: number, q: RecipientsQuery) => api<RecipientsPage>(recipientsPath(id, q)),
   // send is required: "now" or { at } (D29). Nothing is sent without it.
@@ -51,14 +63,14 @@ export function browserTimeZone(): string {
 // streamContent asks the AI for the messages and delivers the stream's events
 // (delta, retry, done, error) as they arrive (D34). It is a POST, so it uses
 // fetch, not EventSource; abort the signal to stop (nothing is saved then).
-export async function streamContent(id: number, version: number, onEvent: (e: SSEEvent) => void, signal: AbortSignal): Promise<void> {
+export async function streamContent(id: number, version: number, req: WriteRequest, onEvent: (e: SSEEvent) => void, signal: AbortSignal): Promise<void> {
   const url = path(id, '/content')
   let res: Response
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ version, ...req }),
       credentials: 'same-origin',
       signal,
     })

@@ -19,6 +19,7 @@ const catalog: Catalog = {
   cities: ['Ankara', 'İstanbul', 'İzmir'],
   categories: ['books', 'fashion'],
   limits: { max_rules: 20, max_days: 365, max_count: 10000, max_amount: 1000000, min_date: '2000-01-01' },
+  languages: [{ code: 'tr', name: 'Türkçe' }, { code: 'en', name: 'English' }],
 }
 
 const rule = (field: string, op: string, value: unknown): Rule => ({ field, op, value })

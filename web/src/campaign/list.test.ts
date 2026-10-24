@@ -13,6 +13,7 @@ const c = (status: Status, patch: Partial<Campaign> = {}): Campaign => ({
   version: 1,
   send_at: null,
   schedule_note: null,
+  default_language: null,
   time_zone: 'Europe/Istanbul',
   parent_campaign_id: null,
   content: null,

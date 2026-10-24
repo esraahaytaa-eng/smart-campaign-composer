@@ -61,6 +61,8 @@ export default () =>
     await page.locator('#sms-body').fill(SHORT)
     await page.locator('#sms-body').blur()
     await page.getByText('All changes saved').waitFor()
+    await page.getByRole('button', { name: 'Approve Türkçe' }).click() // every language is reviewed (D66)
+    await page.locator('.tabs').getByText('Approved').waitFor()
     await page.goto(`${BASE}/campaigns/${resend}/review`)
     await page.getByRole('radio', { name: /Send now/ }).click()
     await page.getByRole('checkbox').check()

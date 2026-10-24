@@ -81,6 +81,15 @@ export const WELCOME_BRIEF = 'Send a welcome discount to users who signed up in 
 // a send gives both sent and skipped (character limit) recipients.
 export const LONG_SMS = 'Merhaba {{first_name}} {{last_name}}, ' + 'hafta sonu indirimi başladı! Sepetinizdeki ürünlerde geçerli fırsatlar için hemen uygulamayı açın ve kodu girin: HAFTA'.padEnd(150 - 'Merhaba , '.length, '.')
 
+// Saves one language's messages as the default and approves them, as the
+// marketer does on the content step (D64, D66). approve: false leaves them
+// for review. Approving keeps the version; the save bumps it.
+export async function putContent(page, id, version, content, { lang = 'tr', approve = true } = {}) {
+  const res = await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version, default_language: lang, content: { [lang]: content } } })
+  if (res.ok() && approve) await page.request.post(`${BASE}/api/campaigns/${id}/languages/${lang}/approve`, { data: { version: version + 1 } })
+  return res
+}
+
 // Campaigns several files need are sent once per run and shared; every
 // marketer sees every campaign (D10). The first caller sends, the others wait.
 const once = new Map()
@@ -93,7 +102,7 @@ export function sentOnce(key, send) {
 export const longSmsToAnkara = (t) =>
   sentOnce('long-sms-ankara', async () => {
     const id = await t.draft(ANKARA_BRIEF, ['sms'])
-    await t.page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: { sms: { body: LONG_SMS } } } })
+    await putContent(t.page, id, 1, { sms: { body: LONG_SMS } })
     const ok = (await t.page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 2, send: 'now' } })).ok()
     return { id, ok: ok && (await t.completed(id)) }
   })
