@@ -68,7 +68,7 @@ func TestLanguages_ConsistentEverywhere(t *testing.T) {
 		want = append(want, l.Code)
 	}
 	slices.Sort(want)
-	for _, column := range []string{"campaign_languages.language", "campaigns.default_language"} {
+	for _, column := range []string{"campaign_languages.language", "campaigns.default_language", "messages.language"} {
 		table, col, _ := strings.Cut(column, ".")
 		def := str(t, pool, `SELECT pg_get_constraintdef(oid) FROM pg_constraint
 			WHERE conrelid = '`+table+`'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%`+col+`%'`)

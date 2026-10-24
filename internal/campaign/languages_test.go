@@ -169,3 +169,34 @@ func TestDraft_RecommendationAndFallback(t *testing.T) {
 		t.Fatalf("the approval estimate keeps the split, got %+v", got.ApprovalEstimate)
 	}
 }
+
+// D31, D64: a resend's languages follow the skipped recipients; it goes
+// through the same content and review steps as any draft.
+func TestResend_LanguagesOfSkipped(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	parent := a.parentWithSkips() // the resend reaches user 1 only
+	a.exec(`UPDATE users SET language = 'en' WHERE id = 1`)
+
+	r := decode[draft](t, a.do(http.MethodPost, "/api/campaigns/"+itoa(parent)+"/resend", `{"channel":"sms"}`))
+	got := decode[struct {
+		Counts struct {
+			ByLanguage map[string]struct{ SMS int } `json:"by_language"`
+		} `json:"counts"`
+		Recommendation struct {
+			Languages []string `json:"languages"`
+			Default   string   `json:"default"`
+		} `json:"recommendation"`
+	}](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(r.ID), ""))
+	if got.Counts.ByLanguage["en"].SMS != 1 || len(got.Counts.ByLanguage) != 1 || got.Recommendation.Default != "en" {
+		t.Fatalf("want the skipped English speaker counted and English recommended, got %+v %+v", got.Counts, got.Recommendation)
+	}
+	a.putContent(r.ID, `{"version":1,"default_language":"en","content":{"en":{"sms":{"body":"Hi {{first_name}}"}}}}`)
+	if code, _ := a.approve(r.ID, `{"version":2,"send":"now"}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("the resend's language needs review too, got %d", code)
+	}
+	a.approveLanguages(r.ID, 2, "en")
+	if code, body := a.approve(r.ID, `{"version":2,"send":"now"}`); code != http.StatusOK {
+		t.Fatalf("want the resend approved, got %d %v", code, body)
+	}
+}

@@ -52,11 +52,14 @@ func (q *Queue) buildOne(ctx context.Context, now time.Time) (bool, error) {
 		rules    []audience.Rule
 		zone     string
 		parent   *int64
+		def      *string // set on every approved campaign with content
+		langs    []string
 	)
 	// SKIP LOCKED: concurrent builders take different campaigns; a cancel waits for this one.
-	err = tx.QueryRow(ctx, `SELECT id, channels, rules, time_zone, parent_campaign_id FROM campaigns
-		WHERE status = 'approved' AND send_at <= $1 ORDER BY send_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).
-		Scan(&id, &channels, &rules, &zone, &parent)
+	err = tx.QueryRow(ctx, `SELECT id, channels, rules, time_zone, parent_campaign_id, default_language,
+			ARRAY(SELECT language FROM campaign_languages l WHERE l.campaign_id = c.id)
+		FROM campaigns c WHERE status = 'approved' AND send_at <= $1 ORDER BY send_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`, now).
+		Scan(&id, &channels, &rules, &zone, &parent, &def, &langs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -80,10 +83,12 @@ func (q *Queue) buildOne(ctx context.Context, now time.Time) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("campaign %d: audience: %w", id, err)
 		}
+		// Each recipient's language is fixed now (D64): their own if the
+		// campaign has it, else the default; retries and resends keep it.
 		n := len(args)
-		tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO messages (campaign_id, user_id, channel, next_attempt_at)
-			SELECT $%d, u.id, $%d, $%d FROM users u WHERE %s
-			ON CONFLICT (campaign_id, user_id, channel) DO NOTHING`, n+1, n+2, n+3, where), append(args, id, ch, now)...)
+		tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO messages (campaign_id, user_id, channel, next_attempt_at, language)
+			SELECT $%d, u.id, $%d, $%d, CASE WHEN u.language = ANY($%d) THEN u.language ELSE $%d END FROM users u WHERE %s
+			ON CONFLICT (campaign_id, user_id, channel) DO NOTHING`, n+1, n+2, n+3, n+4, n+5, where), append(args, id, ch, now, langs, def)...)
 		if err != nil {
 			return false, fmt.Errorf("campaign %d: create messages: %w", id, err)
 		}
