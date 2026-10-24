@@ -70,8 +70,9 @@ func (h *Handler) countAudience(ctx context.Context, c campaignJSON, now time.Ti
 
 // estimateFor returns the current audience and, if there is content, the
 // over-limit counts per channel: both estimates of a future send (D3, D30).
-func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, cont *content.Content, now time.Time) (audience.Counts, *content.OverLimit, error) {
+func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, v content.Variants, now time.Time) (audience.Counts, *content.OverLimit, error) {
 	counts, err := h.countAudience(ctx, c, now)
+	cont := defaultContent(c, v)
 	if err != nil || cont == nil {
 		return counts, nil, err
 	}
@@ -146,7 +147,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "write the messages before approving")
 		return
 	}
-	if errs := content.ValidateDraft(*cont, c.Channels); len(errs) > 0 {
+	if errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage); len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
 		return
 	}

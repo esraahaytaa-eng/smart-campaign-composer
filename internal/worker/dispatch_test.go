@@ -74,12 +74,20 @@ func (f *fixture) newWorker(url string) *worker.Worker {
 	}
 }
 
+// addLanguage gives a campaign a language version; the first one added is the default.
+func (f *fixture) addLanguage(id int64, lang string) {
+	f.t.Helper()
+	f.exec(`INSERT INTO campaign_languages (campaign_id, language) VALUES ($1, $2)`, id, lang)
+	f.exec(`UPDATE campaigns SET default_language = coalesce(default_language, $2) WHERE id = $1`, id, lang)
+}
+
 // sendingWithContent starts the cart-abandoner campaign with valid content.
 func (f *fixture) sendingWithContent(sms string) int64 {
 	f.t.Helper()
 	id := f.approved(cartAbandoners, "{sms,email}", now)
-	f.exec(`INSERT INTO campaign_content (campaign_id, channel, subject, body) VALUES
-		($1, 'sms', NULL, $2), ($1, 'email', '{{first_name}}, sepetin seni bekliyor', $3)`, id, sms, "Merhaba {{first_name}},\n\n{{city}} için fırsat!")
+	f.addLanguage(id, "tr")
+	f.exec(`INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES
+		($1, 'sms', 'tr', NULL, $2), ($1, 'email', 'tr', '{{first_name}}, sepetin seni bekliyor', $3)`, id, sms, "Merhaba {{first_name}},\n\n{{city}} için fırsat!")
 	f.build(now)
 	return id
 }
@@ -279,7 +287,8 @@ func TestRun_RateLimitNoWindowOver100(t *testing.T) {
 		SELECT g, 'U', 'u' || g || '@example.com', '+90510' || g, 'Ankara', 'tr', true, true, $1 FROM generate_series(1000, 1499) g`, now)
 	f.exec(`INSERT INTO cart_items (user_id, category, quantity, unit_price, added_at) SELECT g, 'books', 1, 10, $1 FROM generate_series(1000, 1499) g`, now.Add(-time.Hour))
 	id := f.approved(cartAbandoners, "{sms,email}", now)
-	f.exec(`INSERT INTO campaign_content (campaign_id, channel, subject, body) VALUES ($1, 'sms', NULL, 'Hi {{first_name}}'), ($1, 'email', 'Hi', 'Hello')`, id)
+	f.addLanguage(id, "tr")
+	f.exec(`INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES ($1, 'sms', 'tr', NULL, 'Hi {{first_name}}'), ($1, 'email', 'tr', 'Hi', 'Hello')`, id)
 	// Every 10th request is rate limited once, so retries are part of the stream.
 	var mu sync.Mutex
 	seen := map[string]bool{}

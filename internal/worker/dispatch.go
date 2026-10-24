@@ -288,7 +288,7 @@ func (w *Worker) load(ctx context.Context, j Job) (recipient, error) {
 			u.sms_opt_in, u.email_opt_in, u.first_name, coalesce(u.last_name, ''),
 			u.city, u.phone, u.email, coalesce(cc.subject, ''), cc.body
 		FROM messages m JOIN campaigns c ON c.id = m.campaign_id JOIN users u ON u.id = m.user_id
-		JOIN campaign_content cc ON cc.campaign_id = m.campaign_id AND cc.channel = m.channel
+		JOIN campaign_content cc ON cc.campaign_id = m.campaign_id AND cc.channel = m.channel AND cc.language = c.default_language
 		WHERE m.id = $1`, j.MessageID).Scan(&rc.campaignStatus, &rc.uncertain, &rc.attempts, &sms, &email,
 		&rc.vars.FirstName, &rc.vars.LastName, &rc.vars.City, &phone, &mail, &rc.tpl.Subject, &rc.tpl.Body)
 	if err != nil {

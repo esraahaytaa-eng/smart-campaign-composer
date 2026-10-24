@@ -25,7 +25,9 @@ func TestProcess_CancelDuringCapWait(t *testing.T) {
 			VALUES (1, 'A', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`,
 		`INSERT INTO campaigns (id, request_text, channels, rules, status, time_zone, created_by)
 			VALUES (1, 'b', '{sms}', '[]', 'sending', 'Europe/Istanbul', 1)`,
-		`INSERT INTO campaign_content (campaign_id, channel, body) VALUES (1, 'sms', 'Hi {{first_name}}')`,
+		`INSERT INTO campaign_languages (campaign_id, language) VALUES (1, 'tr')`,
+		`UPDATE campaigns SET default_language = 'tr' WHERE id = 1`,
+		`INSERT INTO campaign_content (campaign_id, channel, language, body) VALUES (1, 'sms', 'tr', 'Hi {{first_name}}')`,
 		`INSERT INTO messages (campaign_id, user_id, channel) VALUES (1, 1, 'sms')`,
 	} {
 		if _, err := pool.Exec(ctx, sql); err != nil {

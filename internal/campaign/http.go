@@ -91,12 +91,16 @@ type campaignJSON struct {
 	AudienceBuiltAt   *time.Time       `json:"audience_built_at"`
 	CompletedAt       *time.Time       `json:"completed_at"`
 	Counts            *audience.Counts `json:"counts,omitempty"`
-	Content           *content.Content `json:"content"` // in single-campaign responses
+	DefaultLanguage   *string          `json:"default_language"`
+	// In single-campaign responses: the text per language, including channels
+	// that aren't chosen (kept, not sent: D67), and each language's review state.
+	Content   content.Variants               `json:"content"`
+	Languages map[content.Lang]languageState `json:"languages,omitempty"`
 }
 
 const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
 	created_at, updated_at, parent_campaign_id, approval_estimate, approved_by, approved_at, cancelled_by, cancelled_at,
-	audience_built_at, completed_at`
+	audience_built_at, completed_at, default_language`
 
 func scanCampaign(row pgx.Row) (campaignJSON, error) {
 	var c campaignJSON
@@ -107,7 +111,7 @@ func scanCampaign(row pgx.Row) (campaignJSON, error) {
 func scanInto(row pgx.Row, c *campaignJSON, extra ...any) error {
 	return row.Scan(append([]any{&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
 		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &c.ParentCampaignID, &c.ApprovalEstimate,
-		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt}, extra...)...)
+		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt, &c.DefaultLanguage}, extra...)...)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +190,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits(),
+		"languages": content.Languages,
 	})
 }
 
@@ -225,8 +230,8 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 	h.update(w, r.Context(), id, *in.Version, `rules = $4`, rulesJSON)
 }
 
-// updateChannels changes a draft's channels and deletes the content of any
-// channel removed, so approval is not blocked by text that won't be sent (D38).
+// updateChannels changes a draft's channels. A removed channel's text is kept
+// and left out of approval and delivery until it is chosen again (D67).
 func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -245,31 +250,7 @@ func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	tx, err := h.Pool.Begin(ctx)
-	if err != nil {
-		serverError(w, "begin", err)
-		return
-	}
-	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $3, version = version + 1, updated_at = now()
-		WHERE id = $1 AND version = $2 AND status = 'draft'`, id, *in.Version, in.Channels)
-	if err != nil {
-		serverError(w, "update channels", err)
-		return
-	}
-	if tag.RowsAffected() == 0 {
-		writeError(w, http.StatusConflict, errStale.Error())
-		return
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1 AND NOT channel = ANY($2)`, id, in.Channels); err != nil {
-		serverError(w, "delete content", err)
-		return
-	}
-	if err := tx.Commit(ctx); err != nil {
-		serverError(w, "commit", err)
-		return
-	}
-	h.respond(w, ctx, http.StatusOK, id)
+	h.update(w, ctx, id, *in.Version, `channels = $4`, in.Channels)
 }
 
 // updateRequest replaces a draft's brief and re-interprets it (D40): the rules
@@ -409,7 +390,7 @@ func (h *Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "lock draft", err)
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM campaign_languages WHERE campaign_id = $1`, id); err != nil { // and their content
 		serverError(w, "delete content", err)
 		return
 	}
@@ -482,6 +463,10 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 	}
 	if c.Content, err = h.loadContent(ctx, id); err != nil {
 		serverError(w, "load content", err)
+		return
+	}
+	if c.Languages, err = h.loadLanguages(ctx, id); err != nil {
+		serverError(w, "load languages", err)
 		return
 	}
 	if c.Status == "draft" {

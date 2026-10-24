@@ -115,7 +115,7 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q string, page int) (recipientsResponse, error) {
 	out := recipientsResponse{AsOf: h.Now(), Groups: map[string]map[string]int{}, Reasons: map[string]int{},
 		Page: page, PageSize: recipientsPageSize, Recipients: []recipientJSON{}}
-	tpl, err := h.loadContent(ctx, id) // fixed after approval (D11)
+	v, err := h.loadContent(ctx, id) // fixed after approval (D11)
 	if err != nil {
 		return out, err
 	}
@@ -127,9 +127,11 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 	defer tx.Rollback(ctx)
 
 	var channels []string
-	if err := tx.QueryRow(ctx, `SELECT channels FROM campaigns WHERE id = $1`, id).Scan(&channels); err != nil {
+	var def *string
+	if err := tx.QueryRow(ctx, `SELECT channels, default_language FROM campaigns WHERE id = $1`, id).Scan(&channels, &def); err != nil {
 		return out, err
 	}
+	tpl := defaultContent(campaignJSON{DefaultLanguage: def, Channels: channels}, v)
 	for _, ch := range channels {
 		out.Groups[ch] = map[string]int{}
 		for _, g := range deliveryGroups {

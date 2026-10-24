@@ -229,7 +229,7 @@ func TestEndToEnd(t *testing.T) {
 		s.t = t
 		c := s.json(http.MethodPost, "/api/campaigns", `{"request":`+strconv.Quote(caseExample)+`,"channels":["sms","email"],"time_zone":"Europe/Istanbul"}`, 201)
 		cid := id(c)
-		gen := s.do(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/content", `{"version":1}`)
+		gen := s.do(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/content", `{"version":1,"languages":["tr"]}`)
 		if !strings.Contains(gen.Body.String(), "event: done") {
 			t.Fatalf("content generation did not finish: %s", gen.Body)
 		}
@@ -260,7 +260,7 @@ func TestEndToEnd(t *testing.T) {
 		c := s.json(http.MethodPost, "/api/campaigns", `{"request":"Send a weekend sale announcement to all users in Muğla.","channels":["sms"],"time_zone":"Europe/Istanbul"}`, 201)
 		cid := id(c)
 		path := "/api/campaigns/" + strconv.FormatInt(cid, 10)
-		s.json(http.MethodPut, path+"/content", `{"version":1,"content":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}`, 200)
+		s.json(http.MethodPut, path+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}}`, 200)
 		sendAt := time.Now().Add(4 * time.Second)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":{"at":"`+sendAt.Format(time.RFC3339Nano)+`"}}`, 200)
 
@@ -293,7 +293,7 @@ func TestEndToEnd(t *testing.T) {
 		// 143 characters + first name, last name and city (seeded: about 8 to 25):
 		// roughly half the recipients go over 160.
 		long := "Merhaba {{first_name}} {{last_name}}, " + strings.Repeat("ş", 123) + " {{city}}'da %30!"
-		s.json(http.MethodPut, path+"/content", `{"version":1,"content":{"sms":{"body":`+strconv.Quote(long)+`}}}`, 200)
+		s.json(http.MethodPut, path+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":`+strconv.Quote(long)+`}}}}`, 200)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":"now"}`, 200)
 		s.waitStatus(cid, "completed", 90*time.Second)
 		s.checkDelivery(cid)
@@ -306,7 +306,7 @@ func TestEndToEnd(t *testing.T) {
 		r := s.json(http.MethodPost, path+"/resend", `{"channel":"sms"}`, 201)
 		rid := id(r)
 		rpath := "/api/campaigns/" + strconv.FormatInt(rid, 10)
-		s.json(http.MethodPut, rpath+"/content", `{"version":1,"content":{"sms":{"body":"{{first_name}}, %30 indirim seni bekliyor!"}}}`, 200)
+		s.json(http.MethodPut, rpath+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"{{first_name}}, %30 indirim seni bekliyor!"}}}}`, 200)
 		s.json(http.MethodPost, rpath+"/approve", `{"version":2,"send":"now"}`, 200)
 		s.waitStatus(rid, "completed", 90*time.Second)
 		s.checkDelivery(rid)

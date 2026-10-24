@@ -72,7 +72,7 @@ func TestAICallLimit_GenerationAnswers429BeforeStreaming(t *testing.T) {
 	d := a.newDraft()   // call 1
 	a.generate(d.ID, 1) // call 2
 
-	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":2}`)
+	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":2,"languages":["tr"]}`)
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("want a 429 JSON answer, not a stream; got %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}

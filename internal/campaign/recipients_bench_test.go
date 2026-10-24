@@ -63,9 +63,11 @@ func benchCampaign(b *testing.B, pool *pgxpool.Pool) int64 {
 			VALUES ('bench', '{sms,email}', '[]', 'sending', 1, 'Europe/Istanbul', now()) RETURNING id`).Scan(&id); err != nil {
 			b.Fatal(err)
 		}
-		exec(`INSERT INTO campaign_content (campaign_id, channel, subject, body) VALUES
-			($1, 'sms', NULL, 'Merhaba {{first_name}} {{last_name}}, sepetin {{city}} için bekliyor! %20 indirim: SEPET20'),
-			($1, 'email', '{{first_name}}, sepetin seni bekliyor', 'Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor.')`, id)
+		exec(`INSERT INTO campaign_languages (campaign_id, language) VALUES ($1, 'tr')`, id)
+		exec(`UPDATE campaigns SET default_language = 'tr' WHERE id = $1`, id)
+		exec(`INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES
+			($1, 'sms', 'tr', NULL, 'Merhaba {{first_name}} {{last_name}}, sepetin {{city}} için bekliyor! %20 indirim: SEPET20'),
+			($1, 'email', 'tr', '{{first_name}}, sepetin seni bekliyor', 'Merhaba {{first_name}}, sepetindeki ürünler seni bekliyor.')`, id)
 		// Of every 100 messages: 85 sent, 5 skipped, 1 failed, 1 uncertain, 3 retrying, 5 pending.
 		exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason, delivery_uncertain, attempt_count, next_attempt_at)
 			SELECT $1, id, ch,
