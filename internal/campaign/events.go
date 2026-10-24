@@ -84,9 +84,9 @@ type channelStatus struct {
 	RateLimitedRecent int                       `json:"rate_limited_recent"` // in the last recentWindow
 	SkipReasons       map[string]int            `json:"skip_reasons"`
 	// An A/B test's delivery per version (D68): real outcomes only, never a winner.
-	ByVariant map[string]*variantStatus `json:"by_variant,omitempty"`
-	Resendable        int                       `json:"resendable"` // who a resend would reach now (D31)
-	ActiveResendID    *int64                    `json:"active_resend_id"`
+	ByVariant      map[string]*variantStatus `json:"by_variant,omitempty"`
+	Resendable     int                       `json:"resendable"` // who a resend would reach now (D31)
+	ActiveResendID *int64                    `json:"active_resend_id"`
 }
 
 // events streams the campaign's status: a snapshot at once, then one on each

@@ -2,9 +2,9 @@ package campaign_test
 
 import (
 	"context"
-	"strings"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"smart-campaign-composer/internal/campaign"
@@ -298,7 +298,7 @@ func TestEstimate_OverLimitPerVersion(t *testing.T) {
 		t.Fatalf("save B: %d", code)
 	}
 	got := decode[struct {
-		Over  struct{ SMS int } `json:"over_limit"`
+		Over  struct{ SMS int }  `json:"over_limit"`
 		OverB *struct{ SMS int } `json:"over_limit_b"`
 	}](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID)+"/estimate", ""))
 	if got.OverB == nil || got.OverB.SMS == 0 || got.Over.SMS != 0 {
