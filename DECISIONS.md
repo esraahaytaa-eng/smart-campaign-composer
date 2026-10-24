@@ -124,6 +124,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Realistic segments ("over 10,000 TL in 12 months, at least 4 orders, no order in 45 days, not new") were correctly rejected; approximating them would break D15.
 - **Rejected:** *Windows on `total_spend` / `order_count`:* two value shapes per field break stored rules and the chip editor. *12 months as 365 days:* an approximation. *A general NOT or OR:* turns the catalog into a query language.
 - **Trade-offs:** Four more field/operator families to validate, show and test; the AI prompt grows by a few lines.
+- **History:** 2026-10-24: in the AI's structured answer each rule's `value` is JSON text (field and op stay fixed lists), decoded and validated strictly in Go; text that is not exactly one JSON value is an invalid answer (retried once, D15). Per-field value shapes were refused by the API (compiled grammar too large; nullable forms exceeded its 16 union-parameter limit). Trade-off: the API no longer constrains the value's shape, so validation alone does.
 
 ### D15 — Handling invalid or failed AI output
 - **Status:** Accepted · 2026-10-21

@@ -8,18 +8,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/anthropics/anthropic-sdk-go/option"
 
-	"smart-campaign-composer/internal/content"
-
 	"smart-campaign-composer/internal/audience"
+	"smart-campaign-composer/internal/content"
 )
 
-const validOutput = `{"unsupported":false,"reason":"","rules":[{"field":"city","op":"in","value":["İstanbul"]}],"suggested_send_at":null,"schedule_note":null}`
+// validOutput is the model's text (values as JSON text, D70); decodedOutput what InterpretRequest returns.
+const (
+	validOutput   = `{"unsupported":false,"reason":"","rules":[{"field":"city","op":"in","value":"[\"İstanbul\"]"}],"suggested_send_at":null,"schedule_note":null}`
+	decodedOutput = `{"unsupported":false,"reason":"","rules":[{"field":"city","op":"in","value":["İstanbul"]}],"suggested_send_at":null,"schedule_note":null}`
+)
 
 type captured struct {
 	body   map[string]any
@@ -71,8 +74,8 @@ func TestAnthropic_RequestShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != validOutput {
-		t.Fatalf("want model text returned as-is, got %s", raw)
+	if !sameJSON(t, string(raw), decodedOutput) {
+		t.Fatalf("want the model's answer with decoded values, got %s", raw)
 	}
 
 	b := got.body
@@ -124,33 +127,46 @@ func TestInterpretPrompt_ContainsContextNotUserData(t *testing.T) {
 			t.Errorf("system prompt does not describe %s", f.Field)
 		}
 	}
-	for _, want := range []string{"last_months", "gt", "lt", "signed_up / before", "users with no orders"} { // D70
+	for _, want := range []string{"last_months", "gt", "lt", "signed_up / before", "users with no orders", "JSON text"} { // D70
 		if !strings.Contains(interpretSystemPrompt, want) {
 			t.Errorf("system prompt does not describe %s", want)
 		}
 	}
 }
 
-// A window is one object with every form and no unions (option A,
-// 2026-10-24): the API refused a choice of shapes ("compiled grammar is too
-// large") and nullable forms ("too many parameters with union types",
-// limit 16).
-func TestInterpretSchema_WindowIsOneObjectWithoutUnions(t *testing.T) {
-	for name, w := range map[string]map[string]any{"window": window, "categories": categoryWin, "amount": amountWin, "count": countWin} {
-		props, _ := w["properties"].(map[string]any)
-		if w["type"] != "object" || w["anyOf"] != nil {
-			t.Errorf("%s: want one object, got %v", name, w)
-		}
-		for _, key := range []string{"last_days", "last_months", "from", "to"} {
-			if p, ok := props[key].(map[string]any); !ok || p["anyOf"] != nil {
-				t.Errorf("%s.%s: want a plain, required property, got %v", name, key, props[key])
+// D70: a rule's value is JSON text in the answer, so the compiled grammar
+// stays small whatever the catalog holds (the API refused per-field value
+// shapes as "compiled grammar is too large", 2026-10-24). field and op are
+// the catalog's own lists; Go validates the value strictly.
+func TestInterpretSchema_OneRuleShape(t *testing.T) {
+	b, _ := json.Marshal(interpretSchema["properties"].(map[string]any)["rules"])
+	var rules struct {
+		Items struct {
+			AnyOf      any
+			Properties struct {
+				Field, Op struct{ Enum []string }
+				Value     struct{ Type string }
 			}
 		}
 	}
+	if err := json.Unmarshal(b, &rules); err != nil {
+		t.Fatal(err)
+	}
+	var fields, ops []string
+	for _, f := range audience.Fields() {
+		fields = append(fields, f.Field)
+		ops = append(ops, f.Ops...)
+	}
+	slices.Sort(ops)
+	ops = slices.Compact(ops)
+	p := rules.Items.Properties
+	if rules.Items.AnyOf != nil || p.Value.Type != "string" || !slices.Equal(p.Field.Enum, fields) || !slices.Equal(p.Op.Enum, ops) {
+		t.Fatalf("want one rule shape with the catalog's fields %v and operators %v and a text value, got %s", fields, ops, b)
+	}
 }
 
-// The whole answer schema stays as small as before D70: the rules list's
-// choice of rule types, suggested_send_at and schedule_note.
+// The whole schema has two union-typed parameters (the API's limit is 16):
+// suggested_send_at and schedule_note.
 func TestInterpretSchema_UnionCount(t *testing.T) {
 	var unions func(v any) int
 	unions = func(v any) int {
@@ -176,112 +192,92 @@ func TestInterpretSchema_UnionCount(t *testing.T) {
 	b, _ := json.Marshal(interpretSchema)
 	var schema any
 	json.Unmarshal(b, &schema)
-	if n := unions(schema); n > 3 {
-		t.Fatalf("schema has %d union-typed parameters, want at most 3 (the API's limit is 16)", n)
+	if n := unions(schema); n != 2 {
+		t.Fatalf("schema has %d union-typed parameters, want 2", n)
 	}
 }
 
-// normalizeWindows drops only the documented unused window values (0 days or
-// months, "" dates) before strict validation; everything else is kept, so
-// validation still rejects conflicting or invalid windows.
-func TestNormalizeWindows(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"days", `{"field":"no_order","op":"within","value":{"last_days":45,"last_months":0,"from":"","to":""}}`,
-			`{"field":"no_order","op":"within","value":{"last_days":45}}`},
-		{"months with amount", `{"field":"spend_in_window","op":"gt","value":{"amount":10000,"last_days":0,"last_months":12,"from":"","to":""}}`,
-			`{"field":"spend_in_window","op":"gt","value":{"amount":10000,"last_months":12}}`},
-		{"open-ended dates", `{"field":"cart_added","op":"within","value":{"last_days":0,"last_months":0,"from":"2026-10-01","to":""}}`,
-			`{"field":"cart_added","op":"within","value":{"from":"2026-10-01"}}`},
-		{"zero amount and count kept", `{"field":"orders_in_window","op":"lte","value":{"count":0,"last_days":30,"last_months":0,"from":"","to":""}}`,
-			`{"field":"orders_in_window","op":"lte","value":{"count":0,"last_days":30}}`},
-		{"conflict kept", `{"field":"cart_added","op":"within","value":{"last_days":30,"last_months":1,"from":"","to":""}}`,
-			`{"field":"cart_added","op":"within","value":{"last_days":30,"last_months":1}}`},
-		{"invalid kept", `{"field":"cart_added","op":"within","value":{"last_days":-1,"last_months":0,"from":"x","to":""}}`,
-			`{"field":"cart_added","op":"within","value":{"last_days":-1,"from":"x"}}`},
-		{"not a window", `{"field":"total_spend","op":"gt","value":0}`, `{"field":"total_spend","op":"gt","value":0}`},
-		{"cities", `{"field":"city","op":"in","value":[""]}`, `{"field":"city","op":"in","value":[""]}`},
+func answerWith(rules string) string {
+	return `{"unsupported":false,"reason":"","rules":[` + rules + `],"suggested_send_at":null,"schedule_note":null}`
+}
+
+// Each value's text becomes the JSON value itself, exactly as written.
+func TestDecodeRuleValues(t *testing.T) {
+	in := answerWith(`{"field":"spend_in_window","op":"gt","value":"{\"amount\": 10000, \"last_months\": 12}"},` +
+		`{"field":"city","op":"in","value":" [\"İstanbul\"] "},{"field":"total_spend","op":"gte","value":"10000"}`)
+	want := answerWith(`{"field":"spend_in_window","op":"gt","value":{"amount":10000,"last_months":12}},` +
+		`{"field":"city","op":"in","value":["İstanbul"]},{"field":"total_spend","op":"gte","value":10000}`)
+
+	got, err := decodeRuleValues(json.RawMessage(in))
+	if err != nil || !sameJSON(t, string(got), want) {
+		t.Fatalf("\n got: %s (%v)\nwant: %s", got, err, want)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := normalizeWindows(json.RawMessage(`{"unsupported":false,"reason":"","rules":[` + tc.in + `],"suggested_send_at":null,"schedule_note":null}`))
-			want := `{"unsupported":false,"reason":"","rules":[` + tc.want + `],"suggested_send_at":null,"schedule_note":null}`
-			if !sameJSON(t, string(got), want) {
-				t.Fatalf("\n got: %s\nwant: %s", got, want)
+	unsupported := `{"unsupported":true,"reason":"Age is not in the catalog.","rules":[],"suggested_send_at":null,"schedule_note":null}`
+	if got, err := decodeRuleValues(json.RawMessage(unsupported)); err != nil || string(got) != unsupported {
+		t.Fatalf("an answer without rules must pass unchanged, got %s (%v)", got, err)
+	}
+	// Not the schema at all: left to the caller's strict decoding, which reports it.
+	if got, err := decodeRuleValues(json.RawMessage(`not json`)); err != nil || string(got) != `not json` {
+		t.Fatalf("got %s (%v)", got, err)
+	}
+}
+
+// Text that is not exactly one JSON value is an invalid answer (retried once,
+// D15), never guessed at or dropped.
+func TestDecodeRuleValues_RejectsInvalidValues(t *testing.T) {
+	for name, rule := range map[string]string{
+		"not JSON":      `{"field":"cart_added","op":"within","value":"{last_days: 30}"}`,
+		"trailing data": `{"field":"cart_added","op":"within","value":"{\"last_days\": 30} {}"}`,
+		"empty":         `{"field":"cart_added","op":"within","value":""}`,
+		"not text":      `{"field":"cart_added","op":"within","value":{"last_days":30}}`,
+		"missing":       `{"field":"cart_added","op":"within"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeRuleValues(json.RawMessage(answerWith(`{"field":"city","op":"in","value":"[\"Ankara\"]"},` + rule)))
+			var invalid *InvalidAnswerError
+			if !errors.As(err, &invalid) || len(invalid.Problems) != 1 || !strings.HasPrefix(invalid.Problems[0], "rule 1: ") {
+				t.Fatalf("want one problem on rule 1, got %v", err)
 			}
 		})
 	}
-	for _, raw := range []string{`not json`, `{"unsupported":true,"reason":"no","rules":[]}`} {
-		if got := normalizeWindows(json.RawMessage(raw)); string(got) != raw {
-			t.Errorf("%s: changed to %s", raw, got)
-		}
-	}
 }
 
-// After normalization, strict validation still refuses what is not exactly
-// one valid window form.
-func TestNormalizeWindows_ValidationStillRejects(t *testing.T) {
-	for name, value := range map[string]string{
-		"no form":        `{"last_days":0,"last_months":0,"from":"","to":""}`,
-		"two forms":      `{"last_days":30,"last_months":1,"from":"","to":""}`,
-		"days and dates": `{"last_days":30,"last_months":0,"from":"2026-10-01","to":""}`,
-		"end only":       `{"last_days":0,"last_months":0,"from":"","to":"2026-10-01"}`,
-		"bad date":       `{"last_days":0,"last_months":0,"from":"1 Oct","to":""}`,
-		"13 months":      `{"last_days":0,"last_months":13,"from":"","to":""}`,
+// Decoded values still go through strict validation: conflicting or invalid
+// values and pairs outside the catalog are rejected there.
+func TestDecodeRuleValues_ValidationStillRejects(t *testing.T) {
+	for name, rule := range map[string]string{
+		"two window forms": `{"field":"cart_added","op":"within","value":"{\"last_days\": 30, \"last_months\": 1}"}`,
+		"13 months":        `{"field":"spend_in_window","op":"gt","value":"{\"amount\": 1, \"last_months\": 13}"}`,
+		"unknown key":      `{"field":"orders_in_window","op":"gte","value":"{\"count\": 4, \"last_months\": 12, \"note\": \"x\"}"}`,
+		"wrong value type": `{"field":"total_spend","op":"gt","value":"\"10000\""}`,
+		"pair not allowed": `{"field":"cart_value","op":"lt","value":"100"}`,
+		"before with to":   `{"field":"signed_up","op":"before","value":"{\"from\": \"2026-01-01\", \"to\": \"2026-02-01\"}"}`,
 	} {
-		raw := normalizeWindows(json.RawMessage(`{"rules":[{"field":"cart_added","op":"within","value":` + value + `}]}`))
-		var out struct{ Rules []audience.Rule }
-		json.Unmarshal(raw, &out)
-		if _, errs := audience.Validate(out.Rules, testCatalog); len(errs) != 1 {
-			t.Errorf("%s: want one validation error, got %v (%s)", name, errs, raw)
-		}
+		t.Run(name, func(t *testing.T) {
+			raw, err := decodeRuleValues(json.RawMessage(answerWith(rule)))
+			var out struct{ Rules []audience.Rule }
+			if err != nil || json.Unmarshal(raw, &out) != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if _, errs := audience.Validate(out.Rules, testCatalog); len(errs) != 1 {
+				t.Fatalf("want one validation error, got %v", errs)
+			}
+		})
 	}
 }
 
-// The real client hands the normalized answer on.
-func TestAnthropic_NormalizesWindows(t *testing.T) {
-	_, url := fakeAPI(t, http.StatusOK, "end_turn",
-		`{"unsupported":false,"reason":"","rules":[{"field":"no_order","op":"within","value":{"last_days":45,"last_months":0,"from":"","to":""}}],"suggested_send_at":null,"schedule_note":null}`)
+// The real client decodes the values, and reports text that is not JSON as
+// an invalid answer rather than an API failure.
+func TestAnthropic_DecodesRuleValues(t *testing.T) {
+	_, url := fakeAPI(t, http.StatusOK, "end_turn", answerWith(`{"field":"no_order","op":"within","value":"{\"last_days\": 45}"}`))
 	raw, err := interpretVia(t, url, "claude-opus-5-5", testInput())
 	if err != nil || !strings.Contains(string(raw), `"value":{"last_days":45}`) {
-		t.Fatalf("want the normalized window, got %s (%v)", raw, err)
+		t.Fatalf("want the decoded value, got %s (%v)", raw, err)
 	}
-}
-
-// The answer schema offers every catalog field and operator (D70), and only those.
-func TestInterpretSchema_CoversCatalog(t *testing.T) {
-	b, _ := json.Marshal(interpretSchema["properties"].(map[string]any)["rules"])
-	var rules struct {
-		Items struct {
-			AnyOf []struct {
-				Properties struct {
-					Field, Op struct{ Enum []string }
-					Value     json.RawMessage
-				}
-			}
-		}
-	}
-	if err := json.Unmarshal(b, &rules); err != nil {
-		t.Fatal(err)
-	}
-	offered := map[string]bool{}
-	for _, r := range rules.Items.AnyOf {
-		for _, f := range r.Properties.Field.Enum {
-			for _, op := range r.Properties.Op.Enum {
-				offered[f+" "+op] = true
-			}
-		}
-	}
-	want := map[string]bool{}
-	for _, f := range audience.Fields() {
-		for _, op := range f.Ops {
-			want[f.Field+" "+op] = true
-		}
-	}
-	if !reflect.DeepEqual(offered, want) {
-		t.Fatalf("schema offers %v, catalog has %v", offered, want)
-	}
-	if !strings.Contains(string(b), `"last_months"`) || !strings.Contains(string(b), `"amount"`) || !strings.Contains(string(b), `"count"`) {
-		t.Fatalf("schema lacks last_months or the windowed totals: %s", b)
+	_, url = fakeAPI(t, http.StatusOK, "end_turn", answerWith(`{"field":"no_order","op":"within","value":"45 days"}`))
+	var invalid *InvalidAnswerError
+	if _, err := interpretVia(t, url, "claude-opus-5-5", testInput()); !errors.As(err, &invalid) {
+		t.Fatalf("want an invalid answer, got %v", err)
 	}
 }
 
