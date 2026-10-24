@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../api'
 import { channelsKeepingText } from '../campaign/channels'
 import { campaigns, loadCatalog, streamContent, type Estimate } from '../campaign/client'
@@ -9,7 +9,7 @@ import { briefTitle } from '../campaign/title'
 import { LEGACY, type Campaign, type Catalog, type Channel, type Content, type Lang } from '../campaign/types'
 import { render, samplesFor } from '../content/preview'
 import { fromContent, fromVariants, generationOutcome, hasUnsavedChanges, languagesToReplace, toSave, type Draft } from '../content/editing'
-import { languageName, orderLanguages, startingDefault, toWrite } from '../content/languages'
+import { autoWrite, chosenDefault, chosenLanguages, languageName, orderLanguages, startingDefault, toWrite } from '../content/languages'
 import { copyAToB, missingB, toSaveB } from '../content/variants'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessageField from '../components/MessageField.vue'
@@ -22,6 +22,7 @@ import { contentAIError, errorText } from '../i18n/errors'
 const LIMITS = { sms: 160, subject: 80, body: 2000 } // after personalization (D2)
 
 const route = useRoute()
+const router = useRouter()
 const id = Number(route.params.id) // each campaign gets its own page instance
 
 const campaign = ref<Campaign | null>(null)
@@ -40,6 +41,7 @@ const defaultLanguage = ref<Lang>('')
 const active = ref<Lang>('')
 const fieldErrors = ref<Record<string, string[]>>({})
 const incomplete = ref(false)
+let chosen: Lang[] = [] // ticked on the audience step (D71), from the URL
 
 const saver = createSaver<Campaign>(
   () => campaign.value?.version ?? 0,
@@ -59,7 +61,8 @@ const name = (l: Lang) => languageName(l, catalog.value)
 const tabs = computed(() => orderLanguages(Object.keys(drafts.value), defaultLanguage.value, catalog.value))
 const draft = computed(() => (editingB.value ? draftsB.value[active.value] : drafts.value[active.value]) ?? fromContent(null))
 
-// Without saved text, the languages the audience suggests are pre-ticked;
+// Without saved text, the languages chosen on the audience step (D71), else
+// the ones the audience suggests, are pre-ticked;
 // they are a suggestion, never a restriction (D64). only: after the AI wrote
 // these languages, take just their text, so edits elsewhere are kept.
 function fromCampaign(c: Campaign, only?: Lang[], variant: 'a' | 'b' = 'a') {
@@ -69,9 +72,9 @@ function fromCampaign(c: Campaign, only?: Lang[], variant: 'a' | 'b' = 'a') {
   else {
     drafts.value = fresh
     draftsB.value = fromVariants(c.content_b ?? null)
-    if (!c.content) for (const l of c.recommendation?.languages ?? []) drafts.value[l] = fromContent(null)
+    if (!c.content) for (const l of chosen.length ? chosen : (c.recommendation?.languages ?? [])) drafts.value[l] = fromContent(null)
   }
-  defaultLanguage.value = startingDefault(c.default_language, c.recommendation?.default, catalog.value)
+  defaultLanguage.value = startingDefault(c.default_language, chosenDefault(chosen, c.recommendation?.default), catalog.value)
   drafts.value[defaultLanguage.value] ??= fromContent(null)
   if (!drafts.value[active.value]) active.value = defaultLanguage.value
   withB()
@@ -91,7 +94,13 @@ async function load() {
     const [c, cat] = await Promise.all([campaigns.get(id), loadCatalog()])
     catalog.value = cat.languages
     campaign.value = c
+    chosen = chosenLanguages(route.query.languages, cat.languages)
     fromCampaign(c)
+    // The AI starts by itself at most once (D71): the signal leaves the URL
+    // first, so reload, Back or Forward never start it again.
+    const langs = autoWrite(route.query, c, cat.languages)
+    if (route.query.write !== undefined) await router.replace({ query: { ...route.query, write: undefined } })
+    if (langs.length) write(langs, false)
     // A resend shows its original message for reference (D48).
     if (c.parent_campaign_id) campaigns.get(c.parent_campaign_id).then((p) => (parent.value = p), () => {})
     await refreshEstimate()

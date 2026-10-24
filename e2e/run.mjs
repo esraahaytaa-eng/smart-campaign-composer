@@ -24,7 +24,7 @@ await fetch(`${BASE}/api/logout`, { method: 'POST', headers: { cookie } })
 // 100/s limit, so running them together would make their timings wobble).
 const alone = ['campaigns.mjs']
 const lanes = [
-  ['sign-in.mjs', 'composer.mjs', 'saving.mjs', 'languages.mjs', 'content-review.mjs', 'languages-content.mjs', 'pagination.mjs', 'responsive.mjs'],
+  ['sign-in.mjs', 'composer.mjs', 'saving.mjs', 'languages.mjs', 'content-review.mjs', 'languages-content.mjs', 'one-step.mjs', 'pagination.mjs', 'responsive.mjs'],
   ['delivery.mjs', 'recipients.mjs', 'resend.mjs', 'live.mjs', 'review-fixes.mjs', 'ab-test.mjs'],
 ]
 const times = []

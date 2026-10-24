@@ -48,7 +48,8 @@ export default () =>
     const viaApp = async (d) => {
       await page.goto(`${BASE}/campaigns/${d}`)
       await page.getByText('Estimated audience').waitFor()
-      await page.getByRole('link', { name: 'Write the messages →' }).click()
+      // a new draft offers "Write them myself" (no AI call, D71); one with text links to it
+      await page.getByRole('link', { name: /^Write (them myself|the messages) →$/ }).click()
       await page.locator('#sms-body').waitFor()
     }
 
@@ -71,7 +72,7 @@ export default () =>
       await page.evaluate(() => history.back()) // "stay" cancels the navigation, so don't wait for one
       await page.waitForTimeout(800)
       check(asked.includes('still empty'), 'leaving with incomplete messages asks first')
-      check(page.url().endsWith(`/campaigns/${d}/content`), 'and "stay" keeps the marketer on the page')
+      check(new URL(page.url()).pathname.endsWith(`/campaigns/${d}/content`), 'and "stay" keeps the marketer on the page')
       check((await page.locator('#sms-body').inputValue()) === 'My own SMS text', 'with the typed text intact')
       await page.locator('#sms-body').fill('') // nothing unsaved before moving on
     }

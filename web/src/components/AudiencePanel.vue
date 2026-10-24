@@ -13,7 +13,9 @@ const props = defineProps<{
   resend?: boolean
   languages?: Catalog['languages']
   recommended?: Lang[]
+  selected?: Lang[] // given: the languages can be ticked here (D71)
 }>()
+defineEmits<{ toggle: [lang: Lang, on: boolean] }>()
 const byLanguage = computed(() => audienceByLanguage(props.counts, props.channels, props.recommended ?? [], props.languages ?? []))
 const rows = computed(() =>
   (['sms', 'email'] as Channel[]).map((ch) => {
@@ -51,7 +53,12 @@ const rows = computed(() =>
       <h3>{{ t('audience.byLanguage') }}</h3>
       <ul>
         <li v-for="l in byLanguage" :key="l.code">
-          <span class="lang">
+          <label v-if="selected" class="lang">
+            <input type="checkbox" :checked="selected.includes(l.code)" @change="$emit('toggle', l.code, ($event.target as HTMLInputElement).checked)" />
+            <strong>{{ l.name }}</strong> {{ l.share }}%
+            <span v-if="l.recommended" class="tag">{{ t('content.recommended') }}</span>
+          </label>
+          <span v-else class="lang">
             <strong>{{ l.name }}</strong> {{ l.share }}%
             <span v-if="l.recommended" class="tag">{{ t('content.recommended') }}</span>
           </span>
@@ -62,7 +69,7 @@ const rows = computed(() =>
           </span>
         </li>
       </ul>
-      <p class="note">{{ t('audience.languagesNote') }}</p>
+      <p class="note">{{ t(selected ? 'audience.languagesPick' : 'audience.languagesNote') }}</p>
     </div>
     <p class="alert alert-info">
       {{ t(resend ? 'audience.resendNote' : 'audience.rulesNote') }}
@@ -150,6 +157,11 @@ h2 {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 4px 12px;
+}
+.languages label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .languages .muted {
   color: var(--muted);

@@ -118,6 +118,9 @@ export const tr: Record<Key, Message> = {
   'campaign.resendAudience': 'Yeniden gönderim, özgün kampanyada {channel} çok uzun olduğu için atlanan alıcılara gider. Hedef kitlesi ve kanalı sabittir.',
   'campaign.next': { one: 'Sıradaki adım: yapay zekâ {channels} mesajını yazar.', other: 'Sıradaki adım: yapay zekâ {channels} mesajlarını yazar.' },
   'campaign.generate': 'Mesajları yaz →',
+  'campaign.writeWithAI': 'Mesajları yapay zekâyla yaz →',
+  'campaign.writeMyself': 'Kendim yazacağım →',
+  'campaign.pickLanguage': 'Yapay zekânın yazması için en az bir dil işaretleyin.',
   'notice.channelsSaved': 'Kanallar kaydedildi.',
   'notice.channelTextKept': '{channels} metni saklanıyor ama gönderilmiyor. Kanalı yeniden eklerseniz incelemeniz için geri gelir.',
   'notice.rulesSaved': 'Hedef kitle kuralları kaydedildi.',
@@ -140,6 +143,7 @@ export const tr: Record<Key, Message> = {
   'audience.resendNote': 'Özgün kampanyada karakter sınırı nedeniyle atlanan alıcılar; mesajı zaten almış olabilecekler hariç.',
   'audience.recalculated': 'Kesin hedef kitle, gönderim başladığında yeniden hesaplanır.',
   'audience.byLanguage': 'Dile göre',
+  'audience.languagesPick': 'Kitleye göre önerildi: yazılacak dilleri işaretleyin. Kendi dilinde metni olmayan herkes varsayılan dildeki metni alır.',
   'audience.languagesNote': 'Kitleye göre bir öneri. Dilleri içerik adımında siz seçersiniz; kendi dilinde metni olmayan herkes varsayılan dildeki metni alır.',
 
   'rules.and': 'VE',
