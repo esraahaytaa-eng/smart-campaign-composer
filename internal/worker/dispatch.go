@@ -242,17 +242,27 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 	if err := w.Limiters[j.Channel].Wait(ctx); err != nil {
 		return errors.Join(err, done(release))
 	}
-	departure, err := w.caps[j.Channel].wait(ctx) // hard cap: ≤100 departures in any second
-	if err != nil {
-		return errors.Join(err, done(release))
-	}
 	// The waits can be long; a cancel or opt-out meanwhile must still stop the
-	// send. This is the last check before the request leaves.
-	if rc, err = w.load(ctx, j); err != nil {
-		return err
-	}
-	if r, stop := skip(rc); stop {
-		return done(r)
+	// send. The departure is recorded only after the last check, right before
+	// the request leaves, so the hard cap (≤100 in any second) counts real
+	// departures, not ones still waiting for the database (audit F4).
+	var departure time.Time
+	for {
+		if rc, err = w.load(ctx, j); err != nil {
+			return err
+		}
+		if r, stop := skip(rc); stop {
+			return done(r)
+		}
+		var delay time.Duration
+		if departure, delay = w.caps[j.Channel].reserve(); delay == 0 {
+			break
+		}
+		select { // the window is full: wait, then check again
+		case <-ctx.Done():
+			return errors.Join(ctx.Err(), done(release))
+		case <-time.After(delay):
+		}
 	}
 
 	attempt := w.call(ctx, j, departure, rc.to, subject, body)
