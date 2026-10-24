@@ -163,11 +163,11 @@ func TestEstimate_CleansValuesLikeRender(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.MigratedDB(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO users (first_name, last_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
-		VALUES (E'A\n\nB\t', E'\r', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
+		VALUES (E'A\n\nB\t', E'\r\u0085', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
 		t.Fatal(err)
 	}
 	where, args, _ := audience.Build([]audience.Rule{{Field: "city", Op: "in", Value: json.RawMessage(`["Ankara"]`)}}, "sms", time.Now(), time.UTC)
-	u := content.UserVars{FirstName: "A\n\nB\t", LastName: "\r", City: "Ankara"}
+	u := content.UserVars{FirstName: "A\n\nB\t", LastName: "\r\u0085", City: "Ankara"} // U+0085: a C1 control
 
 	for name, tpl := range map[string]string{
 		"inside": strings.Repeat("x", 156) + " {{first_name}}", // "A B": 160, "A\n\nB\t": 162

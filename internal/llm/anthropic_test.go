@@ -489,9 +489,23 @@ func TestContentPrompt(t *testing.T) {
 // D72: the AI greets each recipient by name, naturally, and never labels
 // recipients by their segment or leans on last names that may be missing.
 func TestContentSystemPrompt_Personalization(t *testing.T) {
-	for _, want := range []string{"Merhaba {{first_name}},", "Hi {{first_name}},", "never as a label", "loyal customers", "Do not use {{last_name}}", `reads "Hi,"`} {
+	for _, want := range []string{"Merhaba {{first_name}},", "Hi {{first_name}},", "never as a label", "loyal customers", "Do not use {{last_name}}", `reads "Hi,"`, "never as the first word", "Never attach a suffix or apostrophe"} {
 		if !strings.Contains(contentSystemPrompt, want) {
 			t.Errorf("system prompt is missing %q", want)
+		}
+	}
+}
+
+// D72: the mock writes like the prompt asks: a greeting word before the name,
+// so an empty name never leaves a leading comma.
+func TestMockTexts_GreetBeforeTheName(t *testing.T) {
+	for name, texts := range map[string]map[string]mockText{"first": mockTexts, "resend": mockResendTexts, "version B": mockVersionBTexts} {
+		for lang, m := range texts {
+			for field, body := range map[string]string{"sms": m.sms, "email body": m.body} {
+				if body != "" && (!strings.Contains(body, "{{first_name}}") || strings.HasPrefix(body, "{{first_name}}")) {
+					t.Errorf("%s %s %s: want a greeting word before {{first_name}}: %q", name, lang, field, body)
+				}
+			}
 		}
 	}
 }

@@ -30,19 +30,19 @@ var mockTexts = map[string]mockText{
 
 // mockResendTexts are shorter, for recipients the first text was too long for (D31).
 var mockResendTexts = map[string]mockText{
-	"tr": {sms: "{{first_name}}, fırsatın seni bekliyor!", subject: "Fırsatın seni bekliyor"},
-	"en": {sms: "{{first_name}}, your offer is waiting!", subject: "Your offer is waiting"},
+	"tr": {sms: "Merhaba {{first_name}}, fırsatın seni bekliyor!", subject: "Fırsatın seni bekliyor"},
+	"en": {sms: "Hi {{first_name}}, your offer is waiting!", subject: "Your offer is waiting"},
 }
 
 // mockVersionBTexts are the mock's alternatives for an A/B test's version B (D68).
 var mockVersionBTexts = map[string]mockText{
 	"tr": {
-		sms:     "{{first_name}}, fırsat bugün bitiyor! Şimdi göz at.",
+		sms:     "Merhaba {{first_name}}, fırsat bugün bitiyor! Şimdi göz at.",
 		subject: "Son gün, {{first_name}}",
 		body:    "Merhaba {{first_name}},\n\nFırsat bugün sona eriyor. Kaçırma!\n\nSmart Campaign Composer",
 	},
 	"en": {
-		sms:     "{{first_name}}, the offer ends today! Take a look now.",
+		sms:     "Hi {{first_name}}, the offer ends today! Take a look now.",
 		subject: "Last day, {{first_name}}",
 		body:    "Hi {{first_name}},\n\nThe offer ends today. Don't miss it!\n\nSmart Campaign Composer",
 	},
