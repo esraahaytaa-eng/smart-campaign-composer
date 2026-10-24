@@ -242,6 +242,20 @@ func TestRecipients_IncludeLanguage(t *testing.T) {
 	}
 }
 
+// A message whose campaign has no language anywhere (no content, as in old
+// or hand-made data) lists as "not recorded" instead of failing.
+func TestRecipients_NoLanguageAnywhere(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	id := a.recipientsCampaign()
+	a.exec(`UPDATE campaigns SET default_language = NULL WHERE id = $1`, id)
+
+	p, code := a.recipients(id, "group=failed")
+	if code != http.StatusOK || p.Total != 2 || p.Recipient[0].Language != "und" {
+		t.Fatalf("want rows marked und, got %d %+v", code, p)
+	}
+}
+
 func TestRecipients_RejectsBadInput(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())

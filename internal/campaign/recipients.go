@@ -31,8 +31,9 @@ const foldSQL = `lower(translate(%s, 'ÇçĞğİIıÖöŞşÜü', 'ccggiiioossuu
 func fold(expr string) string { return strings.Replace(foldSQL, "%s", expr, 1) }
 
 // messageLangSQL is the language whose text a message gets, as the worker
-// picks it: its stored language, else the campaign's default (pre-T20 rows).
-const messageLangSQL = `coalesce(m.language, (SELECT default_language FROM campaigns WHERE id = m.campaign_id))`
+// picks it: its stored language, else the campaign's default (pre-T20 rows),
+// else "not recorded" for data with no language at all.
+const messageLangSQL = `coalesce(m.language, (SELECT default_language FROM campaigns WHERE id = m.campaign_id), 'und')`
 
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 

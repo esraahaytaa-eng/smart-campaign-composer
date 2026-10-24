@@ -240,7 +240,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Status:** Accepted · 2026-10-24
 - **Decision:**
   - **Languages:** a campaign has content in one or more catalog languages (now `tr`, `en`); the marketer picks a default, which must be complete.
-  - **Sending:** each recipient gets their own language if the campaign has it, otherwise the default, fixed when the audience is built (`messages.language`); retries, the send-time length check, resends and the results use that choice.
+  - **Sending:** each recipient gets their own language if the campaign has it, otherwise the default, fixed when the audience is built (`messages.language`); retries, the send-time length check and the results use that choice. A resend is a campaign of its own: it fixes its recipients' languages from its own languages and their current preference.
   - **Recommendation:** the audience step shows recipients per language and channel and recommends languages with ≥ 5% of the audience, the largest as default. This is a starting suggestion only: any supported language can be chosen whatever its share.
   - **Generation:** the AI writes only the selected languages, in one call.
   - **Catalog:** one Go catalog (code and native name) is the single list of languages, served by `GET /api/catalog` (D39) and guarded by database checks and a consistency test.
@@ -261,6 +261,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
   - A recipient whose language is added after the audience is built keeps the language recorded then.
   - German and more languages are possible but not offered (see README, Future improvements).
   - Plan: `docs/plans/2026-10-24-t20-plan.md`.
+- **History:** 2026-10-24 (Task 7): clarified, with the engineer's approval, that a resend doesn't copy the original messages' languages but resolves its own.
 
 ### D65 — A/B testing is not built
 - **Status:** Deferred · 2026-10-24

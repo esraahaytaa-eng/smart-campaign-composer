@@ -191,3 +191,20 @@ Same machine and method; the host was quieter than before (load average 5–13 i
 D59 needed two corrections on the way, both measured: a new stream's first snapshot is read fresh (the browser suite caught a page opened again right after a resend that still showed none), and a snapshot is reused for a quarter of the poll interval instead of half (with half, the slowest update was 1.4–2.1 s behind, at the edge of 2 s).
 
 Not changed by these fixes, and still as above: P4 and P5 under back-to-back load (list search p95 112–161 ms, recipients 120–170 ms; met with realistic pauses), and the largest-chunk part of P7 (43.9 kB gzipped; Vue's runtime alone is ~43 kB). The phone interactions measured faster after (status filter 120–128 ms, back to English 128–136 ms) with no rendering change, so that is the quieter host, not a fix.
+
+## With two content languages (T20), 2026-10-24
+
+`make perf` now writes Turkish and English content for the full send and the marketers' drafts (D64), so the estimate, the send and recipient details run over two languages. Same machine; load average 4–10 during the runs.
+
+| Target | Measured (last run; range over runs 1, 3 and 4: run 1 had the 500 below, run 2 ran at load 13–17 and is left out) | Met |
+|---|---|---|
+| P1 full send | 95% at 24.2 s, all at 39.3 s (all at 38.0–42.5 s) | yes |
+| P2 rate | peaks 100 per channel | yes |
+| P3 10 marketers back to back | reads p95 55.6 ms, writes 20.2 ms, 0 server errors | yes |
+| P4 list search | p95 60.7 ms (44–61 ms) | yes |
+| P5 recipient details | p95 72.5 ms (51–73 ms) | no, as before T20: back-to-back only (was 120–170 ms); realistic pauses still meet it |
+| P6 live screens | 14 ms/s of database time, slowest update 0.99 s behind (0.99–2.06 s over the runs) | yes |
+| Estimate with two languages | p50 / p95 6.9 / 12.7 ms (was 5 / 11 with one) | — |
+| P7 first load | 96.5 / 103.7 / 109.8 kB gzipped (sign-in / dashboard / list), as after D60 (96–109 kB) | unchanged |
+
+The first run found a 500 in recipient details: a finished campaign with no language anywhere (the perf fixture inserts one directly, without content) made the row's language NULL. Real campaigns can't reach that state, but the row now reads "not recorded" (`und`) instead (`TestRecipients_NoLanguageAnywhere`).
