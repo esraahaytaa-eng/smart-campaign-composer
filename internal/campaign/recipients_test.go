@@ -22,6 +22,7 @@ type recipientsPage struct {
 		Contact       string         `json:"contact"`
 		Channel       string         `json:"channel"`
 		Language      string         `json:"language"`
+		Variant       *string        `json:"variant"`
 		Group         string         `json:"group"`
 		Reason        *string        `json:"reason"`
 		Detail        map[string]any `json:"detail"`
@@ -284,5 +285,34 @@ func TestRecipients_DraftHasNone(t *testing.T) {
 
 	if p.Total != 0 || len(p.Recipient) != 0 || p.Groups["sms"]["pending"] != 0 || p.Groups["email"]["sent"] != 0 || len(p.Reasons) != 0 {
 		t.Fatalf("draft: %+v", p)
+	}
+}
+
+// D68: each row says which version it got, the list filters by version, and
+// the over-limit detail measures that version's text.
+func TestRecipients_VariantFilter(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	id := a.recipientsCampaign()
+	if p, _ := a.recipients(id, "group=skipped"); p.Total == 0 || p.Recipient[0].Variant != nil {
+		t.Fatalf("without A/B no row has a version: %+v", p.Recipient)
+	}
+	a.exec(`UPDATE campaigns SET ab_test = true WHERE id = $1`, id)
+	a.exec(`INSERT INTO campaign_content (campaign_id, channel, language, variant, body) VALUES ($1, 'sms', 'tr', 'b', $2)`,
+		id, "B {{first_name}}, "+strings.Repeat("y", 140))
+	a.exec(`UPDATE messages SET variant = CASE WHEN user_id % 2 = 0 THEN 'b' ELSE 'a' END WHERE campaign_id = $1`, id)
+
+	p, _ := a.recipients(id, "group=skipped&variant=b")
+	if p.Total != 1 || p.Recipient[0].Variant == nil || *p.Recipient[0].Variant != "b" {
+		t.Fatalf("want the one B recipient skipped, got %+v", p)
+	}
+	if got := p.Recipient[0].Detail["length"]; got == float64(165) || got == nil {
+		t.Fatalf("the detail measures version B's text, got %v", p.Recipient[0].Detail)
+	}
+	if p, _ := a.recipients(id, "group=skipped&variant=a"); p.Total != 1 || *p.Recipient[0].Reason != "no_consent" {
+		t.Fatalf("want the one A recipient skipped for consent, got %+v", p)
+	}
+	if _, code := a.recipients(id, "group=sent&variant=x"); code != http.StatusUnprocessableEntity {
+		t.Fatalf("an unknown version: want 422, got %d", code)
 	}
 }

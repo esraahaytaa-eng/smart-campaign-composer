@@ -2,6 +2,7 @@ package campaign_test
 
 import (
 	"context"
+	"strings"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -284,5 +285,23 @@ func TestGenerate_VersionBCountsTowardLimit(t *testing.T) {
 	a.generateBody(d.ID, `{"version":3,"languages":["tr"],"variant":"b","replace":true}`)
 	if rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":4,"languages":["tr"],"variant":"b","replace":true}`); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("want the second call limited, got %d", rec.Code)
+	}
+}
+
+// D68: the review's over-limit estimate for version B measures B's text.
+func TestEstimate_OverLimitPerVersion(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	d := a.abOn()
+	long := `{"sms":{"body":"{{first_name}}{{first_name}}{{first_name}} ` + strings.Repeat("y", 157) + `"},"email":{"subject":"S","body":"B"}}`
+	if code := a.putContent(d.ID, `{"version":3,"default_language":"tr","content":{"tr":`+validContent+`},"content_b":{"tr":`+long+`}}`); code != http.StatusOK {
+		t.Fatalf("save B: %d", code)
+	}
+	got := decode[struct {
+		Over  struct{ SMS int } `json:"over_limit"`
+		OverB *struct{ SMS int } `json:"over_limit_b"`
+	}](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID)+"/estimate", ""))
+	if got.OverB == nil || got.OverB.SMS == 0 || got.Over.SMS != 0 {
+		t.Fatalf("want only version B over the limit, got A %d, B %+v", got.Over.SMS, got.OverB)
 	}
 }

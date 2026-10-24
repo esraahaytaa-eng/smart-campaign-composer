@@ -391,3 +391,28 @@ func TestEvents_RetryCountsWithRealClaimCounts(t *testing.T) {
 		t.Fatalf("a claim handed back unsent is requeued, got %v", r)
 	}
 }
+
+// D68: an A/B test's status is also counted per version, with delivery data
+// only: no opens, clicks, rates or winner exist to report.
+func TestStatus_ByVariantMatchesMessages(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	id := a.sendingCampaign()
+	a.exec(`UPDATE campaigns SET ab_test = true WHERE id = $1`, id)
+	a.exec(`UPDATE messages SET variant = CASE WHEN user_id % 2 = 1 THEN 'a' ELSE 'b' END WHERE campaign_id = $1`, id)
+
+	e, _ := a.stream(id).next(t)
+	sms := e.Data["channels"].(map[string]any)["sms"].(map[string]any)
+	by, _ := sms["by_variant"].(map[string]any)
+	want := map[string]any{
+		"a": map[string]any{"audience": float64(4),
+			"groups":       map[string]any{"sent": float64(1), "uncertain": float64(0), "failed": float64(1), "skipped": float64(1), "cancelled": float64(0), "retrying": float64(1), "pending": float64(0)},
+			"skip_reasons": map[string]any{"no_consent": float64(1)}},
+		"b": map[string]any{"audience": float64(3),
+			"groups":       map[string]any{"sent": float64(0), "uncertain": float64(0), "failed": float64(1), "skipped": float64(1), "cancelled": float64(0), "retrying": float64(0), "pending": float64(1)},
+			"skip_reasons": map[string]any{"character_limit_exceeded": float64(1)}},
+	}
+	if !reflect.DeepEqual(by, want) {
+		t.Fatalf("by_variant:\n got %v\nwant %v", by, want)
+	}
+}
