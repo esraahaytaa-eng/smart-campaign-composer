@@ -1,7 +1,7 @@
 // Dashboard and campaign list (T18 step 4, boards B and C): status counts,
 // filters and search in the URL, row actions, delete and cancel with a
 // confirmation, Turkish.
-import { ANKARA_BRIEF, BASE, CART_BRIEF, suite } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, CART_BRIEF, suite, putContent } from './lib.mjs'
 
 const content = { sms: { body: 'Merhaba {{first_name}}, hafta sonu indirimi başladı!' }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } }
 
@@ -14,7 +14,7 @@ export default () =>
     // a draft, and a campaign scheduled for tomorrow (cancelled at the end, nothing is sent)
     const draft = await t.draft(CART_BRIEF)
     const scheduled = await t.draft(ANKARA_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${scheduled}/content`, { data: { version: 1, content: { sms: content.sms } } })
+    await putContent(page, scheduled, 1, { sms: content.sms })
     const at = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
     const approved = await page.request.post(`${BASE}/api/campaigns/${scheduled}/approve`, { data: { version: 2, send: { at } } })
     check(approved.ok(), 'test setup: a campaign is scheduled for tomorrow')

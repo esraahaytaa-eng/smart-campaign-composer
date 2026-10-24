@@ -3,7 +3,7 @@
 // the review step, a status stream that fails for good, pausing and
 // cancelling, paging past the end, and summary links. The live part sends to
 // every SMS customer through the mock provider and cancels after a moment.
-import { ANKARA_BRIEF, BASE, CART_BRIEF, suite } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, CART_BRIEF, suite, putContent } from './lib.mjs'
 
 export default () =>
   suite('review-fixes', async (t) => {
@@ -24,7 +24,7 @@ export default () =>
 
     // signing out right after typing keeps the text
     const id = await t.draft(ANKARA_BRIEF, ['sms'])
-    await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: { sms: { body: 'Merhaba {{first_name}}!' } } } })
+    await putContent(page, id, 1, { sms: { body: 'Merhaba {{first_name}}!' } })
     await page.goto(`${BASE}/campaigns/${id}/content`)
     // A slow save, still on its way when the marketer signs out.
     await page.route(`**/api/campaigns/${id}/content`, async (r) => {
@@ -37,7 +37,7 @@ export default () =>
     await page.waitForURL(/\/login/)
     await page.unroute(`**/api/campaigns/${id}/content`)
     await t.signIn()
-    check((await t.get(id)).content.sms.body === 'Merhaba {{first_name}}, typed just before signing out', 'signing out saves the text typed just before')
+    check((await t.get(id)).content.tr.sms.body === 'Merhaba {{first_name}}, typed just before signing out', 'signing out saves the text typed just before')
 
     // the review step warns when the brief was re-interpreted after the messages
     await page.goto(`${BASE}/campaigns/${id}`)
@@ -52,7 +52,7 @@ export default () =>
     const live = await t.draft(ANKARA_BRIEF, ['sms'])
     const cities = (await (await page.request.get(`${BASE}/api/catalog`)).json()).cities
     await page.request.put(`${BASE}/api/campaigns/${live}/rules`, { data: { version: 1, rules: [{ field: 'city', op: 'in', value: cities }] } })
-    await page.request.put(`${BASE}/api/campaigns/${live}/content`, { data: { version: 2, content: { sms: { body: 'Merhaba {{first_name}}!' } } } })
+    await putContent(page, live, 2, { sms: { body: 'Merhaba {{first_name}}!' } })
     check((await page.request.post(`${BASE}/api/campaigns/${live}/approve`, { data: { version: 3, send: 'now' } })).ok(), 'test setup: sent now to every SMS customer')
     await page.route(`**/api/campaigns/${live}/events`, (r) => r.fulfill({ status: 500, body: 'down' }))
     await page.goto(`${BASE}/campaigns/${live}`)

@@ -2,7 +2,7 @@
 // signing out: no sideways scrolling, the page content near the top on
 // small screens, the account menu in view on long pages, and every campaign
 // row readable with its actions on screen.
-import { BASE, CART_BRIEF, suite } from './lib.mjs'
+import { BASE, CART_BRIEF, suite, putContent } from './lib.mjs'
 
 const SIZES = [
   [1440, 900],
@@ -17,9 +17,7 @@ export default () =>
     const { page, check } = t
     await t.signIn()
     const id = await t.draft(CART_BRIEF)
-    await page.request.put(`${BASE}/api/campaigns/${id}/content`, {
-      data: { version: 1, content: { sms: { body: 'Merhaba {{first_name}}!' }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } } },
-    })
+    await putContent(page, id, 1, { sms: { body: 'Merhaba {{first_name}}!' }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } })
     const account = page.getByRole('button', { name: /Demo Marketer/ })
     const inView = async (loc) => {
       const box = await loc.boundingBox()

@@ -2,9 +2,10 @@
 import { DialogClose, DialogContent, DialogDescription, DialogOverlay, DialogPortal, DialogRoot, DialogTitle } from 'reka-ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { campaigns } from '../campaign/client'
+import { campaigns, loadCatalog } from '../campaign/client'
 import { briefTitle } from '../campaign/title'
-import type { Campaign, Channel } from '../campaign/types'
+import type { Campaign, Catalog, Channel, Lang } from '../campaign/types'
+import { languageName, orderLanguages } from '../content/languages'
 import {
   attemptView,
   MAX_QUERY,
@@ -64,7 +65,7 @@ watch(
     if (JSON.stringify(q) !== JSON.stringify(old)) {
       openRow.value = null
       // Another tab or channel: show nothing rather than the last one's rows.
-      if (old && (q.group !== old.group || q.channel !== old.channel)) data.value = null
+      if (old && (q.group !== old.group || q.channel !== old.channel || q.language !== old.language)) data.value = null
       load(q)
     }
   },
@@ -103,6 +104,14 @@ const total = computed(() =>
 const groupTotal = computed(() => tabs.value.find((x) => x.group === query.value?.group)?.count ?? 0)
 const info = computed(() => (data.value ? pageInfo(data.value, data.value.recipients.length) : null))
 const channels = computed<(Channel | 'all')[]>(() => (props.campaign.channels.length > 1 ? ['all', ...props.campaign.channels] : []))
+// Each message's language (D64); the filter shows when there is more than one.
+const catalog = ref<Catalog['languages']>([])
+loadCatalog().then((c) => (catalog.value = c.languages), () => {})
+const langName = (l: Lang) => languageName(l, catalog.value)
+const languages = computed<Lang[]>(() => {
+  const all = orderLanguages(Object.keys(props.campaign.content ?? {}), props.campaign.default_language, catalog.value)
+  return all.length > 1 ? ['', ...all] : []
+})
 
 // The reason box: each reason with its count and what it means; groups
 // without reasons get one line for the whole group.
@@ -186,6 +195,11 @@ function resend(ch: Channel) {
                 {{ ch === 'all' ? t('recipients.allChannels') : t(`channel.${ch}`) }}
               </button>
             </div>
+            <div v-if="languages.length" role="group" class="segmented" :aria-label="t('recipients.language')">
+              <button v-for="l in languages" :key="l" type="button" :aria-pressed="query.language === l" @click="set({ language: l })">
+                {{ l ? langName(l) : t('recipients.allLanguages') }}
+              </button>
+            </div>
           </div>
 
           <div v-if="loadError" role="alert" class="alert alert-error">{{ errorText(loadError) }}</div>
@@ -204,6 +218,7 @@ function resend(ch: Channel) {
                 <div role="row" class="row header">
                   <span role="columnheader">{{ t('recipients.col.recipient') }}</span>
                   <span role="columnheader">{{ t('recipients.col.channel') }}</span>
+                  <span role="columnheader">{{ t('recipients.col.language') }}</span>
                   <span role="columnheader">{{ t('recipients.col.status') }}</span>
                   <span role="columnheader">{{ t('recipients.col.reason') }}</span>
                   <span role="columnheader">{{ t('recipients.col.attempts') }}</span>
@@ -214,6 +229,7 @@ function resend(ch: Channel) {
                   <div role="row" class="row" :class="{ open: openRow === r.id }">
                     <span role="cell" class="who"><strong class="name">{{ r.name }}</strong><span class="contact">{{ r.contact }}</span></span>
                     <span role="cell">{{ t(`channel.${r.channel}`) }}</span>
+                    <span role="cell">{{ langName(r.language) }}</span>
                     <span role="cell"><span :class="['badge', r.group]">{{ groupLabel(r.group) }}</span></span>
                     <span role="cell" class="why">
                       <span>{{ r.reason ? label('reasonName', r.reason) : label('infoName', r.group) }}</span>
@@ -470,12 +486,12 @@ function resend(ch: Channel) {
   opacity: 0.6;
 }
 .table {
-  min-width: 780px;
+  min-width: 880px;
   font-size: 13px;
 }
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) 70px 110px minmax(0, 2fr) 76px 100px 40px;
+  grid-template-columns: minmax(0, 1.8fr) 70px 90px 110px minmax(0, 2fr) 76px 100px 40px;
   gap: 12px;
   align-items: center;
   padding: 10px 14px;

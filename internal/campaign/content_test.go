@@ -47,6 +47,9 @@ const (
 	invalidContent = `{"sms":{"body":"Hi {{email}}"},"email":{"subject":"S","body":"B"}}`
 )
 
+// aiAnswer is the model's answer: content keyed by language (D64).
+func aiAnswer(lang, content string) string { return `{"` + lang + `":` + content + `}` }
+
 type event struct {
 	Name string
 	Data map[string]any
@@ -87,7 +90,7 @@ func names(evs []event) string {
 
 func (a *app) generate(id int64, version int) []event {
 	a.t.Helper()
-	return events(a.t, a.do(http.MethodPost, "/api/campaigns/"+itoa(id)+"/content", `{"version":`+itoa(int64(version))+`}`))
+	return events(a.t, a.do(http.MethodPost, "/api/campaigns/"+itoa(id)+"/content", `{"version":`+itoa(int64(version))+`,"languages":["tr"]}`))
 }
 
 func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
@@ -105,9 +108,9 @@ func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
 		streamed[e.Data["field"].(string)] += e.Data["text"].(string)
 	}
 	done := evs[len(evs)-1].Data
-	c := done["content"].(map[string]any)
+	c := done["content"].(map[string]any)["tr"].(map[string]any)
 	sms, email := c["sms"].(map[string]any), c["email"].(map[string]any)
-	if streamed["sms.body"] != sms["body"] || streamed["email.subject"] != email["subject"] || streamed["email.body"] != email["body"] {
+	if streamed["tr.sms.body"] != sms["body"] || streamed["tr.email.subject"] != email["subject"] || streamed["tr.email.body"] != email["body"] {
 		t.Fatalf("deltas do not add up to the saved content:\n%q\n%v", streamed, c)
 	}
 	if done["version"] != float64(2) || a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1`, d.ID) != 2 {
@@ -122,7 +125,7 @@ func TestGenerate_MockStreamsDeltasThenDone(t *testing.T) {
 
 func TestGenerate_InvalidThenValid_RetryThenDone(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	d := a.newDraft()
 
@@ -131,7 +134,7 @@ func TestGenerate_InvalidThenValid_RetryThenDone(t *testing.T) {
 	if got := names(evs); got != "delta,retry,delta,done" {
 		t.Fatalf("want delta,retry,delta,done, got %s", got)
 	}
-	if len(model.calls) != 2 || !strings.Contains(strings.Join(model.calls[1].Errors, ";"), "sms.body") {
+	if len(model.calls) != 2 || !strings.Contains(strings.Join(model.calls[1].Errors, ";"), "tr.sms.body") {
 		t.Fatalf("the retry must carry the validation errors, got %+v", model.calls)
 	}
 	if a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1 AND body LIKE '%sepetin%'`, d.ID) != 1 {
@@ -151,7 +154,7 @@ func (a *app) unchanged(id int64) {
 
 func TestGenerate_InvalidTwice_ErrorNothingSaved(t *testing.T) {
 	t.Parallel()
-	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, invalidContent}})
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", invalidContent)}})
 	d := a.newDraft()
 
 	evs := a.generate(d.ID, 1)
@@ -185,10 +188,10 @@ func TestGenerate_AIFailure_ErrorNothingSaved(t *testing.T) {
 func TestGenerate_ClientDisconnect_NothingSaved(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
-	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{validContent}, between: cancel})
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", validContent)}, between: cancel})
 	d := a.newDraft()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", strings.NewReader(`{"version":1}`)).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", strings.NewReader(`{"version":1,"languages":["tr"]}`)).WithContext(ctx)
 	req.AddCookie(a.cookie)
 	a.mux.ServeHTTP(httptest.NewRecorder(), req)
 
@@ -205,9 +208,9 @@ func TestGenerate_Preconditions(t *testing.T) {
 		path, body string
 		want       int
 	}{
-		"stale version":   {path, `{"version":7}`, http.StatusConflict},
+		"stale version":   {path, `{"version":7,"languages":["tr"]}`, http.StatusConflict},
 		"missing version": {path, `{}`, http.StatusUnprocessableEntity},
-		"unknown id":      {"/api/campaigns/999/content", `{"version":1}`, http.StatusNotFound},
+		"unknown id":      {"/api/campaigns/999/content", `{"version":1,"languages":["tr"]}`, http.StatusNotFound},
 	} {
 		if rec := a.do(http.MethodPost, tc.path, tc.body); rec.Code != tc.want || strings.HasPrefix(rec.Header().Get("Content-Type"), "text/event-stream") {
 			t.Errorf("%s: want %d JSON, got %d %q", name, tc.want, rec.Code, rec.Header().Get("Content-Type"))
@@ -216,7 +219,7 @@ func TestGenerate_Preconditions(t *testing.T) {
 	if _, err := a.pool.Exec(context.Background(), `UPDATE campaigns SET status = 'approved' WHERE id = $1`, d.ID); err != nil {
 		t.Fatal(err)
 	}
-	if rec := a.do(http.MethodPost, path, `{"version":1}`); rec.Code != http.StatusConflict {
+	if rec := a.do(http.MethodPost, path, `{"version":1,"languages":["tr"]}`); rec.Code != http.StatusConflict {
 		t.Errorf("approved campaign: want 409, got %d", rec.Code)
 	}
 }
@@ -227,25 +230,25 @@ func TestUpdateContent(t *testing.T) {
 	d := a.newDraft()
 	path := "/api/campaigns/" + itoa(d.ID) + "/content"
 
-	rec := a.do(http.MethodPut, path, `{"version":1,"content":`+validContent+`}`)
+	rec := a.do(http.MethodPut, path, `{"version":1,"default_language":"tr","content":{"tr":`+validContent+`}}`)
 	got := decode[map[string]any](t, rec)
 	if rec.Code != http.StatusOK || got["version"] != float64(2) || got["content"] == nil {
 		t.Fatalf("valid edit: want 200 v2 with content, got %d %s", rec.Code, rec.Body)
 	}
 
-	rec = a.do(http.MethodPut, path, `{"version":2,"content":`+invalidContent+`}`)
+	rec = a.do(http.MethodPut, path, `{"version":2,"default_language":"tr","content":{"tr":`+invalidContent+`}}`)
 	errs := decode[map[string]any](t, rec)
 	if rec.Code != http.StatusUnprocessableEntity || errs["field_errors"] == nil {
 		t.Fatalf("invalid variable: want 422 with field_errors, got %d %s", rec.Code, rec.Body)
 	}
-	if rec := a.do(http.MethodPut, path, `{"version":2,"content":{"sms":{"body":"Hi"}}}`); rec.Code != http.StatusUnprocessableEntity {
+	if rec := a.do(http.MethodPut, path, `{"version":2,"default_language":"tr","content":{"tr":{"sms":{"body":"Hi"}}}}`); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("missing email content: want 422, got %d", rec.Code)
 	}
 	// A NUL byte must be a validation error, not a database failure (500).
-	if rec := a.do(http.MethodPut, path, `{"version":2,"content":{"sms":{"body":"Hi\u0000"},"email":{"subject":"S","body":"B"}}}`); rec.Code != http.StatusUnprocessableEntity {
+	if rec := a.do(http.MethodPut, path, `{"version":2,"default_language":"tr","content":{"tr":{"sms":{"body":"Hi\u0000"},"email":{"subject":"S","body":"B"}}}}`); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("NUL in content: want 422, got %d %s", rec.Code, rec.Body)
 	}
-	if rec := a.do(http.MethodPut, path, `{"version":1,"content":`+validContent+`}`); rec.Code != http.StatusConflict {
+	if rec := a.do(http.MethodPut, path, `{"version":1,"default_language":"tr","content":{"tr":`+validContent+`}}`); rec.Code != http.StatusConflict {
 		t.Fatalf("stale version: want 409, got %d", rec.Code)
 	}
 	var c content.Content
@@ -257,7 +260,7 @@ func TestUpdateContent(t *testing.T) {
 
 func TestGenerate_TruncatedAnswerIsRetried(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), errs: []error{llm.ErrTruncated}, outputs: []string{"", aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	d := a.newDraft()
 
@@ -274,7 +277,7 @@ func TestGenerate_RecordsCallMetrics(t *testing.T) {
 	}
 	ok, invalid, failed := value("ok"), value("invalid"), value("error")
 
-	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}})
+	a := newApp(t, &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}})
 	a.generate(a.newDraft().ID, 1)
 	b := newApp(t, &contentLLM{Mock: llm.NewMock(), err: errors.New("503 overloaded")})
 	b.generate(b.newDraft().ID, 1)

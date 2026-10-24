@@ -8,6 +8,15 @@ export const SAMPLES: { id: 'typical' | 'long'; vars: Vars }[] = [
   { id: 'long', vars: { first_name: 'Abdurrahman Kerim', last_name: 'Yıldızoğlu', city: 'Afyonkarahisar' } }, // i18n-ignore: sample data
 ]
 
+export type Sample = (typeof SAMPLES)[number]
+const SAMPLES_EN: Sample[] = [
+  { id: 'typical', vars: { first_name: 'Emma', last_name: 'Clarke', city: 'İzmir' } }, // i18n-ignore: sample data
+  { id: 'long', vars: { first_name: 'Alexandra Victoria', last_name: 'Worthington', city: 'Afyonkarahisar' } }, // i18n-ignore: sample data
+]
+
+// Each language's tab previews with customers who speak it (D64).
+export const samplesFor = (lang: string): Sample[] => (lang === 'en' ? SAMPLES_EN : SAMPLES)
+
 export function render(template: string, vars: Vars): string {
   let s = template
   for (const v of ['first_name', 'last_name', 'city'] as const) s = s.split(`{{${v}}}`).join(vars[v]) // backend order

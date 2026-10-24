@@ -30,6 +30,11 @@ const foldSQL = `lower(translate(%s, 'ÇçĞğİIıÖöŞşÜü', 'ccggiiioossuu
 
 func fold(expr string) string { return strings.Replace(foldSQL, "%s", expr, 1) }
 
+// messageLangSQL is the language whose text a message gets, as the worker
+// picks it: its stored language, else the campaign's default (pre-T20 rows),
+// else "not recorded" for data with no language at all.
+const messageLangSQL = `coalesce(m.language, (SELECT default_language FROM campaigns WHERE id = m.campaign_id), 'und')`
+
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 type recipientsResponse struct {
@@ -49,6 +54,7 @@ type recipientJSON struct {
 	Name          string        `json:"name"`
 	Contact       string        `json:"contact"`
 	Channel       string        `json:"channel"`
+	Language      content.Lang  `json:"language"` // whose text it got: its own, else the default (D64)
 	Group         string        `json:"group"`
 	Reason        *string       `json:"reason"`
 	Detail        *overLimit    `json:"detail"`
@@ -78,7 +84,7 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	qs := r.URL.Query()
-	group, channel, q := qs.Get("group"), qs.Get("channel"), strings.TrimSpace(qs.Get("q"))
+	group, channel, q, lang := qs.Get("group"), qs.Get("channel"), strings.TrimSpace(qs.Get("q")), qs.Get("language")
 	page := 1
 	if p := qs.Get("page"); p != "" {
 		n, err := strconv.Atoi(p)
@@ -95,12 +101,15 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 	case channel != "" && channel != "sms" && channel != "email":
 		writeError(w, http.StatusUnprocessableEntity, "channel must be sms or email")
 		return
+	case lang != "" && !content.IsLanguage(lang) && lang != content.LegacyLang:
+		writeError(w, http.StatusUnprocessableEntity, "language must be a supported language or "+content.LegacyLang)
+		return
 	case utf8.RuneCountInString(q) > maxNameQuery:
 		writeError(w, http.StatusUnprocessableEntity, "the name search is limited to "+strconv.Itoa(maxNameQuery)+" characters")
 		return
 	}
 
-	out, err := h.listRecipients(r.Context(), id, group, channel, q, page)
+	out, err := h.listRecipients(r.Context(), id, group, channel, q, lang, page)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "campaign not found")
 		return
@@ -112,10 +121,10 @@ func (h *Handler) recipients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q string, page int) (recipientsResponse, error) {
+func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, q, lang string, page int) (recipientsResponse, error) {
 	out := recipientsResponse{AsOf: h.Now(), Groups: map[string]map[string]int{}, Reasons: map[string]int{},
 		Page: page, PageSize: recipientsPageSize, Recipients: []recipientJSON{}}
-	tpl, err := h.loadContent(ctx, id) // fixed after approval (D11)
+	v, err := h.loadContent(ctx, id) // fixed after approval (D11)
 	if err != nil {
 		return out, err
 	}
@@ -169,12 +178,16 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 		}
 	}
 
-	// The name search ($4, LIKE-escaped) narrows the total and the rows only.
+	// The name search (LIKE-escaped) and the language narrow the total and the rows only.
 	from, args := ` FROM messages m`, []any{id, group, channel}
 	if q != "" {
 		from += ` JOIN users u ON u.id = m.user_id`
-		where += ` AND ` + fold(`concat_ws(' ', u.first_name, u.last_name)`) + ` LIKE '%' || ` + fold(`$4`) + ` || '%'`
 		args = append(args, likeEscaper.Replace(q))
+		where += ` AND ` + fold(`concat_ws(' ', u.first_name, u.last_name)`) + ` LIKE '%' || ` + fold(`$`+strconv.Itoa(len(args))) + ` || '%'`
+	}
+	if lang != "" {
+		args = append(args, lang)
+		where += ` AND ` + messageLangSQL + ` = $` + strconv.Itoa(len(args))
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*)`+from+where, args...).Scan(&out.Total); err != nil {
 		return out, err
@@ -185,7 +198,7 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 			ORDER BY last_at DESC NULLS LAST, m.id DESC
 			LIMIT `+strconv.Itoa(recipientsPageSize)+` OFFSET `+strconv.Itoa((page-1)*recipientsPageSize)+`)
 		SELECT m.id, concat_ws(' ', u.first_name, u.last_name), u.first_name, coalesce(u.last_name, ''), u.city,
-			CASE m.channel WHEN 'sms' THEN u.phone ELSE u.email END, m.channel, `+reasonSQL+`,
+			CASE m.channel WHEN 'sms' THEN u.phone ELSE u.email END, m.channel, `+messageLangSQL+`, `+reasonSQL+`,
 			CASE WHEN m.status = 'retry_scheduled' THEN m.next_attempt_at END
 		FROM page p JOIN messages m ON m.id = p.id JOIN users u ON u.id = m.user_id`+lastAttemptsSQL+`
 		ORDER BY p.last_at DESC NULLS LAST, m.id DESC`, args...)
@@ -195,15 +208,15 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 	byID := map[int64]int{}
 	var first, last, city, contact string
 	var rc recipientJSON
-	if _, err := pgx.ForEachRow(rows, []any{&rc.ID, &rc.Name, &first, &last, &city, &contact, &rc.Channel, &rc.Reason, &rc.NextAttemptAt}, func() error {
+	if _, err := pgx.ForEachRow(rows, []any{&rc.ID, &rc.Name, &first, &last, &city, &contact, &rc.Channel, &rc.Language, &rc.Reason, &rc.NextAttemptAt}, func() error {
 		rc.Group, rc.Attempts, rc.Detail = group, []attemptJSON{}, nil
 		if rc.Channel == "sms" {
 			rc.Contact = maskPhone(contact)
 		} else {
 			rc.Contact = maskEmail(contact)
 		}
-		if rc.Reason != nil && *rc.Reason == "character_limit_exceeded" && tpl != nil {
-			rc.Detail = overLimitDetail(*tpl, rc.Channel, content.UserVars{FirstName: first, LastName: last, City: city})
+		if tpl, ok := v[rc.Language]; ok && rc.Reason != nil && *rc.Reason == "character_limit_exceeded" {
+			rc.Detail = overLimitDetail(tpl, rc.Channel, content.UserVars{FirstName: first, LastName: last, City: city})
 		}
 		byID[rc.ID] = len(out.Recipients)
 		out.Recipients = append(out.Recipients, rc)

@@ -33,6 +33,13 @@ keywords = ["@"]
     '''(?i)@users\.noreply\.github\.com$''',
   ]
 
+  [[rules.allowlists]]
+  description = "Session exports quoting the scanner self-test's planted contacts (fictional; any other contact is still caught)"
+  condition = "AND"
+  paths = ['''(?:^|/)ai-sessions/''']
+  regexTarget = "match"
+  regexes = ['''^(?:(?:ay)?se\.yilmaz@gmail|mehmet\.kaya@hotmail)\.com$''']
+
 [[rules]]
 id = "phone-number"
 description = "Phone number (possible personal data)"
@@ -42,6 +49,13 @@ regex = '''\+\d{1,3}[ .\-]?\(?\d{3}\)?[ .\-]?\d{3}[ .\-]?\d{2}[ .\-]?\d{2}\b|\b0
   description = "Fictional numbers: the seed's and tests' +90 500/555 ranges, and the UK range Ofcom reserves for fiction (+44 7700 900)"
   regexTarget = "match"
   regexes = ['''^\+90[ .\-]?5(?:00|55)''', '''^\+44[ .\-]?7700[ .\-]?900''']
+
+  [[rules.allowlists]]
+  description = "Session exports quoting the scanner self-test's planted numbers (fictional; [x] keeps this file from holding them)"
+  condition = "AND"
+  paths = ['''(?:^|/)ai-sessions/''']
+  regexTarget = "match"
+  regexes = ['''^\+90 532 1[2]3 45 67$''', '''^0532 9[8]7 65 43$''', '''^\+49151[1]2345678$''']
 
 [[rules]]
 id = "dotenv-file"

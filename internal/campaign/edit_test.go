@@ -13,53 +13,96 @@ import (
 	"smart-campaign-composer/internal/llm"
 )
 
-type editedDraft struct {
-	draft
-	Content map[string]any `json:"content"`
-}
-
-func (a *app) putChannels(id int64, body string) (int, editedDraft) {
+func (a *app) putChannels(id int64, body string) (int, variantDraft) {
 	a.t.Helper()
 	rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(id)+"/channels", body)
 	if rec.Code != http.StatusOK {
-		return rec.Code, editedDraft{}
+		return rec.Code, variantDraft{}
 	}
-	return rec.Code, decode[editedDraft](a.t, rec)
+	return rec.Code, decode[variantDraft](a.t, rec)
 }
 
-func TestChannels_RemovingOneDeletesItsContent(t *testing.T) {
+// D67: a removed channel's text is kept, left out of approval and counts.
+func TestChannels_RemoveKeepsText(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())
-	d := a.readyDraft() // sms + email with content, version 2
+	d := a.readyDraft() // sms + email with Turkish content, version 2
+	// invalid text on the channel being removed must not block approval
+	a.exec(`UPDATE campaign_content SET body = 'Hi {{email}}' WHERE campaign_id = $1 AND channel = 'email'`, d.ID)
 
 	code, got := a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
 
 	if code != http.StatusOK || len(got.Channels) != 1 || got.Channels[0] != "sms" || got.Version != 3 {
 		t.Fatalf("want sms only at version 3, got %d %+v", code, got.draft)
 	}
-	if got.Content["sms"] == nil || got.Content["email"] != nil {
-		t.Fatalf("want the sms content kept and the email content gone, got %v", got.Content)
+	if got.Content["tr"]["sms"] == nil || got.Content["tr"]["email"]["body"] != "Hi {{email}}" {
+		t.Fatalf("want both channels' text kept, got %v", got.Content)
 	}
 	if got.Counts == nil || got.Counts.SMS != 1 || got.Counts.Email != 0 || got.Counts.Total != 1 {
 		t.Fatalf("want counts for sms only, got %+v", got.Counts)
 	}
 	if code, body := a.approve(d.ID, `{"version":3,"send":"now"}`); code != http.StatusOK {
-		t.Fatalf("the remaining content must still be approvable, got %d %v", code, body)
+		t.Fatalf("the chosen channel's content must be approvable, got %d %v", code, body)
+	}
+}
+
+func TestChannels_ReAddRestoresText(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	d := a.readyDraft()
+	before := a.get(d.ID).Content
+	a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
+
+	code, got := a.putChannels(d.ID, `{"version":3,"channels":["sms","email"]}`)
+
+	if code != http.StatusOK || len(got.Channels) != 2 || !reflect.DeepEqual(got.Content, before) || got.Counts.Email != 1 {
+		t.Fatalf("want both channels with the email text back as it was, got %d %v", code, got.Content)
+	}
+}
+
+// D67: kept text that comes back with its channel is reviewed again before
+// it is sent; the text is unchanged and no AI is called.
+func TestChannels_ReAddNeedsReview(t *testing.T) {
+	t.Parallel()
+	model := noContentCalls()
+	a := newApp(t, model)
+	d := a.readyDraft() // Turkish approved, version 2
+	a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
+	if got := a.get(d.ID); got.Languages["tr"].ApprovedAt == nil {
+		t.Fatal("removing a channel keeps the approval of what is still sent")
+	}
+
+	code, got := a.putChannels(d.ID, `{"version":3,"channels":["sms","email"]}`)
+
+	if code != http.StatusOK || got.Languages["tr"].ApprovedAt != nil || got.Content["tr"]["email"] == nil {
+		t.Fatalf("want the email text back and Turkish needing review, got %d %+v", code, got.Languages)
+	}
+	if code, _ := a.approve(d.ID, `{"version":4,"send":"now"}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("approval must wait for the language to be reviewed again, got %d", code)
+	}
+	if code := a.approveLanguage(d.ID, "tr", 4); code != http.StatusOK {
+		t.Fatalf("the kept text can be reapproved as it is, got %d", code)
+	}
+	if code, body := a.approve(d.ID, `{"version":4,"send":"now"}`); code != http.StatusOK {
+		t.Fatalf("want approval after the review, got %d %v", code, body)
+	}
+	if len(model.calls) != 0 {
+		t.Fatalf("no AI call, got %d", len(model.calls))
 	}
 }
 
 func TestChannels_AddedOneStartsWithoutContent(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())
-	d := a.readyDraft()
-	a.putChannels(d.ID, `{"version":2,"channels":["sms"]}`)
+	_, d := a.create(map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
+	a.putContent(d.ID, `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Merhaba!"}}}}`)
 
-	code, got := a.putChannels(d.ID, `{"version":3,"channels":["sms","email"]}`)
+	code, got := a.putChannels(d.ID, `{"version":2,"channels":["sms","email"]}`)
 
-	if code != http.StatusOK || len(got.Channels) != 2 || got.Content["email"] != nil || got.Counts.Email != 1 {
+	if code != http.StatusOK || len(got.Channels) != 2 || got.Content["tr"]["email"] != nil || got.Counts.Email != 1 {
 		t.Fatalf("want both channels, no email content yet, got %d %+v %v", code, got.draft, got.Content)
 	}
-	if code, _ := a.approve(d.ID, `{"version":4,"send":"now"}`); code != http.StatusUnprocessableEntity {
+	if code, _ := a.approve(d.ID, `{"version":3,"send":"now"}`); code != http.StatusUnprocessableEntity {
 		t.Fatalf("approval must wait for the added channel's content, got %d", code)
 	}
 }
@@ -92,8 +135,8 @@ func TestChannels_Rejects(t *testing.T) {
 			t.Errorf("%s: want %d, got %d", tc.name, tc.want, code)
 		}
 	}
-	got := decode[editedDraft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
-	if got.Version != 2 || len(got.Channels) != 2 || got.Content["email"] == nil {
+	got := a.get(d.ID)
+	if got.Version != 2 || len(got.Channels) != 2 || got.Content["tr"]["email"] == nil {
 		t.Fatalf("a rejected change altered the draft: %+v %v", got.draft, got.Content)
 	}
 	if a.count(`SELECT count(*) FROM campaign_content WHERE campaign_id = $1`, approved.ID) != 2 {
@@ -167,7 +210,7 @@ func TestRequest_ReinterpretsAndKeepsContent(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())
 	d := a.readyDraft() // the case example: İstanbul cart abandoners, no time, content, version 2
-	before := decode[editedDraft](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	before := decode[map[string]any](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
 
 	code, got := a.putRequest(d.ID, requestBody(ankaraBrief, 2))
 
@@ -185,8 +228,8 @@ func TestRequest_ReinterpretsAndKeepsContent(t *testing.T) {
 	if counts["total"] != float64(1) || counts["sms"] != float64(1) || counts["email"] != float64(0) {
 		t.Fatalf("want counts for the new rules (user 2 in Ankara, SMS only), got %v", counts)
 	}
-	if !reflect.DeepEqual(got["content"], before.Content) {
-		t.Fatalf("the content must be kept as it was:\n got %v\nwant %v", got["content"], before.Content)
+	if !reflect.DeepEqual(got["content"], before["content"]) {
+		t.Fatalf("the content must be kept as it was:\n got %v\nwant %v", got["content"], before["content"])
 	}
 }
 

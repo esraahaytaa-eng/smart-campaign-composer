@@ -163,6 +163,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Marketers write the brief in the language they want to send.
 - **Rejected:** *English-only mock:* breaks Turkish demos. *Language per recipient:* optional feature, still deferred.
 - **Trade-offs:** Mixed-language briefs depend on Claude's judgement.
+- **History:** 2026-10-24: narrowed by D64; the brief can be in any language and each selected language's version is written in that language. Unsupported-brief reasons stay in the brief's language.
 
 ### D45 — Recipient details are part of T18
 - **Status:** Accepted · 2026-10-23
@@ -234,6 +235,65 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** 25 rows push the lower pager below the fold on a desktop screen.
 - **Rejected:** *Fewer rows per page:* more paging for everyone. *A pager that sticks to the screen bottom:* covers rows and the page note.
 - **Trade-offs:** Two sets of the same buttons; both carry the same labels.
+
+### D64 — Messages in the recipient's language (Turkish and English)
+- **Status:** Accepted · 2026-10-24
+- **Decision:**
+  - **Languages:** a campaign has content in one or more catalog languages (now `tr`, `en`); the marketer picks a default, which must be complete.
+  - **Sending:** each recipient gets their own language if the campaign has it, otherwise the default, fixed when the audience is built (`messages.language`); retries, the send-time length check and the results use that choice. A resend is a campaign of its own: it fixes its recipients' languages from its own languages and their current preference.
+  - **Recommendation:** the audience step shows recipients per language and channel and recommends languages with ≥ 5% of the audience, the largest as default. This is a starting suggestion only: any supported language can be chosen whatever its share.
+  - **Generation:** the AI writes only the selected languages, in one call.
+  - **Catalog:** one Go catalog (code and native name) is the single list of languages, served by `GET /api/catalog` (D39) and guarded by database checks and a consistency test.
+  - **Legacy content:** content written before T20 is one version labelled `und` ("language not recorded"), already approved and the default, so it reaches everyone as before.
+- **Why:**
+  - CASE.md §9 (messages in the user's language); the seed already stores each user's language.
+  - The catalog makes a new language a migration, a catalog entry and mock texts, with no restructuring.
+  - One call and explicit selection keep AI cost proportional to what the marketer asks for (`docs/plans/2026-10-24-t20-ai-cost.md`: two languages ≈ $0.041 per generation combined vs $0.059 separately).
+- **Rejected:**
+  - *English always required:* forces a version the audience may not need.
+  - *A languages table with foreign keys:* more machinery than two or three languages need, and `und` would sit in it as a fake language.
+  - *One call per language:* +45% cost for two languages and more D63 calls.
+  - *Labelling legacy content English or Turkish:* a guess could change what an approved campaign sends.
+  - *Choosing the language at each attempt:* a retry could switch language.
+  - *Recommending nothing, or writing every recommended language automatically:* the first leaves the marketer to work out the split; the second spends calls nobody asked for.
+- **Trade-offs:**
+  - Each extra language adds output tokens (the cost) and review work.
+  - A recipient whose language is added after the audience is built keeps the language recorded then.
+  - German and more languages are possible but not offered (see README, Future improvements).
+  - Plan: `docs/plans/2026-10-24-t20-plan.md`.
+- **History:** 2026-10-24 (Task 7): clarified, with the engineer's approval, that a resend doesn't copy the original messages' languages but resolves its own.
+
+### D65 — A/B testing is not built
+- **Status:** Deferred · 2026-10-24
+- **Decision:** No A/B variants in T20. The evaluation is recorded in the README.
+- **Why:** The app records delivery but no outcome (opens, clicks, orders after a send), so a winner can't be measured. Building it would double the content model on top of languages (D64).
+- **Rejected:** *A delivery-only A/B report:* looks finished, answers nothing.
+- **Trade-offs:** A CASE.md optional feature stays unbuilt. It needs outcome events, split assignment and a significance rule first.
+
+### D66 — Each language is reviewed and approved on its own; content is never overwritten silently
+- **Status:** Accepted · 2026-10-24
+- **Decision:** Every language of a campaign is *needs review* or *approved by the marketer*.
+  - **What resets it:** writing, regenerating or editing a language's text sets it to needs review. Saving a new brief (D40) recalculates the audience and sets every language to needs review with "may be outdated", without changing, deleting or regenerating any text.
+  - **Re-approving:** the marketer can re-approve existing content as it is, with no AI call.
+  - **Campaign approval:** allowed only when every selected language is approved.
+  - **AI calls:** only "Write with AI" writes content. Adding a language writes that language alone and leaves the others (text, review state) untouched. Rewriting a language that has content needs a confirmation, and the server refuses it without an explicit `replace`. No settings change (brief, rules, languages, default, text, channels) triggers an AI call.
+- **Why:** Hand edits and paid-for AI text must survive. A language nobody re-read after a brief change shouldn't be sent, and the state must survive reloads and other tabs.
+- **Rejected:**
+  - *A warning only:* an unreviewed language could still be sent.
+  - *D40's warning in the browser tab:* lost on reload or in another tab.
+  - *Regenerating or clearing content after a brief change:* loses edits and costs calls.
+  - *One approval for the whole campaign:* hides which language is unreviewed.
+- **Trade-offs:** One more click per language before approval, and again after a brief change.
+
+### D67 — Removing a channel keeps its text
+- **Status:** Accepted · 2026-10-24
+- **Decision:** A removed channel's text stays in every language. It is left out of validation, approval, counts, estimates and delivery while the channel isn't chosen. Choosing the channel again brings the text back unchanged, and each language that has it needs review again (D66): it is sent only after a marketer reapproves it, with no AI call. Replaces D38's deletion.
+- **Why:** A channel toggle shouldn't lose hand-written or paid-for text (D66), and text that was left out when a language was approved must not be sent unreviewed.
+- **Rejected:**
+  - *Deleting it (D38):* re-adding the channel means writing it again.
+  - *Keeping the approval on re-add:* kept text, possibly written for an older brief, could be sent without review.
+- **Trade-offs:** Hidden text is stored; the content screen marks it "kept, not sent". One more approval per language after re-adding a channel.
+- **History:** 2026-10-24 (final T20 review, user's decision): re-adding a channel now clears the affected languages' approval; previously the text came back still approved.
 
 ## Architecture & Technical Decisions
 
@@ -373,6 +433,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Changing the channel picker otherwise needs a new draft and a new AI call. Approval rejects content for a channel that is not chosen, so leftover content would block it.
 - **Rejected:** *Keeping the removed channel's content:* blocks approval and shows text that will not be sent.
 - **Trade-offs:** Content for a removed channel is lost; re-adding the channel means writing it again.
+- **History:** 2026-10-24: the deletion is replaced by D67 (the text is kept and left out until the channel is chosen again).
 
 ### D39 — The rule catalog is served by the API
 - **Status:** Accepted · 2026-10-22
@@ -387,6 +448,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Rephrasing should not need a new draft. Clearing the content would silently drop manual edits, and it is reviewed before approval anyway.
 - **Rejected:** *Clearing the content:* loses hand edits. *Flagging stale content on the server:* the warning is a UI concern.
 - **Trade-offs:** Content can briefly contradict the brief; the warning and the review before approval cover it.
+- **History:** 2026-10-24: the stale-content warning moves to the server, per language, as part of D66; content is still never cleared or regenerated.
 
 ### D41 — Headless UI components (Reka UI) with our own styles
 - **Status:** Accepted · 2026-10-22
@@ -425,6 +487,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *A grep script:* misses key formats gitleaks knows. *A scanner as an app dependency:* not needed; it runs in Docker.
 - **Trade-offs:** False positives need allow-list entries; the hook is per clone.
 - **History:** 2026-10-24 (PR #7 review). Tighter rules, each proven by the self-test: a Go checksum no longer hides other findings on its line; only the UI's four placeholder addresses at company.com/sirket.com are allowed; `.env.*.*`, `.envrc` and `*.env` files are caught. The history scan finds the same single item as before.
+  2026-10-24 (T20 branch, user's decision): the owner's public GitHub username and profile links are not sensitive and are kept in session exports. The self-test's planted fictional contacts are allowed only under `ai-sessions/` (path and exact value); any other contact there is still caught.
 
 ### D52 — CI with GitHub Actions
 - **Status:** Accepted · 2026-10-23
@@ -505,5 +568,5 @@ Proposed 2026-10-23 after the step 7 measurements (`docs/performance.md`). Q1, Q
 
 ## Deferred
 
-- **Optional features from `CASE.md`:** A/B testing, messages in the user's language (a `language` field will be seeded now), CI pipeline. Scheduled sending moved into scope (D29). Resend to skipped recipients moved into scope (D31).
+- **Optional features from `CASE.md`:** A/B testing, messages in the user's language (a `language` field will be seeded now), CI pipeline. Scheduled sending moved into scope (D29). Resend to skipped recipients moved into scope (D31). Messages in the user's language moved into scope (D64); A/B testing stays deferred (D65).
 - **Archiving campaigns** (2026-10-22): hiding finished campaigns from the list. Deleting drafts (D37) removes most of the clutter; it can be added later without changing D37.

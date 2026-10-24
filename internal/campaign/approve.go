@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -48,31 +49,24 @@ func (h *Handler) countAudience(ctx context.Context, c campaignJSON, now time.Ti
 		}
 		return audience.Count(ctx, h.Pool, c.Rules, c.Channels, now, loc)
 	}
-	var counts audience.Counts
-	for _, ch := range c.Channels { // a resend has exactly one channel
-		a, err := channelAudience(c, ch, now)
-		if err != nil {
-			return counts, err
-		}
-		var n int
-		if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM users u WHERE `+a.Where, a.Args...).Scan(&n); err != nil {
-			return counts, err
-		}
-		counts.Total = n
-		if ch == "sms" {
-			counts.SMS = n
-		} else {
-			counts.Email = n
-		}
+	ch := c.Channels[0] // a resend has exactly one channel
+	a, err := channelAudience(c, ch, now)
+	if err != nil {
+		return audience.Counts{}, err
 	}
-	return counts, nil
+	rows, err := h.Pool.Query(ctx, `SELECT u.language, count(*), count(*), count(*) FROM users u WHERE `+a.Where+` GROUP BY 1`, a.Args...)
+	if err != nil {
+		return audience.Counts{}, err
+	}
+	return audience.ScanCounts(rows, c.Channels)
 }
 
 // estimateFor returns the current audience and, if there is content, the
-// over-limit counts per channel: both estimates of a future send (D3, D30).
-func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, cont *content.Content, now time.Time) (audience.Counts, *content.OverLimit, error) {
+// over-limit counts per language and channel: both estimates of a future
+// send (D3, D30). Text of channels that aren't chosen is left out (D67).
+func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, v content.Variants, now time.Time) (audience.Counts, *content.OverLimit, error) {
 	counts, err := h.countAudience(ctx, c, now)
-	if err != nil || cont == nil {
+	if err != nil || v == nil || c.DefaultLanguage == nil {
 		return counts, nil, err
 	}
 	audiences := map[string]content.Audience{}
@@ -81,8 +75,20 @@ func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, cont *content
 			return counts, nil, err
 		}
 	}
-	over, err := content.EstimateOverLimit(ctx, h.Pool, *cont, audiences)
+	chosen := content.Variants{}
+	for l, x := range v {
+		chosen[l] = content.ForChannels(x, c.Channels)
+	}
+	over, err := content.EstimateOverLimit(ctx, h.Pool, chosen, *c.DefaultLanguage, audiences)
 	return counts, &over, err
+}
+
+// deliveryFor is delivery for the campaign's current languages; nil without content.
+func deliveryFor(c campaignJSON, v content.Variants, counts audience.Counts) map[string]map[content.Lang]deliveryCount {
+	if v == nil || c.DefaultLanguage == nil {
+		return nil
+	}
+	return delivery(counts, c.Channels, slices.Collect(maps.Keys(v)), *c.DefaultLanguage)
 }
 
 // approve freezes a draft and fixes when it is sent (D11, D29, D30). The
@@ -146,8 +152,15 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "write the messages before approving")
 		return
 	}
-	if errs := content.ValidateDraft(*cont, c.Channels); len(errs) > 0 {
+	if errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage); len(errs) > 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "invalid content", "field_errors": errs})
+		return
+	}
+	if names, err := unapprovedLanguages(ctx, tx, id); err != nil {
+		serverError(w, "load languages", err)
+		return
+	} else if names != "" {
+		writeError(w, http.StatusUnprocessableEntity, "review and approve every language first: "+names)
 		return
 	}
 	if msg, err := checkWindowsStartBefore(c, sendAt); err != nil {
@@ -169,6 +182,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 	}
 	estimate, _ := json.Marshal(map[string]any{
 		"total": counts.Total, "sms": counts.SMS, "email": counts.Email, "over_limit": over, "calculated_at": now,
+		"by_language": counts.ByLanguage, "delivery": deliveryFor(c, cont, counts),
 	})
 	marketer, _ := auth.MarketerID(ctx)
 	if _, err := tx.Exec(ctx, `UPDATE campaigns SET status = 'approved', send_at = $2, approved_by = $3, approved_at = $4,
@@ -315,7 +329,8 @@ func (h *Handler) estimate(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "estimate", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"estimate": true, "audience": counts, "over_limit": over, "calculated_at": now})
+	writeJSON(w, http.StatusOK, map[string]any{"estimate": true, "audience": counts, "over_limit": over, "calculated_at": now,
+		"delivery": deliveryFor(c, cont, counts), "recommendation": newRecommendation(counts)})
 }
 
 // resend creates a draft follow-up for one channel, addressed to the

@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Channel, Counts } from '../campaign/types'
+import type { Catalog, Channel, Counts, Lang } from '../campaign/types'
+import { audienceByLanguage } from '../content/languages'
 import { formatNumber, t } from '../i18n'
 
 // change is the total's difference after the marketer's last edit (shown
 // instead of a preview before Apply, which would need another endpoint).
-const props = defineProps<{ counts?: Counts; channels: Channel[]; change?: number | null; resend?: boolean }>()
+const props = defineProps<{
+  counts?: Counts
+  channels: Channel[]
+  change?: number | null
+  resend?: boolean
+  languages?: Catalog['languages']
+  recommended?: Lang[]
+}>()
+const byLanguage = computed(() => audienceByLanguage(props.counts, props.channels, props.recommended ?? [], props.languages ?? []))
 const rows = computed(() =>
   (['sms', 'email'] as Channel[]).map((ch) => {
     const on = props.channels.includes(ch)
@@ -37,6 +46,23 @@ const rows = computed(() =>
       </div>
       <div class="bar" aria-hidden="true"><div :style="{ width: r.width }" :class="r.ch" /></div>
       <span v-if="!r.on" class="note">{{ r.off }}</span>
+    </div>
+    <div v-if="byLanguage.length" class="languages">
+      <h3>{{ t('audience.byLanguage') }}</h3>
+      <ul>
+        <li v-for="l in byLanguage" :key="l.code">
+          <span class="lang">
+            <strong>{{ l.name }}</strong> {{ l.share }}%
+            <span v-if="l.recommended" class="tag">{{ t('content.recommended') }}</span>
+          </span>
+          <span class="muted">
+            <template v-if="l.sms !== null">{{ t('channel.sms') }} {{ formatNumber(l.sms) }}</template>
+            <template v-if="l.sms !== null && l.email !== null"> · </template>
+            <template v-if="l.email !== null">{{ t('channel.email') }} {{ formatNumber(l.email) }}</template>
+          </span>
+        </li>
+      </ul>
+      <p class="note">{{ t('audience.languagesNote') }}</p>
     </div>
     <p class="alert alert-info">
       {{ t(resend ? 'audience.resendNote' : 'audience.rulesNote') }}
@@ -104,6 +130,35 @@ h2 {
 .note {
   font-size: 12px;
   color: var(--muted);
+}
+.languages h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.languages ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.languages li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.languages .muted {
+  color: var(--muted);
+}
+.tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .alert {
   margin: 0;

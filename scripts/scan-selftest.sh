@@ -16,7 +16,7 @@ key="sk-ant-api03-$(rand 93)AA"
 github="ghp_$(rand 36)"
 
 expect() { # case rule file content: the case must be reported by that rule
-	mkdir -p "$WORK/$1/repo"
+	mkdir -p "$(dirname "$WORK/$1/repo/$3")"
 	printf '%s\n' "$4" >"$WORK/$1/repo/$3"
 	echo "$2" >"$WORK/$1/rule"
 }
@@ -36,6 +36,10 @@ expect env3 dotenv-file prod.env "LOG_LEVEL=debug"
 expect env4 dotenv-file .envrc "export LOG_LEVEL=debug"
 # Only the UI's own placeholders at these real domains are allowed.
 expect mail3 email-address crm.txt "Owner: mehmet.kaya${at}company.com"
+# Session exports quote the planted contacts above (allowed below), but any
+# other contact in them is still caught.
+expect mail4 email-address ai-sessions/08.txt "Reply to zeynep.kara${at}gmail.com"
+expect phone4 phone-number ai-sessions/08.txt "Call +90 533 $(echo 246) 80 13"
 # A Go checksum on the same line must not hide a key next to it.
 expect key3 anthropic-api-key notes.txt "example.com/mod v1.0.0 h1:uiha35bPI8zGxUpS+qJ7Ux/2hD/2k5Qo3G5L2hUQFgQ= ANTHROPIC_API_KEY=$key"
 
@@ -52,6 +56,10 @@ go.sum: cloud.google.com/go/auth v0.7.2 h1:uiha35bPI8zGxUpS+qJ7Ux/2hD/2k5Qo3G5L2
 EOF
 printf 'phone := fmt.Sprintf("+90555%%07d", id)\n' >"$WORK/allowed/repo/internal/db/generate.go"
 cp "$ROOT/.env.example" "$WORK/allowed/repo/.env.example"
+mkdir -p "$WORK/allowed/repo/ai-sessions"
+printf '%s\n' "expect mail1 \"ayse.yilmaz${at}gmail.com\"" "cut by a line wrap: ay" "se.yilmaz${at}gmail.com" "7,mehmet.kaya${at}hotmail.com" \
+	"Call +90 532 $(echo 123) 45 67, telefon: 0532 $(echo 987) 65 43" "{\"phone\":\"+49151$(echo 12345678)\"}" \
+	>"$WORK/allowed/repo/ai-sessions/07.txt"
 
 fail=0
 for case in "$WORK"/*/; do

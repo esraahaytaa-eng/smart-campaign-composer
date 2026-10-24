@@ -72,7 +72,7 @@ func TestAICallLimit_GenerationAnswers429BeforeStreaming(t *testing.T) {
 	d := a.newDraft()   // call 1
 	a.generate(d.ID, 1) // call 2
 
-	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":2}`)
+	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":2,"languages":["tr"],"replace":true}`)
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("want a 429 JSON answer, not a stream; got %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
@@ -84,7 +84,7 @@ func TestAICallLimit_GenerationAnswers429BeforeStreaming(t *testing.T) {
 // A retry refused mid-stream ends the stream with the limit's message.
 func TestAICallLimit_RetryRefusedMidStream(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{invalidContent, validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", invalidContent), aiAnswer("tr", validContent)}}
 	a := newAppWith(t, model, func(h *campaign.Handler) { h.AICalls = campaign.NewAICallLimit(2) })
 	d := a.newDraft() // call 1
 

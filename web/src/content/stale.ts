@@ -1,29 +1,16 @@
-// D40: after the brief is re-interpreted, the existing messages may no longer
-// match it. The flag lives in this browser tab (sessionStorage) until the
-// messages are saved or rewritten; without storage, only the page that
-// re-interpreted shows the warning.
-const key = (id: number) => `scc.staleContent.${id}`
+// D40, D66: after the brief is re-interpreted, the existing messages may no
+// longer match it. The server keeps each language's review state, so the
+// warning survives reloads and shows in every tab.
+import type { Lang, LanguageState } from '../campaign/types'
 
-export function markContentStale(id: number) {
-  try {
-    sessionStorage.setItem(key(id), '1')
-  } catch {
-    /* storage unavailable */
-  }
+export function outdatedLanguages(languages: Record<Lang, LanguageState> | undefined): Lang[] {
+  return Object.entries(languages ?? {})
+    .filter(([, s]) => s.outdated)
+    .map(([l]) => l)
 }
 
-export function markContentFresh(id: number) {
-  try {
-    sessionStorage.removeItem(key(id))
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-export function contentWasStale(id: number): boolean {
-  try {
-    return sessionStorage.getItem(key(id)) === '1'
-  } catch {
-    return false
-  }
+export function needsReview(languages: Record<Lang, LanguageState> | undefined): Lang[] {
+  return Object.entries(languages ?? {})
+    .filter(([, s]) => !s.approved_at)
+    .map(([l]) => l)
 }

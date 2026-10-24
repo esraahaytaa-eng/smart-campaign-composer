@@ -1,6 +1,6 @@
 // Autosave and races on the audience step (T16 review): quick edits, campaign
 // switching, failures and changes made elsewhere never save wrong data.
-import { BASE, CART_BRIEF, suite } from './lib.mjs'
+import { BASE, CART_BRIEF, suite, putContent } from './lib.mjs'
 
 const keys = (c) => (c.rules ?? []).map((r) => `${r.field} ${r.op}`).sort()
 const slow = (ms, fail = false) => async (route) => {
@@ -19,20 +19,18 @@ export default () =>
     const remove = (text) => page.getByRole('button', { name: new RegExp('^Remove rule: ' + text) })
     await t.signIn()
 
-    // removing a channel that has content asks first, then deletes only that content
+    // removing a channel keeps its text, not sent, and it comes back with the channel (D67)
     {
       const id = await t.draft(CART_BRIEF)
-      await page.request.put(`${BASE}/api/campaigns/${id}/content`, {
-        data: { version: 1, content: { sms: { body: 'Merhaba {{first_name}}!' }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } } },
-      })
+      await putContent(page, id, 1, { sms: { body: 'Merhaba {{first_name}}!' }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } })
       await open(id)
       await page.getByRole('button', { name: 'SMS', exact: true }).click()
-      const dlg = page.getByRole('alertdialog')
-      check((await dlg.textContent()).includes('Remove email?'), 'removing email with content asks first')
-      await dlg.getByRole('button', { name: 'Remove and delete content' }).click()
       await page.getByText('All changes saved').waitFor()
+      check(!(await page.getByRole('alertdialog').isVisible()), 'removing a channel with text asks nothing')
+      check(await page.getByText('The email text is kept, not sent.').isVisible(), 'and says the text is kept')
       const after = await t.get(id)
-      check(JSON.stringify(after.channels) === '["sms"]' && after.content.sms && !after.content.email, 'only the removed channel loses its content')
+      check(JSON.stringify(after.channels) === '["sms"]' && after.content.tr.email?.subject === 'İndirim', 'the removed channel keeps its text')
+      check(after.languages.tr.approved_at !== null, 'and the language stays approved')
     }
 
     // two quick removals while saves are slow

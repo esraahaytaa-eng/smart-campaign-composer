@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { campaigns } from '../campaign/client'
+import { campaigns, loadCatalog } from '../campaign/client'
 import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
-import type { Campaign, Channel } from '../campaign/types'
+import type { Campaign, Catalog, Channel } from '../campaign/types'
+import { languageName, orderLanguages } from '../content/languages'
 import { api } from '../api'
 import { channelRows, deliveryPhase, deliverySummary, firstNonEmpty, resendOffer, type Group, type Snapshot } from '../delivery/status'
 import { writeQuery } from '../delivery/recipients'
@@ -17,6 +18,12 @@ import ResendDialog from './ResendDialog.vue'
 // A campaign after approval (boards 4 and B): scheduled, live delivery, or
 // read-only results. Everything comes from the status stream (D36).
 const props = defineProps<{ campaign: Campaign; parent: Campaign | null }>()
+
+// The text sent in each language, default first; kept text of a channel
+// that isn't chosen was never sent (D67).
+const catalog = ref<Catalog['languages']>([])
+loadCatalog().then((c) => (catalog.value = c.languages), () => {})
+const sentLanguages = computed(() => orderLanguages(Object.keys(props.campaign.content ?? {}), props.campaign.default_language, catalog.value))
 const emit = defineEmits<{ updated: [Campaign]; status: [Snapshot['status']] }>()
 
 const snap = ref<Snapshot | null>(null)
@@ -112,7 +119,7 @@ function refresh() {
 }
 
 // Each count opens recipient details for its group (board 5).
-const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, q: '', page: 1 }) })
+const open = (group: Group, channel: Channel | 'all' = 'all') => ({ query: writeQuery({ group, channel, language: '', q: '', page: 1 }) })
 // A summary count opens the first of its groups that has messages.
 const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels.map((c) => c.status.groups) ?? [], order))
 </script>
@@ -155,14 +162,16 @@ const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels
         </section>
         <section v-if="campaign.content" class="card section" aria-labelledby="content-h">
           <h2 id="content-h">{{ t('delivery.content') }}</h2>
-          <div v-if="campaign.content.sms" class="message">
-            <span class="kicker">{{ t('channel.sms') }}</span>
-            <p class="text">{{ campaign.content.sms.body }}</p>
-          </div>
-          <div v-if="campaign.content.email" class="message">
-            <span class="kicker">{{ t('channel.email') }} · {{ campaign.content.email.subject }}</span>
-            <p class="text">{{ campaign.content.email.body }}</p>
-          </div>
+          <template v-for="l in sentLanguages" :key="l">
+            <div v-if="campaign.channels.includes('sms') && campaign.content[l]?.sms" class="message">
+              <span class="kicker">{{ t('channel.sms') }} · {{ languageName(l, catalog) }}</span>
+              <p class="text">{{ campaign.content[l]!.sms!.body }}</p>
+            </div>
+            <div v-if="campaign.channels.includes('email') && campaign.content[l]?.email" class="message">
+              <span class="kicker">{{ t('channel.email') }} · {{ languageName(l, catalog) }} · {{ campaign.content[l]!.email!.subject }}</span>
+              <p class="text">{{ campaign.content[l]!.email!.body }}</p>
+            </div>
+          </template>
         </section>
       </div>
       <aside class="card section side">

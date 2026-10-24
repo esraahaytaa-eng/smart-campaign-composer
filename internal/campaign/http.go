@@ -56,6 +56,7 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/campaigns/{id}/schedule", h.updateSchedule)
 	mux.HandleFunc("POST /api/campaigns/{id}/content", h.generateContent)
 	mux.HandleFunc("PUT /api/campaigns/{id}/content", h.updateContent)
+	mux.HandleFunc("POST /api/campaigns/{id}/languages/{lang}/approve", h.approveLanguage)
 	mux.HandleFunc("POST /api/campaigns/{id}/approve", h.approve)
 	mux.HandleFunc("POST /api/campaigns/{id}/cancel", h.cancel)
 	mux.HandleFunc("GET /api/campaigns/{id}/estimate", h.estimate)
@@ -91,12 +92,20 @@ type campaignJSON struct {
 	AudienceBuiltAt   *time.Time       `json:"audience_built_at"`
 	CompletedAt       *time.Time       `json:"completed_at"`
 	Counts            *audience.Counts `json:"counts,omitempty"`
-	Content           *content.Content `json:"content"` // in single-campaign responses
+	DefaultLanguage   *string          `json:"default_language"`
+	// In single-campaign responses: the text per language, including channels
+	// that aren't chosen (kept, not sent: D67), and each language's review state.
+	Content   content.Variants               `json:"content"`
+	Languages map[content.Lang]languageState `json:"languages,omitempty"`
+	// Drafts only: languages suggested by the audience (never a restriction)
+	// and who would get which language's text now.
+	Recommendation *recommendation                           `json:"recommendation,omitempty"`
+	Delivery       map[string]map[content.Lang]deliveryCount `json:"delivery,omitempty"`
 }
 
 const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
 	created_at, updated_at, parent_campaign_id, approval_estimate, approved_by, approved_at, cancelled_by, cancelled_at,
-	audience_built_at, completed_at`
+	audience_built_at, completed_at, default_language`
 
 func scanCampaign(row pgx.Row) (campaignJSON, error) {
 	var c campaignJSON
@@ -107,7 +116,7 @@ func scanCampaign(row pgx.Row) (campaignJSON, error) {
 func scanInto(row pgx.Row, c *campaignJSON, extra ...any) error {
 	return row.Scan(append([]any{&c.ID, &c.RequestText, &c.Channels, &c.Rules, &c.Status, &c.Version, &c.SendAt,
 		&c.ScheduleNote, &c.TimeZone, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt, &c.ParentCampaignID, &c.ApprovalEstimate,
-		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt}, extra...)...)
+		&c.ApprovedBy, &c.ApprovedAt, &c.CancelledBy, &c.CancelledAt, &c.AudienceBuiltAt, &c.CompletedAt, &c.DefaultLanguage}, extra...)...)
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +195,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"fields": audience.Fields(), "cities": cat.Cities, "categories": cat.Categories, "limits": audience.Limits(),
+		"languages": content.Languages,
 	})
 }
 
@@ -225,8 +235,8 @@ func (h *Handler) updateRules(w http.ResponseWriter, r *http.Request) {
 	h.update(w, r.Context(), id, *in.Version, `rules = $4`, rulesJSON)
 }
 
-// updateChannels changes a draft's channels and deletes the content of any
-// channel removed, so approval is not blocked by text that won't be sent (D38).
+// updateChannels changes a draft's channels. A removed channel's text is kept
+// and left out of approval and delivery until it is chosen again (D67).
 func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -251,18 +261,28 @@ func (h *Handler) updateChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $3, version = version + 1, updated_at = now()
-		WHERE id = $1 AND version = $2 AND status = 'draft'`, id, *in.Version, in.Channels)
-	if err != nil {
-		serverError(w, "update channels", err)
-		return
-	}
-	if tag.RowsAffected() == 0 {
+	var old []string
+	err = tx.QueryRow(ctx, `SELECT channels FROM campaigns WHERE id = $1 AND version = $2 AND status = 'draft' FOR UPDATE`,
+		id, *in.Version).Scan(&old)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusConflict, errStale.Error())
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1 AND NOT channel = ANY($2)`, id, in.Channels); err != nil {
-		serverError(w, "delete content", err)
+	if err != nil {
+		serverError(w, "load channels", err)
+		return
+	}
+	// Kept text that comes back with its channel is reviewed again before it
+	// is sent; the text itself is unchanged (D67).
+	if _, err := tx.Exec(ctx, `UPDATE campaign_languages l SET approved_at = NULL, approved_by = NULL
+		WHERE campaign_id = $1 AND EXISTS (SELECT 1 FROM campaign_content cc WHERE cc.campaign_id = $1
+			AND cc.language = l.language AND cc.channel = ANY($2) AND NOT cc.channel = ANY($3))`, id, in.Channels, old); err != nil {
+		serverError(w, "mark kept text for review", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE campaigns SET channels = $2, version = version + 1, updated_at = now() WHERE id = $1`,
+		id, in.Channels); err != nil {
+		serverError(w, "update channels", err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -319,7 +339,13 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 		note = &got.ScheduleNote
 	}
 	rulesJSON, _ := json.Marshal(got.Rules)
-	tag, err := h.Pool.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
+	tx, err := h.Pool.Begin(ctx)
+	if err != nil {
+		serverError(w, "begin", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `UPDATE campaigns SET request_text = $3, rules = $4, send_at = $5, schedule_note = $6,
 		version = version + 1, updated_at = now() WHERE id = $1 AND version = $2 AND status = 'draft'`,
 		id, *in.Version, strings.TrimSpace(in.Request), rulesJSON, got.SuggestedSendAt, note)
 	if err != nil {
@@ -328,6 +354,17 @@ func (h *Handler) updateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if tag.RowsAffected() == 0 {
 		writeError(w, http.StatusConflict, errStale.Error())
+		return
+	}
+	// The text is kept as it is, but was written for the old brief: every
+	// language needs review again (D66).
+	if _, err := tx.Exec(ctx, `UPDATE campaign_languages SET approved_at = NULL, approved_by = NULL, outdated = true
+		WHERE campaign_id = $1`, id); err != nil {
+		serverError(w, "mark content outdated", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		serverError(w, "commit", err)
 		return
 	}
 	h.respond(w, ctx, http.StatusOK, id)
@@ -409,7 +446,7 @@ func (h *Handler) deleteDraft(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "lock draft", err)
 		return
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM campaign_content WHERE campaign_id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM campaign_languages WHERE campaign_id = $1`, id); err != nil { // and their content
 		serverError(w, "delete content", err)
 		return
 	}
@@ -484,6 +521,10 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 		serverError(w, "load content", err)
 		return
 	}
+	if c.Languages, err = h.loadLanguages(ctx, id); err != nil {
+		serverError(w, "load languages", err)
+		return
+	}
 	if c.Status == "draft" {
 		counts, err := h.countAudience(ctx, c, h.Now())
 		if err != nil {
@@ -491,6 +532,8 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 			return
 		}
 		c.Counts = &counts
+		c.Recommendation = newRecommendation(counts)
+		c.Delivery = deliveryFor(c, c.Content, counts)
 	}
 	writeJSON(w, status, c)
 }

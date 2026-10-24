@@ -3,7 +3,7 @@
 // Back and Escape, Turkish. Sends one campaign to the Ankara SMS customers
 // through the mock provider, with an SMS that is too long for longer names,
 // so some recipients are sent and some skipped.
-import { BASE, longSmsToAnkara, suite } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, longSmsToAnkara, suite } from './lib.mjs'
 
 export default () =>
   suite('recipients', async (t) => {
@@ -83,4 +83,30 @@ export default () =>
     await page.getByRole('dialog', { name: 'Alıcı ayrıntıları' }).waitFor()
     check(await page.getByRole('tab', { name: /^Atlandı/ }).isVisible(), 'the drawer is in Turkish')
     await page.evaluate(() => localStorage.setItem('scc.locale', 'en'))
+    await page.reload()
+
+    // D64: the review counts who gets the default as a fallback; each row says its language
+    {
+      const d = await t.draft(ANKARA_BRIEF, ['sms'])
+      const put = (version, content) => page.request.put(`${BASE}/api/campaigns/${d}/content`, { data: { version, default_language: 'tr', content } })
+      const tr = { sms: { body: 'Merhaba {{first_name}}, hafta sonu indirimi!' } }
+      await put(1, { tr })
+      await page.request.post(`${BASE}/api/campaigns/${d}/languages/tr/approve`, { data: { version: 2 } })
+      const fallback = (await t.get(d)).delivery.sms.tr.fallback
+      await page.goto(`${BASE}/campaigns/${d}/review`)
+      await page.getByRole('heading', { name: 'When should it send?' }).waitFor()
+      const row = page.getByRole('list', { name: 'Who gets which text' }).getByRole('listitem')
+      check(fallback > 0 && (await row.innerText()).includes(`+ ${fallback} as the default`), `the review shows the ${fallback} who get Turkish as the default`)
+
+      await put(2, { tr, en: { sms: { body: 'Hi {{first_name}}, weekend sale!' } } })
+      for (const l of ['tr', 'en']) await page.request.post(`${BASE}/api/campaigns/${d}/languages/${l}/approve`, { data: { version: 3 } })
+      check((await page.request.post(`${BASE}/api/campaigns/${d}/approve`, { data: { version: 3, send: 'now' } })).ok(), 'test setup: the bilingual campaign is sent')
+      check(await t.completed(d), 'test setup: and finished')
+      await page.goto(`${BASE}/campaigns/${d}?recipients=sent&language=en`)
+      const dlg = page.getByRole('dialog', { name: 'Recipient details' })
+      await dlg.locator('[role=row]:not(.header)').first().waitFor()
+      const langs = await dlg.locator('[role=row]:not(.header) [role=cell]:nth-child(3)').allInnerTexts()
+      check(langs.length > 0 && langs.every((l) => l === 'English'), `filtered to English, every row says English (${langs.length})`)
+      check(await dlg.getByRole('button', { name: 'All languages' }).isVisible(), 'the language filter is offered')
+    }
   })

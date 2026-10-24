@@ -11,13 +11,14 @@ import (
 )
 
 // readyDraft is the case-example draft (1 recipient on each channel) with
-// valid content; it is at version 2.
+// valid Turkish content, approved by the marketer; it is at version 2.
 func (a *app) readyDraft() draft {
 	a.t.Helper()
 	d := a.newDraft()
-	if rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":1,"content":`+validContent+`}`); rec.Code != http.StatusOK {
+	if rec := a.do(http.MethodPut, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":1,"default_language":"tr","content":{"tr":`+validContent+`}}`); rec.Code != http.StatusOK {
 		a.t.Fatalf("content: %d %s", rec.Code, rec.Body)
 	}
+	a.approveLanguages(d.ID, 2, "tr")
 	return d
 }
 
@@ -45,7 +46,7 @@ func TestApprove_RequiresExplicitSendChoice(t *testing.T) {
 	if d.SendAt == nil {
 		t.Fatal("setup: the draft should have a proposed send time")
 	}
-	a.do(http.MethodPut, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":1,"content":{"sms":{"body":"Hafta sonu indirimi!"}}}`)
+	a.do(http.MethodPut, "/api/campaigns/"+itoa(d.ID)+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Hafta sonu indirimi!"}}}}`)
 
 	code, _ := a.approve(d.ID, `{"version":2}`)
 
@@ -155,10 +156,10 @@ func TestApprovedCampaign_IsFrozen(t *testing.T) {
 	id := itoa(d.ID)
 
 	for _, r := range []struct{ method, path, body string }{
-		{http.MethodPut, "/api/campaigns/" + id + "/content", `{"version":3,"content":` + validContent + `}`},
+		{http.MethodPut, "/api/campaigns/" + id + "/content", `{"version":3,"default_language":"tr","content":{"tr":` + validContent + `}}`},
 		{http.MethodPut, "/api/campaigns/" + id + "/rules", `{"version":3,"rules":[{"field":"city","op":"in","value":["Ankara"]}]}`},
 		{http.MethodPut, "/api/campaigns/" + id + "/schedule", `{"version":3,"send_at":null}`},
-		{http.MethodPost, "/api/campaigns/" + id + "/content", `{"version":3}`},
+		{http.MethodPost, "/api/campaigns/" + id + "/content", `{"version":3,"languages":["tr"]}`},
 		{http.MethodPost, "/api/campaigns/" + id + "/approve", `{"version":3,"send":"now"}`},
 	} {
 		if rec := a.do(r.method, r.path, r.body); rec.Code != http.StatusConflict {
@@ -322,7 +323,7 @@ func TestResend_Conflicts(t *testing.T) {
 
 func TestGenerate_ResendAsksForShorterContent(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{`{"sms":{"body":"Merhaba {{first_name}}!"}}`, validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", `{"sms":{"body":"Merhaba {{first_name}}!"}}`), aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	parent := a.parentWithSkips()
 	rec := a.do(http.MethodPost, "/api/campaigns/"+itoa(parent)+"/resend", `{"channel":"sms"}`)

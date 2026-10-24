@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Channel, Content } from '../campaign/types'
-import { render, SAMPLES } from '../content/preview'
+import { render, SAMPLES, type Sample } from '../content/preview'
 import { smsInfo } from '../content/sms'
 import { formatNumber, t } from '../i18n'
 
 // The message as one fictional customer would get it (T17, option A).
 // Customer and AI text are shown as plain text, never as HTML.
-const props = defineProps<{ content: Content; channels: Channel[] }>()
+const props = withDefaults(defineProps<{ content: Content; channels: Channel[]; samples?: Sample[] }>(), { samples: () => SAMPLES })
 const sampleId = ref<'typical' | 'long'>('typical')
 const tab = ref<Channel>(props.channels[0] ?? 'sms')
-const sample = computed(() => SAMPLES.find((s) => s.id === sampleId.value)!)
+const sample = computed(() => props.samples.find((s) => s.id === sampleId.value)!)
 const sms = computed(() => render(props.content.sms?.body ?? '', sample.value.vars))
 const subject = computed(() => render(props.content.email?.subject ?? '', sample.value.vars))
 const body = computed(() => render(props.content.email?.body ?? '', sample.value.vars))
 const info = computed(() => smsInfo(sms.value))
-const name = (s: (typeof SAMPLES)[number]) => `${s.vars.first_name} ${s.vars.last_name} · ${s.vars.city}`
+const name = (s: Sample) => `${s.vars.first_name} ${s.vars.last_name} · ${s.vars.city}`
 </script>
 
 <template>
@@ -30,7 +30,7 @@ const name = (s: (typeof SAMPLES)[number]) => `${s.vars.first_name} ${s.vars.las
     </div>
     <div class="samples" role="group" :aria-label="t('content.showAs')">
       <span>{{ t('content.showAs') }}</span>
-      <button v-for="s in SAMPLES" :key="s.id" type="button" :aria-pressed="sampleId === s.id" @click="sampleId = s.id">
+      <button v-for="s in samples" :key="s.id" type="button" :aria-pressed="sampleId === s.id" @click="sampleId = s.id">
         <strong>{{ t(`content.sample.${s.id}`) }}</strong>
         <span>{{ name(s) }}</span>
       </button>

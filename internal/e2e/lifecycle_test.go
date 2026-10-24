@@ -78,7 +78,7 @@ func (l *life) provider(b config.ProviderChannel, hang time.Duration) string {
 	}
 	mux := http.NewServeMux()
 	p.Routes(mux)
-	log := &providerLog{requests: map[string]int{}, processed: map[string]int{}, first: map[string]time.Time{}}
+	log := &providerLog{requests: map[string]int{}, processed: map[string]int{}, first: map[string]time.Time{}, body: map[string]string{}}
 	l.logs = append(l.logs, log)
 	srv := httptest.NewServer(log.wrap(mux))
 	l.t.Cleanup(srv.Close)
@@ -154,7 +154,9 @@ func (l *life) campaign(channels string, sms string, parent *int64) int64 {
 	if err != nil {
 		l.t.Fatal(err)
 	}
-	l.exec(`INSERT INTO campaign_content (campaign_id, channel, subject, body) VALUES ($1, 'sms', NULL, $2), ($1, 'email', 'Merhaba {{first_name}}', 'Fırsat!')`, id, sms)
+	l.exec(`INSERT INTO campaign_languages (campaign_id, language) VALUES ($1, 'tr')`, id)
+	l.exec(`UPDATE campaigns SET default_language = 'tr' WHERE id = $1`, id)
+	l.exec(`INSERT INTO campaign_content (campaign_id, channel, language, subject, body) VALUES ($1, 'sms', 'tr', NULL, $2), ($1, 'email', 'tr', 'Merhaba {{first_name}}', 'Fırsat!')`, id, sms)
 	if _, err := l.q.BuildAudience(context.Background(), time.Now()); err != nil {
 		l.t.Fatal(err)
 	}

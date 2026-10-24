@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { campaigns, type Estimate } from '../campaign/client'
+import { campaigns, loadCatalog, type Estimate } from '../campaign/client'
 import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
-import type { Campaign, Channel } from '../campaign/types'
+import type { Campaign, Catalog, Channel, Lang } from '../campaign/types'
+import { languageName, orderLanguages } from '../content/languages'
 import { approvalBlockers, type Blocker } from '../content/approval'
-import { SAMPLES } from '../content/preview'
-import { contentWasStale } from '../content/stale'
+import { samplesFor } from '../content/preview'
+import { outdatedLanguages } from '../content/stale'
 import { browserZone, fromLocalInput, scheduleProblem, suggestion, toLocalInput } from '../content/schedule'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessagePreview from '../components/MessagePreview.vue'
@@ -20,9 +21,10 @@ const route = useRoute()
 const router = useRouter()
 const id = Number(route.params.id)
 // The brief was re-interpreted after the messages were written (D40).
-const stale = contentWasStale(id)
+const stale = computed(() => outdatedLanguages(campaign.value?.languages).length > 0) // D40, D66
 
 const campaign = ref<Campaign | null>(null)
+const catalog = ref<Catalog['languages']>([])
 const estimate = ref<Estimate | null>(null)
 const loadError = ref<unknown>(null)
 const approveError = ref<unknown>(null)
@@ -46,8 +48,10 @@ const conflict = computed(() => approveError.value instanceof ApiError && approv
 
 async function load() {
   try {
-    const c = await campaigns.get(id)
+    const [c, cat] = await Promise.all([campaigns.get(id), loadCatalog()])
+    catalog.value = cat.languages
     campaign.value = c
+    active.value = c.default_language ?? ''
     const s = suggestion(c.send_at, c.schedule_note, new Date())
     note.value = s.note
     suggested.value = s.preselect
@@ -66,13 +70,15 @@ load()
 const channels = computed<Channel[]>(() => campaign.value?.channels ?? [])
 const at = computed(() => fromLocalInput(localAt.value))
 const counts = computed(() => estimate.value?.audience ?? campaign.value?.counts ?? { total: 0, sms: 0, email: 0 })
-const over = computed(() => estimate.value?.over_limit ?? null)
+const over = computed(() => estimate.value?.over_limit?.by_language?.[active.value] ?? null)
 const messages = computed(() => channels.value.reduce((n, c) => n + (counts.value[c] ?? 0), 0))
 const blockers = computed<Blocker[]>(() =>
   campaign.value
     ? approvalBlockers({
         channels: channels.value,
         content: campaign.value.content,
+        defaultLanguage: campaign.value.default_language,
+        languages: campaign.value.languages ?? {},
         audience: counts.value.total,
         when: when.value,
         at: at.value,
@@ -81,9 +87,21 @@ const blockers = computed<Blocker[]>(() =>
       })
     : [],
 )
-const sample = SAMPLES[0]!.vars
 const rules = computed(() => (campaign.value?.rules ?? []).map(ruleLabel))
 const isResend = computed(() => campaign.value?.parent_campaign_id != null)
+// Each language on its own (D64, D66): who gets its text, its review state
+// and a preview with customers who speak it.
+const active = ref<Lang>('')
+const name = (l: Lang) => languageName(l, catalog.value)
+const langs = computed(() => orderLanguages(Object.keys(campaign.value?.content ?? {}), campaign.value?.default_language ?? null, catalog.value))
+const delivery = computed(() => estimate.value?.delivery ?? campaign.value?.delivery ?? {})
+const sample = computed(() => samplesFor(active.value)[0]!.vars)
+const activeContent = computed(() => campaign.value?.content?.[active.value] ?? null)
+function stateOf(l: Lang): 'approved' | 'outdated' | 'needsReview' {
+  const s = campaign.value?.languages?.[l]
+  if (s?.approved_at) return 'approved'
+  return s?.outdated ? 'outdated' : 'needsReview'
+}
 const blockerList = ref<HTMLElement>()
 
 async function openConfirm() {
@@ -191,7 +209,28 @@ function reload() {
                   <RouterLink :to="{ name: 'campaign-content', params: { id } }">{{ t('review.editContent') }}</RouterLink>
                 </span>
               </div>
-              <MessagePreview v-if="campaign.content" :content="campaign.content" :channels="channels" />
+              <ul v-if="langs.length" class="by-language" :aria-label="t('review.byLanguage')">
+                <li v-for="l in langs" :key="l">
+                  <span class="lang-name">
+                    <strong>{{ name(l) }}</strong>
+                    <span v-if="l === campaign.default_language" class="tag">{{ t('content.lang.default') }}</span>
+                    <span :class="['state', stateOf(l)]">{{ t(`content.lang.${stateOf(l)}`) }}</span>
+                  </span>
+                  <span class="muted">
+                    <template v-for="(c, i) in channels" :key="c">
+                      {{ i ? ' · ' : '' }}{{ t(c === 'sms' ? 'channel.sms' : 'channel.email') }} {{ formatNumber(delivery[c]?.[l]?.own ?? 0) }}
+                      <template v-if="delivery[c]?.[l]?.fallback">{{ t('review.fallback', { count: formatNumber(delivery[c]![l]!.fallback) }) }}</template>
+                    </template>
+                  </span>
+                </li>
+              </ul>
+              <p v-if="langs.length > 1 || campaign.default_language === 'und'" class="muted">{{ t('review.fallbackHint') }}</p>
+              <div v-if="langs.length > 1" class="tabs" role="group" :aria-label="t('content.languages')">
+                <button v-for="l in langs" :key="l" type="button" class="tab" :class="{ current: l === active }" :aria-pressed="l === active" @click="active = l">
+                  {{ name(l) }}
+                </button>
+              </div>
+              <MessagePreview v-if="activeContent" :key="active" :content="activeContent" :channels="channels" :samples="samplesFor(active)" />
               <p v-else class="muted">{{ t('content.empty') }}</p>
               <p v-if="over?.sms" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overSms', { count: formatNumber(over.sms) }) }}</p>
               <p v-if="over?.email" class="estimate"><span class="tag">{{ t('content.estimate') }}</span> {{ t('review.overEmail', { count: formatNumber(over.email) }) }}</p>
@@ -377,6 +416,58 @@ function reload() {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink-2);
+}
+.by-language {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.by-language li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.lang-name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.state {
+  font-size: 12px;
+  color: var(--muted);
+}
+.state.approved {
+  color: var(--ink-2);
+}
+.state.outdated,
+.state.needsReview {
+  color: #5a3a0a;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tab {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  cursor: pointer;
+}
+.tab.current {
+  border-color: var(--primary);
+  box-shadow: inset 0 -3px 0 var(--primary);
+  font-weight: 650;
 }
 .estimate {
   margin: 0;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { render, SAMPLES } from './preview'
+import { render, SAMPLES, samplesFor } from './preview'
 
 // The preview fills templates like the backend's content.Render, with
 // fictional customers only (T17, option A: no customer data on screen).
@@ -27,5 +27,15 @@ describe('render', () => {
     expect(SAMPLES.map((s) => s.id)).toEqual(['typical', 'long'])
     const long = SAMPLES.find((s) => s.id === 'long')!.vars
     expect([...`${long.first_name} ${long.last_name}`].length).toBeGreaterThan(20)
+  })
+
+  // D64: each language's tab previews with customers who speak it.
+  it('has samples per language, Turkish for anything else', () => {
+    const en = samplesFor('en')
+    expect(en.map((s) => s.id)).toEqual(['typical', 'long'])
+    expect(en[0]!.vars.first_name).not.toBe(SAMPLES[0]!.vars.first_name)
+    expect([...`${en[1]!.vars.first_name} ${en[1]!.vars.last_name}`].length).toBeGreaterThan(20)
+    expect(samplesFor('tr')).toBe(SAMPLES)
+    expect(samplesFor('und')).toBe(SAMPLES)
   })
 })

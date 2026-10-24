@@ -117,7 +117,7 @@ func TestDelete_ConcurrentWithApprove(t *testing.T) {
 // nothing is written back.
 func TestDelete_DuringContentGeneration(t *testing.T) {
 	t.Parallel()
-	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{validContent}}
+	model := &contentLLM{Mock: llm.NewMock(), outputs: []string{aiAnswer("tr", validContent)}}
 	a := newApp(t, model)
 	d := a.newDraft()
 	model.between = func() {

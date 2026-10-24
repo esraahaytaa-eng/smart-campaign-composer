@@ -85,10 +85,13 @@ func fullSend(t *testing.T, ctx context.Context, pool *pgxpool.Pool, c *client, 
 		"request": "Performance check: every consenting customer", "channels": []string{"sms", "email"}, "time_zone": "Europe/Istanbul",
 		"rules": []any{map[string]any{"field": "city", "op": "in", "value": cities}},
 	}, 201), &draft)
-	c.decode(c.must(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/content", draft.ID), map[string]any{"version": draft.Version, "content": map[string]any{
+	c.decode(c.must(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/content", draft.ID), map[string]any{"version": draft.Version, "default_language": "tr", "content": map[string]any{"tr": map[string]any{
 		"sms":   map[string]string{"body": "Merhaba {{first_name}}, hafta sonu indirimi başladı!"},
 		"email": map[string]string{"subject": "Hafta sonu indirimi", "body": "Merhaba {{first_name}}, hafta sonu indirimi başladı."},
-	}}, 200), &draft)
+	}, "en": map[string]any{ // two languages (D64): each recipient gets their own
+		"sms":   map[string]string{"body": "Hi {{first_name}}, the weekend sale has started!"},
+		"email": map[string]string{"subject": "Weekend sale", "body": "Hi {{first_name}}, the weekend sale has started."},
+	}}}, 200), &draft)
 
 	// 20 live screens, connected before sending starts.
 	const screens = 20
@@ -136,6 +139,9 @@ func fullSend(t *testing.T, ctx context.Context, pool *pgxpool.Pool, c *client, 
 		t.Fatal(err)
 	}
 	statsFrom := time.Now()
+	for _, lang := range []string{"tr", "en"} {
+		c.must(http.MethodPost, fmt.Sprintf("/api/campaigns/%d/languages/%s/approve", draft.ID, lang), map[string]any{"version": draft.Version}, 200)
+	}
 	c.must(http.MethodPost, fmt.Sprintf("/api/campaigns/%d/approve", draft.ID), map[string]any{"version": draft.Version, "send": "now"}, 200)
 	select {
 	case <-polled:
@@ -315,8 +321,9 @@ func marketers(t *testing.T, ctx context.Context, pool *pgxpool.Pool, cities []s
 				case "catalog":
 					status, body, took = c.call(http.MethodGet, "/api/catalog", nil)
 				case "save messages":
-					status, body, took = c.call(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/content", own.ID), map[string]any{"version": own.Version,
-						"content": map[string]any{"sms": map[string]string{"body": fmt.Sprintf("Merhaba {{first_name}}, kampanya %d!", i)}}})
+					status, body, took = c.call(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/content", own.ID), map[string]any{"version": own.Version, "default_language": "tr",
+						"content": map[string]any{"tr": map[string]any{"sms": map[string]string{"body": fmt.Sprintf("Merhaba {{first_name}}, kampanya %d!", i)}},
+							"en": map[string]any{"sms": map[string]string{"body": fmt.Sprintf("Hi {{first_name}}, campaign %d!", i)}}}})
 				case "save rules":
 					status, body, took = c.call(http.MethodPut, fmt.Sprintf("/api/campaigns/%d/rules", own.ID), map[string]any{"version": own.Version,
 						"rules": []any{map[string]any{"field": "city", "op": "in", "value": []string{cities[i%len(cities)]}}}})

@@ -1,8 +1,10 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -30,13 +32,19 @@ type providerLog struct {
 	requests  map[string]int       // key → requests received
 	processed map[string]int       // key → requests answered 200 without replay (a real send)
 	first     map[string]time.Time // key → first request
+	body      map[string]string    // key → the message text sent
 }
 
 func (l *providerLog) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key, at := r.Header.Get("Idempotency-Key"), time.Now()
+		raw, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		var msg struct{ Body string }
+		json.Unmarshal(raw, &msg)
 		l.mu.Lock() // count the request on arrival: a hung one is still a request
 		l.requests[key]++
+		l.body[key] = msg.Body
 		if _, ok := l.first[key]; !ok {
 			l.first[key] = at
 		}
@@ -87,7 +95,7 @@ func newStack(t *testing.T) *stack {
 	prov.Hang = 2500 * time.Millisecond
 	pmux := http.NewServeMux()
 	prov.Routes(pmux)
-	log := &providerLog{requests: map[string]int{}, processed: map[string]int{}, first: map[string]time.Time{}}
+	log := &providerLog{requests: map[string]int{}, processed: map[string]int{}, first: map[string]time.Time{}, body: map[string]string{}}
 	provSrv := httptest.NewServer(log.wrap(pmux))
 	t.Cleanup(provSrv.Close)
 
@@ -229,10 +237,11 @@ func TestEndToEnd(t *testing.T) {
 		s.t = t
 		c := s.json(http.MethodPost, "/api/campaigns", `{"request":`+strconv.Quote(caseExample)+`,"channels":["sms","email"],"time_zone":"Europe/Istanbul"}`, 201)
 		cid := id(c)
-		gen := s.do(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/content", `{"version":1}`)
+		gen := s.do(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/content", `{"version":1,"languages":["tr"]}`)
 		if !strings.Contains(gen.Body.String(), "event: done") {
 			t.Fatalf("content generation did not finish: %s", gen.Body)
 		}
+		s.json(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/languages/tr/approve", `{"version":2}`, 200)
 		approved := s.json(http.MethodPost, "/api/campaigns/"+strconv.FormatInt(cid, 10)+"/approve", `{"version":2,"send":"now"}`, 200)
 		est := approved["approval_estimate"].(map[string]any)
 
@@ -260,8 +269,9 @@ func TestEndToEnd(t *testing.T) {
 		c := s.json(http.MethodPost, "/api/campaigns", `{"request":"Send a weekend sale announcement to all users in Muğla.","channels":["sms"],"time_zone":"Europe/Istanbul"}`, 201)
 		cid := id(c)
 		path := "/api/campaigns/" + strconv.FormatInt(cid, 10)
-		s.json(http.MethodPut, path+"/content", `{"version":1,"content":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}`, 200)
+		s.json(http.MethodPut, path+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Merhaba {{first_name}}, hafta sonu indirimi!"}}}}`, 200)
 		sendAt := time.Now().Add(4 * time.Second)
+		s.json(http.MethodPost, path+"/languages/tr/approve", `{"version":2}`, 200)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":{"at":"`+sendAt.Format(time.RFC3339Nano)+`"}}`, 200)
 
 		time.Sleep(time.Until(sendAt.Add(-2 * time.Second)))
@@ -285,6 +295,56 @@ func TestEndToEnd(t *testing.T) {
 		}
 	})
 
+	// D64: each recipient gets their language's text, else the default.
+	t.Run("each recipient gets their language", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, content, langs string
+		}{
+			{"Turkish and English", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Merhaba {{first_name}}!"}},"en":{"sms":{"body":"Hello {{first_name}}!"}}}}`, "tr en"},
+			{"Turkish only", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"Merhaba {{first_name}}!"}}}}`, "tr"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				s.t = t
+				c := s.json(http.MethodPost, "/api/campaigns", `{"request":"Send a weekend sale announcement to all users in İzmir.","channels":["sms"],"time_zone":"Europe/Istanbul"}`, 201)
+				cid := id(c)
+				path := "/api/campaigns/" + strconv.FormatInt(cid, 10)
+				s.json(http.MethodPut, path+"/content", tc.content, 200)
+				for _, l := range strings.Fields(tc.langs) {
+					s.json(http.MethodPost, path+"/languages/"+l+"/approve", `{"version":2}`, 200)
+				}
+				s.json(http.MethodPost, path+"/approve", `{"version":2,"send":"now"}`, 200)
+				s.waitStatus(cid, "completed", 90*time.Second)
+				s.checkDelivery(cid)
+
+				rows, err := s.pool.Query(context.Background(), `SELECT m.id::text, u.language FROM messages m JOIN users u ON u.id = m.user_id
+					WHERE m.campaign_id = $1 AND m.status = 'sent'`, cid)
+				if err != nil {
+					t.Fatal(err)
+				}
+				speakers := map[string]int{}
+				s.log.mu.Lock()
+				defer s.log.mu.Unlock()
+				var key, lang string
+				if _, err := pgx.ForEachRow(rows, []any{&key, &lang}, func() error {
+					speakers[lang]++
+					want := "Merhaba "
+					if lang == "en" && strings.Contains(tc.langs, "en") {
+						want = "Hello "
+					}
+					if !strings.HasPrefix(s.log.body[key], want) {
+						t.Errorf("message %s to a %s speaker: got %q", key, lang, s.log.body[key])
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if speakers["tr"] == 0 || speakers["en"] == 0 {
+					t.Fatalf("the audience must include both languages to prove anything: %v", speakers)
+				}
+			})
+		}
+	})
+
 	t.Run("over-limit recipients are skipped, then resent", func(t *testing.T) {
 		s.t = t
 		c := s.json(http.MethodPost, "/api/campaigns", `{"request":`+strconv.Quote(caseExample)+`,"channels":["sms"],"time_zone":"Europe/Istanbul"}`, 201)
@@ -293,7 +353,8 @@ func TestEndToEnd(t *testing.T) {
 		// 143 characters + first name, last name and city (seeded: about 8 to 25):
 		// roughly half the recipients go over 160.
 		long := "Merhaba {{first_name}} {{last_name}}, " + strings.Repeat("ş", 123) + " {{city}}'da %30!"
-		s.json(http.MethodPut, path+"/content", `{"version":1,"content":{"sms":{"body":`+strconv.Quote(long)+`}}}`, 200)
+		s.json(http.MethodPut, path+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":`+strconv.Quote(long)+`}}}}`, 200)
+		s.json(http.MethodPost, path+"/languages/tr/approve", `{"version":2}`, 200)
 		s.json(http.MethodPost, path+"/approve", `{"version":2,"send":"now"}`, 200)
 		s.waitStatus(cid, "completed", 90*time.Second)
 		s.checkDelivery(cid)
@@ -306,7 +367,8 @@ func TestEndToEnd(t *testing.T) {
 		r := s.json(http.MethodPost, path+"/resend", `{"channel":"sms"}`, 201)
 		rid := id(r)
 		rpath := "/api/campaigns/" + strconv.FormatInt(rid, 10)
-		s.json(http.MethodPut, rpath+"/content", `{"version":1,"content":{"sms":{"body":"{{first_name}}, %30 indirim seni bekliyor!"}}}`, 200)
+		s.json(http.MethodPut, rpath+"/content", `{"version":1,"default_language":"tr","content":{"tr":{"sms":{"body":"{{first_name}}, %30 indirim seni bekliyor!"}}}}`, 200)
+		s.json(http.MethodPost, rpath+"/languages/tr/approve", `{"version":2}`, 200)
 		s.json(http.MethodPost, rpath+"/approve", `{"version":2,"send":"now"}`, 200)
 		s.waitStatus(rid, "completed", 90*time.Second)
 		s.checkDelivery(rid)

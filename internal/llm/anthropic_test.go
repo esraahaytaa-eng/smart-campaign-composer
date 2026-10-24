@@ -228,10 +228,10 @@ func streamVia(t *testing.T, url string, in ContentInput) (json.RawMessage, []st
 }
 
 func TestAnthropicContent_StreamsTextAndRequestShape(t *testing.T) {
-	pieces := []string{`{"sms":{"bo`, `dy":"Merhaba {{first_`, `name}} İndirim!"}}`}
+	pieces := []string{`{"tr":{"sms":{"bo`, `dy":"Merhaba {{first_`, `name}} İndirim!"}}}`}
 	got, url := fakeStream(t, pieces, "end_turn")
 
-	raw, chunks, err := streamVia(t, url, ContentInput{Text: "İndirim gönder", Channels: []string{"sms"}})
+	raw, chunks, err := streamVia(t, url, ContentInput{Text: "İndirim gönder", Channels: []string{"sms"}, Languages: []string{"tr"}})
 
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestAnthropicContent_StreamsTextAndRequestShape(t *testing.T) {
 	format, _ := oc["format"].(map[string]any)
 	schema, _ := format["schema"].(map[string]any)
 	props, _ := schema["properties"].(map[string]any)
-	if b["stream"] != true || oc["effort"] != "medium" || len(props) != 1 || props["sms"] == nil {
+	if b["stream"] != true || oc["effort"] != "medium" || len(props) != 1 || props["tr"] == nil {
 		t.Errorf("request: stream=%v effort=%v schema properties=%v", b["stream"], oc["effort"], props)
 	}
 	if thinking, _ := b["thinking"].(map[string]any); thinking["type"] != "adaptive" {
@@ -257,28 +257,29 @@ func TestAnthropicContent_StreamsTextAndRequestShape(t *testing.T) {
 
 func TestAnthropicContent_RefusalAndTruncationAreErrors(t *testing.T) {
 	_, url := fakeStream(t, nil, "refusal")
-	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); !errors.Is(err, ErrRefused) {
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}, Languages: []string{"tr"}}); !errors.Is(err, ErrRefused) {
 		t.Errorf("refusal: want ErrRefused, got %v", err)
 	}
-	_, url = fakeStream(t, []string{`{"sms":{"body":"cut`}, "max_tokens")
-	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); !errors.Is(err, ErrTruncated) {
+	_, url = fakeStream(t, []string{`{"tr":{"sms":{"body":"cut`}, "max_tokens")
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}, Languages: []string{"tr"}}); !errors.Is(err, ErrTruncated) {
 		t.Errorf("max_tokens: want ErrTruncated, got %v", err)
 	}
 	got, url := fakeAPI(t, http.StatusInternalServerError, "", "")
-	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}}); err == nil || got.calls != 1 {
+	if _, _, err := streamVia(t, url, ContentInput{Text: "x", Channels: []string{"sms"}, Languages: []string{"tr"}}); err == nil || got.calls != 1 {
 		t.Errorf("HTTP 500: want an error after exactly 1 call, got %v after %d", err, got.calls)
 	}
 }
 
 func TestContentPrompt(t *testing.T) {
-	prompt := contentPrompt(ContentInput{Text: "Sepette ürün bırakanlara indirim", Channels: []string{"sms", "email"}, Errors: []string{"sms.body: the fixed text alone is 172 characters"}})
+	prompt := contentPrompt(ContentInput{Text: "Sepette ürün bırakanlara indirim", Channels: []string{"sms", "email"}, Languages: []string{"tr", "en"},
+		Errors: []string{"en.sms.body: the fixed text alone is 172 characters"}})
 
-	for _, want := range []string{"<brief>\nSepette ürün bırakanlara indirim\n</brief>", "sms, email", "172 characters"} {
+	for _, want := range []string{"<brief>\nSepette ürün bırakanlara indirim\n</brief>", "sms, email", "172 characters", "tr (Türkçe), en (English)"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt is missing %q:\n%s", want, prompt)
 		}
 	}
-	for _, want := range []string{"{{first_name}}", "{{last_name}}", "{{city}}", "160", "80", "2000", "language of the brief"} {
+	for _, want := range []string{"{{first_name}}", "{{last_name}}", "{{city}}", "160", "80", "2000", "natively", "whatever language the brief is in"} {
 		if !strings.Contains(contentSystemPrompt, want) {
 			t.Errorf("system prompt is missing %q", want)
 		}
@@ -286,17 +287,28 @@ func TestContentPrompt(t *testing.T) {
 	if strings.Contains(prompt, "@") || strings.Contains(prompt, "+90") {
 		t.Errorf("prompt looks like it contains user records:\n%s", prompt)
 	}
-	schema := contentSchema([]string{"email"})
+}
+
+// One closed object per selected language, each with the chosen channels only.
+func TestContentSchema_PerLanguage(t *testing.T) {
+	schema := contentSchema([]string{"email"}, []string{"tr", "en"})
 	props := schema["properties"].(map[string]any)
-	if len(props) != 1 || props["email"] == nil {
-		t.Errorf("schema for email only: %v", props)
+	if len(props) != 2 || schema["additionalProperties"] != false || len(schema["required"].([]string)) != 2 {
+		t.Fatalf("want exactly tr and en, closed and required: %v", schema)
+	}
+	for _, l := range []string{"tr", "en"} {
+		lang := props[l].(map[string]any)
+		channels := lang["properties"].(map[string]any)
+		if len(channels) != 1 || channels["email"] == nil || lang["additionalProperties"] != false {
+			t.Errorf("%s: want email only, closed: %v", l, lang)
+		}
 	}
 }
 
 // D31: a resend exists because the first text was too long for some names.
 func TestContentPrompt_ResendAsksForShorterText(t *testing.T) {
-	resend := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}, Resend: true})
-	normal := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}})
+	resend := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}, Languages: []string{"tr"}, Resend: true})
+	normal := contentPrompt(ContentInput{Text: "brief", Channels: []string{"sms"}, Languages: []string{"tr"}})
 
 	if !strings.Contains(resend, "under 100") || strings.Contains(normal, "under 100") {
 		t.Fatalf("resend prompt must ask for shorter text, the normal one must not:\n%s\n---\n%s", resend, normal)

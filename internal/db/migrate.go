@@ -21,6 +21,13 @@ var migrations embed.FS
 
 // Migrate applies all pending migrations. Already applied ones are skipped.
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
+	return migrate(pool, func(p *goose.Provider) error {
+		_, err := p.Up(ctx)
+		return err
+	})
+}
+
+func migrate(pool *pgxpool.Pool, run func(*goose.Provider) error) error {
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer sqlDB.Close()
 
@@ -37,8 +44,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	_, err = provider.Up(ctx)
-	return err
+	return run(provider)
 }
 
 // MigrationsHash identifies the schema the embedded migrations build. Tests

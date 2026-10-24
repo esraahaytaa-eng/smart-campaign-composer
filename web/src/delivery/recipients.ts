@@ -1,10 +1,11 @@
 // Recipient details (D47): the drawer's filters live in the URL query, so
 // Back closes it and a link reopens it.
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
-import type { Channel } from '../campaign/types'
+import type { Channel, Lang } from '../campaign/types'
 import { GROUPS, type Group } from './status'
 
-export type RecipientsQuery = { group: Group; channel: Channel | 'all'; q: string; page: number }
+// language: '' for every language (D64).
+export type RecipientsQuery = { group: Group; channel: Channel | 'all'; language: Lang; q: string; page: number }
 
 export type Attempt = { attempt_no: number; started_at: string; finished_at: string | null; outcome: string | null; http_status: number | null }
 
@@ -13,6 +14,7 @@ export type Recipient = {
   name: string
   contact: string // masked by the server
   channel: Channel
+  language: Lang // whose text it got (D64); 'und' before languages were recorded
   group: Group
   reason: string | null
   detail: { part: 'sms' | 'subject' | 'body'; length: number; limit: number } | null
@@ -40,9 +42,11 @@ export function readQuery(query: LocationQuery): RecipientsQuery | null {
   if (!GROUPS.includes(group)) return null
   const channel = first(query.channel)
   const page = Number(first(query.page))
+  const language = first(query.language)
   return {
     group,
     channel: channel === 'sms' || channel === 'email' ? channel : 'all',
+    language: /^[a-z]{2,3}$/.test(language) ? language : '', // the server checks it is supported
     q: [...first(query.q)].slice(0, MAX_QUERY).join(''),
     page: Number.isInteger(page) && page >= 1 ? Math.min(page, MAX_PAGE) : 1,
   }
@@ -51,6 +55,7 @@ export function readQuery(query: LocationQuery): RecipientsQuery | null {
 export function writeQuery(r: RecipientsQuery): LocationQueryRaw {
   const out: LocationQueryRaw = { recipients: r.group }
   if (r.channel !== 'all') out.channel = r.channel
+  if (r.language) out.language = r.language
   if (r.q) out.q = r.q
   if (r.page > 1) out.page = String(r.page)
   return out
@@ -59,6 +64,7 @@ export function writeQuery(r: RecipientsQuery): LocationQueryRaw {
 export function recipientsPath(id: number, r: RecipientsQuery): string {
   const p = new URLSearchParams({ group: r.group })
   if (r.channel !== 'all') p.set('channel', r.channel)
+  if (r.language) p.set('language', r.language)
   if (r.q.trim()) p.set('q', r.q.trim())
   p.set('page', String(r.page))
   return `/api/campaigns/${id}/recipients?${p}`

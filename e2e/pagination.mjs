@@ -3,7 +3,7 @@
 // back from a campaign. Its 30 campaigns share a tag no other file uses, so
 // the other lane's campaigns never land on these pages. Nothing is sent: the
 // two approved campaigns are scheduled for tomorrow and cancelled at the end.
-import { BASE, suite } from './lib.mjs'
+import { BASE, suite, putContent } from './lib.mjs'
 
 export default () =>
   suite('pagination', async (t) => {
@@ -21,7 +21,7 @@ export default () =>
     for (let n = 1; n <= 30; n++) ids.push(await create(n)) // one by one: newest first is then number 30 down to 01
     const at = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
     for (const id of ids.slice(0, 2)) {
-      await page.request.put(`${BASE}/api/campaigns/${id}/content`, { data: { version: 1, content: { sms: { body: 'Merhaba {{first_name}}!' } } } })
+      await putContent(page, id, 1, { sms: { body: 'Merhaba {{first_name}}!' } })
       const ok = (await page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: 2, send: { at } } })).ok()
       check(ok, 'test setup: a campaign is scheduled for tomorrow')
     }
