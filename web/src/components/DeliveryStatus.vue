@@ -278,8 +278,10 @@ const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels
                     <th scope="col">{{ t('ab.report.version') }}</th>
                     <th scope="col">{{ t('ab.report.recipients') }}</th>
                     <th scope="col">{{ t('ab.report.sent') }}</th>
+                    <th scope="col">{{ t('group.uncertain') }}</th>
                     <th scope="col">{{ t('ab.report.failed') }}</th>
                     <th scope="col">{{ t('ab.report.skipped') }}</th>
+                    <th scope="col">{{ t('group.cancelled') }}</th>
                     <th scope="col">{{ t('ab.report.tooLong') }}</th>
                     <th scope="col">{{ t('ab.report.waiting') }}</th>
                   </tr>
@@ -289,8 +291,10 @@ const openFirst = (order: Group[]) => open(firstNonEmpty(summary.value?.channels
                     <th scope="row">{{ t('ab.version', { v: r.variant.toUpperCase() }) }}</th>
                     <td>{{ formatNumber(r.audience) }}</td>
                     <td>{{ formatNumber(r.sent) }}</td>
+                    <td>{{ formatNumber(r.uncertain) }}</td>
                     <td>{{ formatNumber(r.failed) }}</td>
                     <td>{{ formatNumber(r.skipped) }}</td>
+                    <td>{{ formatNumber(r.cancelled) }}</td>
                     <td>{{ formatNumber(r.tooLong) }}</td>
                     <td>{{ formatNumber(r.waiting) }}</td>
                   </tr>

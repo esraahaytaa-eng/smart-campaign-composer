@@ -45,9 +45,16 @@ describe('variantRows', () => {
       a: { audience: 5, groups, skip_reasons: { no_consent: 1 } },
     })
     expect(rows).toEqual([
-      { variant: 'a', audience: 5, sent: 2, failed: 1, skipped: 1, tooLong: 0, waiting: 1 },
-      { variant: 'b', audience: 3, sent: 1, failed: 1, skipped: 1, tooLong: 1, waiting: 0 },
+      { variant: 'a', audience: 5, sent: 2, uncertain: 0, failed: 1, skipped: 1, cancelled: 0, tooLong: 0, waiting: 1 },
+      { variant: 'b', audience: 3, sent: 1, uncertain: 0, failed: 1, skipped: 1, cancelled: 0, tooLong: 1, waiting: 0 },
     ])
+  })
+
+  // A cancelled send or an uncertain delivery must not drop recipients from a row.
+  it('accounts for every recipient, cancelled and uncertain included', () => {
+    const groups = { sent: 100, uncertain: 3, failed: 2, skipped: 5, cancelled: 390, retrying: 0, pending: 0 }
+    const r = variantRows({ a: { audience: 500, groups, skip_reasons: {} } })[0]!
+    expect(r.sent + r.uncertain + r.failed + r.skipped + r.cancelled + r.waiting).toBe(r.audience)
   })
 
   it('is empty without an A/B test', () => {
