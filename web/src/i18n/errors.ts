@@ -29,12 +29,21 @@ export function errorText(err: unknown): string {
       return t('error.aiCallLimit', { count: Math.max(1, Math.ceil((body.retry_after_seconds ?? 60) / 60)) })
     }
     case 502:
-      return t('error.aiFailed')
+      // ai_unavailable: the provider failed (bad key, outage), not the brief.
+      return t((err.body as { code?: string } | undefined)?.code === 'ai_unavailable' ? 'error.aiUnavailable' : 'error.aiFailed')
     case 504:
       return t('error.aiTimeout')
   }
   if (err.status >= 500) return t('error.server')
   return `${t('error.invalid')} ${t('error.details', { message: err.message })}`
+}
+
+// contentAIError: the text for a content stream "error" event's code, or null
+// when it has none (the page then shows the server's words as details).
+export function contentAIError(code: unknown): string | null {
+  if (code === 'ai_unavailable') return t('content.aiUnavailable')
+  if (code === 'ai_invalid') return t('content.aiInvalid')
+  return null
 }
 
 export function aiReason(err: unknown): string | null {

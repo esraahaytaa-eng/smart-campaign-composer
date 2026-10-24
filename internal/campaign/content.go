@@ -25,7 +25,7 @@ var errStale = errors.New("the campaign changed since you loaded it; reload and 
 // generateContent streams AI-written content for the selected languages as
 // server-sent events (D21, D34): "delta" {field, text} while the model
 // writes ("en.sms.body"), "retry" {errors} when the first answer is invalid,
-// then "done" {content, version} or "error" {message}. Only a valid answer
+// then "done" {content, version} or "error" {message, code?}. Only a valid answer
 // is saved, and only while the client is still connected (D15). It writes
 // only the selected languages and keeps the others as they are; a language
 // that already has text is rewritten only with replace (D66).
@@ -158,7 +158,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			problems = []string{"the answer was cut off; keep the messages short"}
 		case err != nil:
 			llmCalls.WithLabelValues("content", "error").Inc()
-			send("error", map[string]string{"message": aiErrorMessage(err)})
+			send("error", aiErrorEvent(err))
 			return
 		default:
 			v, problems = parseContent(raw, channels, in.Languages)
@@ -171,7 +171,7 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			slog.Warn("AI content invalid twice", "campaign", id, "problems", problems)
-			send("error", map[string]string{"message": "The AI wrote invalid content twice. Edit the messages by hand or try again."})
+			send("error", map[string]string{"message": "The AI wrote invalid content twice. Edit the messages by hand or try again.", "code": "ai_invalid"})
 			return
 		}
 		llmCalls.WithLabelValues("content", "ok").Inc()
@@ -249,19 +249,21 @@ func parseContent(raw json.RawMessage, channels []string, langs []content.Lang) 
 	return v, problems
 }
 
-func aiErrorMessage(err error) string {
+// aiErrorEvent is the "error" event for a failed call; "code" tells the UI a
+// provider failure (bad key, outage) apart from an invalid answer.
+func aiErrorEvent(err error) map[string]string {
 	var limited *aiLimitError
 	switch {
 	case errors.As(err, &limited):
-		return limited.Error()
+		return map[string]string{"message": limited.Error()}
 	case errors.Is(err, llm.ErrRefused):
-		return "The AI declined to write this content. Rephrase the brief or write the messages by hand."
+		return map[string]string{"message": "The AI declined to write this content. Rephrase the brief or write the messages by hand."}
 	case errors.Is(err, context.DeadlineExceeded):
 		slog.Warn("AI content timed out", "err", err)
-		return "The AI did not answer in time. Try again or write the messages by hand."
+		return map[string]string{"message": "The AI did not answer in time. Try again or write the messages by hand."}
 	default:
 		slog.Error("AI content failed", "err", err)
-		return "The AI service is unavailable. Try again or write the messages by hand."
+		return map[string]string{"message": "The AI service is unavailable. Try again or write the messages by hand.", "code": "ai_unavailable"}
 	}
 }
 

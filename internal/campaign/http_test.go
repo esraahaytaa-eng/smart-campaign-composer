@@ -3,6 +3,7 @@ package campaign_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,6 +57,17 @@ func (garbageLLM) StreamContent(context.Context, llm.ContentInput, func(string))
 
 func (garbageLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.RawMessage, error) {
 	return json.RawMessage(`not json`), nil
+}
+
+// downLLM fails every call, like a rejected key or an outage.
+type downLLM struct{ err error }
+
+func (d downLLM) InterpretRequest(context.Context, llm.InterpretInput) (json.RawMessage, error) {
+	return nil, d.err
+}
+
+func (d downLLM) StreamContent(context.Context, llm.ContentInput, func(string)) (json.RawMessage, error) {
+	return nil, d.err
 }
 
 func newApp(t *testing.T, model llm.LLM) *app {
@@ -286,11 +298,25 @@ func TestCreate_AIInvalidTwice_502NothingSaved(t *testing.T) {
 
 	rec, _ := a.create(map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
 
-	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "not json") {
-		t.Fatalf("want 502 without leaking the raw answer, got %d %s", rec.Code, rec.Body)
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "not json") || decode[map[string]any](t, rec)["code"] != "ai_invalid" {
+		t.Fatalf("want 502 ai_invalid without leaking the raw answer, got %d %s", rec.Code, rec.Body)
 	}
 	if a.count(`SELECT count(*) FROM campaigns`) != 0 {
 		t.Fatal("invalid AI answer created a campaign")
+	}
+}
+
+// A provider error (bad key, outage) is not the brief's fault: the UI must be
+// able to tell it apart from an invalid answer.
+func TestCreate_AIUnavailable_502Code(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, downLLM{errors.New("401 Unauthorized invalid x-api-key")})
+
+	rec, _ := a.create(map[string]any{"request": caseExample, "channels": []string{"sms"}, "time_zone": "Europe/Istanbul"})
+
+	got := decode[map[string]any](t, rec)
+	if rec.Code != http.StatusBadGateway || got["code"] != "ai_unavailable" || strings.Contains(rec.Body.String(), "x-api-key") {
+		t.Fatalf("want 502 ai_unavailable without internals, got %d %s", rec.Code, rec.Body)
 	}
 }
 

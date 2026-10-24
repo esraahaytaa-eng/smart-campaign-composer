@@ -159,15 +159,19 @@ func TestGenerate_InvalidTwice_ErrorNothingSaved(t *testing.T) {
 
 	evs := a.generate(d.ID, 1)
 
-	if got := names(evs); got != "delta,retry,delta,error" {
-		t.Fatalf("want ...error, got %s", got)
+	if got := names(evs); got != "delta,retry,delta,error" || evs[len(evs)-1].Data["code"] != "ai_invalid" {
+		t.Fatalf("want ...error ai_invalid, got %s %+v", got, evs[len(evs)-1])
 	}
 	a.unchanged(d.ID)
 }
 
 func TestGenerate_AIFailure_ErrorNothingSaved(t *testing.T) {
 	t.Parallel()
-	for name, err := range map[string]error{"refused": llm.ErrRefused, "unavailable": errors.New("503 overloaded")} {
+	for name, tc := range map[string]struct {
+		err  error
+		code any
+	}{"refused": {llm.ErrRefused, nil}, "unavailable": {errors.New("503 overloaded"), "ai_unavailable"}} {
+		err := tc.err
 		t.Run(name, func(t *testing.T) {
 			model := &contentLLM{Mock: llm.NewMock(), err: err}
 			a := newApp(t, model)
@@ -175,8 +179,8 @@ func TestGenerate_AIFailure_ErrorNothingSaved(t *testing.T) {
 
 			evs := a.generate(d.ID, 1)
 
-			if names(evs) != "error" || strings.Contains(evs[0].Data["message"].(string), "503") || len(model.calls) != 1 {
-				t.Fatalf("want one error event without internals and no retry, got %+v after %d calls", evs, len(model.calls))
+			if names(evs) != "error" || strings.Contains(evs[0].Data["message"].(string), "503") || evs[0].Data["code"] != tc.code || len(model.calls) != 1 {
+				t.Fatalf("want one error event (code %v) without internals and no retry, got %+v after %d calls", tc.code, evs, len(model.calls))
 			}
 			a.unchanged(d.ID)
 		})
