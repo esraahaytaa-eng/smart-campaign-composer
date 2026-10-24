@@ -644,13 +644,13 @@ func writeAIError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, ErrAIInvalid):
 		slog.Warn("AI answer invalid twice", "err", err)
-		writeError(w, http.StatusBadGateway, "The AI returned an invalid answer twice. Rephrase the request or build the rules by hand.")
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "The AI returned an invalid answer twice. Rephrase the request or build the rules by hand.", "code": "ai_invalid"})
 	case errors.Is(err, context.DeadlineExceeded):
 		slog.Warn("AI request timed out", "err", err)
 		writeError(w, http.StatusGatewayTimeout, "The AI did not answer in time. Try again or build the rules by hand.")
 	default:
 		slog.Error("AI request failed", "err", err)
-		writeError(w, http.StatusBadGateway, "The AI service is unavailable. Try again or build the rules by hand.")
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "The AI service is unavailable. Try again or build the rules by hand.", "code": "ai_unavailable"})
 	}
 }
 
