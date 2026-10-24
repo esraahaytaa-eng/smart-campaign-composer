@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"smart-campaign-composer/internal/content"
 	"smart-campaign-composer/internal/db"
 	"smart-campaign-composer/internal/dbtest"
@@ -122,6 +124,89 @@ func TestLanguages_ConsistentEverywhere(t *testing.T) {
 		slices.Sort(got)
 		if !slices.Equal(got, want) {
 			t.Errorf("%s allows %v, the catalog has %v", column, got, want)
+		}
+	}
+}
+
+// D68: content and messages from before A/B testing are version A, and a
+// campaign without A/B behaves as before.
+func TestMigrate_ExistingContentBecomesVersionA(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := dbtest.FreshDB(t)
+	if err := db.MigrateTo(ctx, pool, 7); err != nil {
+		t.Fatal(err)
+	}
+	seedBilingual(t, pool)
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM campaign_content WHERE variant = 'a'`); n != 2 {
+		t.Fatalf("want both content rows as version A, got %d", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM campaigns WHERE NOT ab_test`); n != 1 {
+		t.Fatal("an existing campaign has no A/B test")
+	}
+}
+
+// Rolling A/B back keeps each campaign's version A text (D68).
+func TestMigrate_DownKeepsVersionA(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := dbtest.FreshDB(t)
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	seedBilingual(t, pool)
+	if _, err := pool.Exec(ctx, `INSERT INTO campaign_content (campaign_id, channel, language, variant, body)
+		VALUES (1, 'sms', 'tr', 'b', 'Merhaba B')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MigrateDownTo(ctx, pool, 7); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM campaign_content WHERE body IN ('Merhaba', 'Hello')`); n != 2 {
+		t.Fatalf("want the version A text kept, got %d rows", n)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM campaign_content`); n != 2 {
+		t.Fatal("version B is removed")
+	}
+}
+
+func TestVariants_CheckedByDatabase(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := dbtest.FreshDB(t)
+	if err := db.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	seedBilingual(t, pool)
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
+		VALUES (1, 'A', 'a@example.com', '+905000000001', 'Ankara', 'tr', true, true, now())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range []string{
+		`INSERT INTO campaign_content (campaign_id, channel, language, variant, body) VALUES (1, 'sms', 'tr', 'c', 'x')`,
+		`INSERT INTO messages (campaign_id, user_id, channel, variant) VALUES (1, 1, 'sms', 'c')`,
+	} {
+		if _, err := pool.Exec(ctx, sql); err == nil || !strings.Contains(err.Error(), "check constraint") {
+			t.Fatalf("want a check violation, got %v: %s", err, sql)
+		}
+	}
+}
+
+// seedBilingual adds one draft with Turkish and English SMS text.
+func seedBilingual(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	for _, sql := range []string{
+		`INSERT INTO marketers (id, email, name, password_hash) VALUES (1, 'm@example.com', 'M', 'x')`,
+		`INSERT INTO campaigns (id, request_text, channels, rules, status, time_zone, created_by, default_language)
+		 VALUES (1, 'bilingual', '{sms}', '[]', 'draft', 'UTC', 1, 'tr')`,
+		`INSERT INTO campaign_languages (campaign_id, language) VALUES (1, 'tr'), (1, 'en')`,
+		`INSERT INTO campaign_content (campaign_id, channel, language, body) VALUES (1, 'sms', 'tr', 'Merhaba'), (1, 'sms', 'en', 'Hello')`,
+	} {
+		if _, err := pool.Exec(context.Background(), sql); err != nil {
+			t.Fatalf("%v: %s", err, sql)
 		}
 	}
 }
