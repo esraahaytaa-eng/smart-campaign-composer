@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,37 @@ type Counts struct {
 	Total int `json:"total"`
 	SMS   int `json:"sms"`
 	Email int `json:"email"`
+	// The same per user language (D64); languages nobody is reached in are left out.
+	ByLanguage map[string]ChannelCounts `json:"by_language,omitempty"`
+}
+
+// ChannelCounts are one language's share of Counts.
+type ChannelCounts struct {
+	Total int `json:"total"`
+	SMS   int `json:"sms"`
+	Email int `json:"email"`
+}
+
+// ScanCounts adds up rows of (language, total, sms, email) counts; channels
+// that were not chosen stay 0.
+func ScanCounts(rows pgx.Rows, channels []string) (Counts, error) {
+	c := Counts{ByLanguage: map[string]ChannelCounts{}}
+	var lang string
+	var l ChannelCounts
+	_, err := pgx.ForEachRow(rows, []any{&lang, &l.Total, &l.SMS, &l.Email}, func() error {
+		if !slices.Contains(channels, "sms") {
+			l.SMS = 0
+		}
+		if !slices.Contains(channels, "email") {
+			l.Email = 0
+		}
+		if l.Total > 0 {
+			c.ByLanguage[lang] = l
+			c.Total, c.SMS, c.Email = c.Total+l.Total, c.SMS+l.SMS, c.Email+l.Email
+		}
+		return nil
+	})
+	return c, err
 }
 
 // consent is each channel's opt-in column (CASE §3: checked per channel).
@@ -55,20 +87,15 @@ func Count(ctx context.Context, pool *pgxpool.Pool, rules []Rule, channels []str
 	if err != nil {
 		return Counts{}, err
 	}
-	var all, sms, email int
-	err = pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE `+strings.Join(anyOf, " OR ")+`),
+	rows, err := pool.Query(ctx, `SELECT u.language, count(*) FILTER (WHERE `+strings.Join(anyOf, " OR ")+`),
 		count(*) FILTER (WHERE u.sms_opt_in), count(*) FILTER (WHERE u.email_opt_in)
-		FROM users u WHERE `+where, args...).Scan(&all, &sms, &email)
+		FROM users u WHERE `+where+` GROUP BY u.language`, args...)
 	if err != nil {
 		return Counts{}, fmt.Errorf("count audience: %w", err)
 	}
-	c := Counts{Total: all}
-	for _, ch := range channels {
-		if ch == "sms" {
-			c.SMS = sms
-		} else {
-			c.Email = email
-		}
+	c, err := ScanCounts(rows, channels)
+	if err != nil {
+		return Counts{}, fmt.Errorf("count audience: %w", err)
 	}
 	return c, nil
 }

@@ -127,3 +127,45 @@ func TestApprove_LegacyDraft(t *testing.T) {
 		t.Fatalf("want the legacy draft approved, got %d %v", code, body)
 	}
 }
+
+// The draft shows each language's share of the audience, the recommendation
+// and who gets which text; the recommendation never limits the choice (D64).
+func TestDraft_RecommendationAndFallback(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	a.exec(`UPDATE users SET language = 'en' WHERE id = 1`) // the case example's only recipient
+	d := a.newDraft()
+
+	type view struct {
+		Counts struct {
+			ByLanguage map[string]struct{ Total, SMS, Email int } `json:"by_language"`
+		} `json:"counts"`
+		Recommendation struct {
+			Languages []string `json:"languages"`
+			Default   string   `json:"default"`
+		} `json:"recommendation"`
+		Delivery         map[string]map[string]struct{ Own, Fallback int } `json:"delivery"`
+		ApprovalEstimate struct {
+			Delivery map[string]map[string]struct{ Own, Fallback int } `json:"delivery"`
+		} `json:"approval_estimate"`
+	}
+	got := decode[view](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	if got.Counts.ByLanguage["en"].SMS != 1 || len(got.Recommendation.Languages) != 1 || got.Recommendation.Default != "en" {
+		t.Fatalf("want English recommended as default, got %+v %+v", got.Counts, got.Recommendation)
+	}
+
+	// Turkish only, though nobody in the audience speaks it: allowed.
+	if code := a.putContent(d.ID, `{"version":1,"default_language":"tr","content":{"tr":`+validContent+`}}`); code != http.StatusOK {
+		t.Fatalf("a language with no speakers can still be chosen: %d", code)
+	}
+	got = decode[view](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	if d := got.Delivery["sms"]["tr"]; d.Own != 0 || d.Fallback != 1 {
+		t.Fatalf("want the English speaker counted as Turkish fallback, got %+v", got.Delivery)
+	}
+	a.approveLanguages(d.ID, 2, "tr")
+	a.approve(d.ID, `{"version":2,"send":"now"}`)
+	got = decode[view](t, a.do(http.MethodGet, "/api/campaigns/"+itoa(d.ID), ""))
+	if e := got.ApprovalEstimate.Delivery["email"]["tr"]; e.Fallback != 1 {
+		t.Fatalf("the approval estimate keeps the split, got %+v", got.ApprovalEstimate)
+	}
+}

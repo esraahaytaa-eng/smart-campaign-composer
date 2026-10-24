@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -210,7 +211,7 @@ func TestCount_ConsentPerChannel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got != tc.want {
+		if got.Total != tc.want.Total || got.SMS != tc.want.SMS || got.Email != tc.want.Email {
 			t.Errorf("%s %v: want %+v, got %+v", tc.city, tc.channels, tc.want, got)
 		}
 	}
@@ -219,6 +220,32 @@ func TestCount_ConsentPerChannel(t *testing.T) {
 	}
 	if _, err := audience.Count(ctx, pool, []audience.Rule{rule("city", "in", `["Ankara"]`)}, nil, now, istanbul); err == nil {
 		t.Error("no channels: want error")
+	}
+}
+
+// The audience per user language and channel, consent applied (D64): the
+// basis of the language recommendation and the fallback counts.
+func TestCounts_ByLanguage(t *testing.T) {
+	pool := fixtureDB(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `UPDATE users SET language = 'en' WHERE first_name IN ('vip', 'recent')`); err != nil {
+		t.Fatal(err)
+	}
+	// İstanbul: abandoner (tr, both), vip (en, both), noconsent (tr, none) · Ankara: recent (en, sms), bigcart (tr, both).
+	got, err := audience.Count(ctx, pool, []audience.Rule{rule("city", "in", `["İstanbul","Ankara"]`)}, []string{"sms", "email"}, now, istanbul)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]audience.ChannelCounts{"tr": {Total: 2, SMS: 2, Email: 2}, "en": {Total: 2, SMS: 2, Email: 1}}
+	if got.Total != 4 || !reflect.DeepEqual(got.ByLanguage, want) {
+		t.Fatalf("want %+v of 4, got %+v of %d", want, got.ByLanguage, got.Total)
+	}
+	sms, err := audience.Count(ctx, pool, []audience.Rule{rule("city", "in", `["Ankara"]`)}, []string{"email"}, now, istanbul)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]audience.ChannelCounts{"tr": {Total: 1, Email: 1}}; !reflect.DeepEqual(sms.ByLanguage, want) {
+		t.Fatalf("a language with nobody reachable on the chosen channels is left out: want %+v, got %+v", want, sms.ByLanguage)
 	}
 }
 

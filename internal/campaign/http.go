@@ -97,6 +97,10 @@ type campaignJSON struct {
 	// that aren't chosen (kept, not sent: D67), and each language's review state.
 	Content   content.Variants               `json:"content"`
 	Languages map[content.Lang]languageState `json:"languages,omitempty"`
+	// Drafts only: languages suggested by the audience (never a restriction)
+	// and who would get which language's text now.
+	Recommendation *recommendation                           `json:"recommendation,omitempty"`
+	Delivery       map[string]map[content.Lang]deliveryCount `json:"delivery,omitempty"`
 }
 
 const campaignColumns = `id, request_text, channels, rules, status, version, send_at, schedule_note, time_zone, created_by,
@@ -494,6 +498,8 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 			return
 		}
 		c.Counts = &counts
+		c.Recommendation = newRecommendation(counts)
+		c.Delivery = deliveryFor(c, c.Content, counts)
 	}
 	writeJSON(w, status, c)
 }
