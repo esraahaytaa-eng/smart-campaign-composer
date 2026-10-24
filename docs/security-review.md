@@ -36,7 +36,7 @@ Reviewed 2026-10-23 against the T19 checklist: customer data, authorization, API
 |---|---|---|
 | Sessions | Random token (`crypto/rand`), stored only as a SHA-256 hash, new token at every sign-in (no fixation), `HttpOnly`, `SameSite=Lax`, fixed 12 h lifetime, deleted on logout | OK |
 | Session cookie `Secure` | Set whenever the request came over HTTPS (directly or `X-Forwarded-Proto: https`); `TestLogin_SecureCookieOverHTTPS` | **Fixed** (was never Secure) |
-| Failed sign-ins | 5 per 15 minutes per email and per client address, then `429` with `Retry-After`, checked before the password; `TestThrottle_*`, `TestLogin_Throttled*` | **Fixed** (D55) |
+| Failed sign-ins | 5 per 15 minutes per email and per client address, then `429` with `Retry-After`, counted before the password check, so parallel requests can't slip past; `TestThrottle_*`, `TestLogin_Throttled*` | **Fixed** (D55) |
 | Cross-site requests (CSRF) | `SameSite=Lax`, plus the server refuses state-changing requests whose `Origin` is another site, including sign-in; `TestAPI_RejectsCrossSiteWrites` | **Fixed** (second layer added) |
 | Security headers on the app | Strict Content Security Policy (`default-src 'self'`, no inline scripts or styles, `frame-ancestors 'none'`), `nosniff`, `Referrer-Policy: no-referrer`; the browser suite fails on any CSP violation, proven with a planted inline style | **Fixed** (D56) |
 | XSS | No `v-html` or `innerHTML`; AI output, briefs and server texts are rendered as text; the preview is escaped | OK |

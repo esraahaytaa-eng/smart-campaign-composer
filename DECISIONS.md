@@ -447,6 +447,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** Nothing limited password guessing.
 - **Rejected:** *Documenting it as a limitation:* the fix is small.
 - **Trade-offs:** Limits reset on restart and are per process; a shared address can be throttled by someone else's failures.
+- **History:** 2026-10-24 (PR #7 review). Each attempt is counted before the password check and a success clears it, so parallel requests can't all slip past the limit; the address is checked before the email.
 
 ### D56 — Security headers and no caching of customer data
 - **Status:** Accepted · 2026-10-23
