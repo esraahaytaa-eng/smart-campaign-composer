@@ -141,8 +141,9 @@ services:
     profiles: ["test"]
     image: node:22-alpine
     working_dir: /web
-    # Reinstalls only when the lockfile changed (its hash is kept in the volume).
-    command: ["sh", "-c", "sha256sum package-lock.json | cmp -s - node_modules/.lock-sha || { npm ci --no-audit --no-fund && sha256sum package-lock.json > node_modules/.lock-sha; } && npm run typecheck && npm test"]
+    # Reinstalls only when the lockfile changed (its hash is kept in the volume),
+    # then runs the npm scripts in WEB_CHECKS (make lint sets it to lint).
+    command: ["sh", "-c", "sha256sum package-lock.json | cmp -s - node_modules/.lock-sha || { npm ci --no-audit --no-fund && sha256sum package-lock.json > node_modules/.lock-sha; } && for check in $${WEB_CHECKS:-typecheck test}; do npm run $$check || exit 1; done"]
     volumes:
       - ./web:/web
       # Its own node_modules, so npm ci never replaces the host's copy.

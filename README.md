@@ -161,7 +161,7 @@ One Go module (`cmd/scc`), one image, run as Compose services (D20): `postgres`,
 
 ```sh
 make test         # Go tests on a throwaway Postgres, with Vitest and the TypeScript check alongside (Docker)
-make lint         # gofmt and go vet (Docker)
+make lint         # gofmt, go vet and ESLint on the frontend (Docker)
 make e2e          # Playwright browser suite on its own throwaway stack (D53)
 make perf         # performance targets on their own stack (D57)
 make scan         # gitleaks: secrets and personal data in files and unpushed commits (D51)
@@ -213,7 +213,6 @@ Details in [`docs/security-review.md`](docs/security-review.md). Contacts are ma
 ## Future technical improvements
 
 - Bundle the Inter font from the design; the app uses Inter when it is installed and the system font otherwise.
-- Add a frontend linter (such as ESLint). Today the frontend is checked by the TypeScript type check (`vue-tsc`), the Vitest tests and the i18n coverage check, all run by `make test`.
 
 ## Project completion summary
 
