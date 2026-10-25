@@ -150,7 +150,7 @@ Reports in `docs/`:
 | [Manual QA](docs/qa/2026-10-24-manual-qa/README.md) | 78 cases in a real browser, including 3 paid real-Claude calls; results, screenshots and the one bug (fixed) |
 | [Architecture audit](docs/audit/2026-10-24-architecture-audit.md) | Independent audit of the delivery path and the code; the approved findings were fixed (D69) |
 | [Security review](docs/security-review.md) | Customer data, authorization, API security and dependencies, each with evidence |
-| [Performance](docs/performance.md) | Targets P1–P7, method and measured results; P5 is still missed back to back |
+| [Performance](docs/performance.md) | Performance targets, method and measured results |
 
 Frontend development with hot reload, against the api from `docker compose up`:
 
@@ -171,11 +171,18 @@ Details in [`docs/security-review.md`](docs/security-review.md). Contacts are ma
 
 ## Known limitations
 
-- **Not built:** the final UI/UX audit and the product roadmap planned for T21 (D50); AI-generated campaign titles (D43); archiving campaigns (D37). See the A/B and language scope above.
+- **A/B test:** delivery data only: no clicks, conversions, statistical significance or winner (D68). The 50/50 split is exact per language over unique recipients; per channel it can differ slightly, since consent and contact details differ. Version B's over-limit estimate covers the whole audience, so it is an upper bound.
+- **Languages:** Turkish and English only. A customer whose language has no text gets the campaign's default language. A further language needs a migration, seed data and mock texts (see Bonus features).
 - **Mock AI** understands only the documented briefs; free-form briefs need real Claude.
+- **Scalability:** sized for the case (3,000 customers, about 6,000 messages per campaign).
+  - One worker sends at a time: the 100/s per-channel limit lives in its process, and a second worker waits on a database lock (D19, D69).
+  - Sign-in limits, the AI call limit and metrics are in memory per api process and reset on restart; behind a proxy, all clients share its address.
+  - Status streams share one snapshot per campaign (D59), but nothing limits how many are open.
+  - Recipient details page by offset, so rows can move while a campaign sends (D47).
+  - Performance was measured on one shared laptop, with results and their variance in [`docs/performance.md`](docs/performance.md).
 - **`/docs`** loads Swagger UI from the jsDelivr CDN (pinned and integrity-checked), so it needs internet access; `/docs/openapi.json` works offline. A test keeps the spec's routes in step with the server, but not every field.
-- **Per-process state:** sign-in limits and the AI call limit are in memory per api process and reset on restart. Behind a proxy, all clients share its address. Metrics count per process.
-- **Status streams** share one snapshot per campaign (D59), but nothing limits how many are open.
-- **Recipient details** page by offset, so rows can move while a campaign sends (D47). With 10 marketers back to back, P5 measured 55.4 ms p95 against a 50 ms target; with a 1 s pause it measured 45 ms in T19, not re-measured since.
-- **A/B:** version B's over-limit estimate covers the whole audience, so it is an upper bound (D68).
-- **Frontend:** the Inter font isn't bundled; there is no frontend linter beyond the TypeScript check.
+
+## Future technical improvements
+
+- Bundle the Inter font from the design; the app uses Inter when it is installed and the system font otherwise.
+- Add a frontend linter; today `make test` runs only the TypeScript type check and the i18n coverage scan.
