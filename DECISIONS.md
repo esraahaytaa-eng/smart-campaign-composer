@@ -552,6 +552,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Trade-offs:** False positives need allow-list entries; the hook is per clone.
 - **History:** 2026-10-24 (PR #7 review). Tighter rules, each proven by the self-test: a Go checksum no longer hides other findings on its line; only the UI's four placeholder addresses at company.com/sirket.com are allowed; `.env.*.*`, `.envrc` and `*.env` files are caught. The history scan finds the same single item as before.
   2026-10-24 (T20 branch, user's decision): the owner's public GitHub username and profile links are not sensitive and are kept in session exports. The self-test's planted fictional contacts are allowed only under `ai-sessions/` (path and exact value); any other contact there is still caught.
+  2026-10-25 (session 09 export): one exact phrase, a line-wrapped code comment naming the OpenAPI spec's path that gitleaks' generic key rule reported, is allowed; the self-test proves the allowance and that a generic key in a session export is still caught.
 
 ### D52 — CI with GitHub Actions
 - **Status:** Accepted · 2026-10-23
