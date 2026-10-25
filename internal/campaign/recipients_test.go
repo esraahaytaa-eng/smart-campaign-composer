@@ -125,6 +125,51 @@ func TestRecipients_SkipDetailAndRetry(t *testing.T) {
 	}
 }
 
+// Every group lists exactly the messages its count says, each with a reason
+// where the group has them: the list filters by status before the group.
+func TestRecipients_EveryGroupMatchesItsCount(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	id := a.recipientsCampaign()
+	a.exec(`INSERT INTO messages (campaign_id, user_id, channel, status, skip_reason, delivery_uncertain) VALUES
+		($1, 2, 'email', 'cancelled', NULL, false),
+		($1, 3, 'email', 'cancelled', NULL, true),
+		($1, 4, 'email', 'failed', NULL, true),
+		($1, 5, 'email', 'skipped', 'no_consent', true),
+		($1, 6, 'email', 'retry_scheduled', NULL, false)`, id)
+	a.exec(`INSERT INTO delivery_attempts (message_id, attempt_no, started_at, outcome)
+		SELECT id, 1, $2, 'timeout' FROM messages WHERE campaign_id = $1 AND channel = 'email' AND user_id = 4`, id, fixedNow)
+
+	want := map[string]map[string]int{
+		"sent": nil, "pending": nil, "cancelled": nil,
+		"uncertain": {"timeout": 1, "no_response_recorded": 2},
+		"failed":    {"provider_rejected": 2},
+		"skipped":   {"character_limit_exceeded": 1, "no_consent": 1},
+		"retrying":  {"server_error": 1, "requeued": 1},
+	}
+	for group, reasons := range want {
+		p, code := a.recipients(id, "group="+group)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", group, code)
+		}
+		count := p.Groups["sms"][group] + p.Groups["email"][group]
+		if count == 0 || p.Total != count || len(p.Recipient) != count {
+			t.Errorf("%s: count %d, total %d, rows %d", group, count, p.Total, len(p.Recipient))
+		}
+		for _, r := range p.Recipient {
+			if r.Group != group {
+				t.Errorf("%s: row in group %s", group, r.Group)
+			}
+		}
+		if reasons == nil {
+			reasons = map[string]int{}
+		}
+		if !reflect.DeepEqual(p.Reasons, reasons) {
+			t.Errorf("%s: reasons %v, want %v", group, p.Reasons, reasons)
+		}
+	}
+}
+
 func TestRecipients_NameSearch(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())

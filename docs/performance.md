@@ -261,3 +261,26 @@ The page statement went from 19.0 ms to 5.1 ms of execution (planning from 6.6 t
 | P6 live screens | 13 ms/s of database time, slowest update 1.86 s behind | yes |
 
 **P5, read accurately.** The miss is 55.4 ms against 50 ms, from one representative run with 10 marketers back to back on one 8-core host, which saturates it (load average above 20 during the phase). One request's own cost is now about 9 ms (`BenchmarkRecipients`, and 8.9 ms mean for the page statement under that load), so the p95 is mostly time spent waiting for CPU behind the whole request mix. The campaign list's three statements use the most database time in that phase (about 200 s, against about 100 s for recipient details). Run-to-run variance on this host is large: the first run measured 77.2 ms while P4, whose code is unchanged, also rose from 72 to 98 ms. With a 1 s pause per request, P5 was last measured at 45 ms in T19, before T20, T21 and D69; it has not been re-measured. No further optimization was made: nothing measured points to a remaining bottleneck in recipient details itself, and how P3–P5 are read (back to back or with pauses) is still Q6.
+
+## P5: recipient details without full-campaign scans, 2026-10-25
+
+**Profile** (marketers phase, 10 marketers back to back; same machine). The connection pool was not the limit: at most 5 of the api's 6 open connections were busy, below the default cap of 8. Postgres used about 4.4 of the VM's 8 CPUs and the api about 1. Recipient details took about a quarter of the api's database time. Every request scanned all 6,000 messages of the campaign two or three times, even for a group of 300:
+
+| Statement (`pgbench -M prepared`, idle) | Before | After |
+|---|---|---|
+| Group counts (every request, unchanged) | 2.7 ms | 2.7 ms |
+| Page: failed / skipped / cancelled / sent | 1.35 / 1.47 / 1.65 / 2.0 ms | 0.32 / 0.57 / 0.74 / 2.1 ms |
+| Reasons: failed / skipped | 3.2 / 4.6 ms | 1.9 / 0.48 ms |
+
+**Change** (`internal/campaign/recipients.go`). The list filters on the group's statuses before the group expression, so small groups use the existing `(campaign_id, status)` index. A skipped message's reason is its stored skip reason, so those counts no longer look up attempts. Averaged over the benchmark's four groups, the database work per request drops from about 6.3 to 4.3 ms. Nothing else changed: no index, no schema change, same target. `TestRecipients_EveryGroupMatchesItsCount` checks every group's rows and reasons against its count; it passed before the change and fails if a group's statuses are wrong. A covering index for the group counts was measured too (2.7 → 2.0 ms) and not added: an extra write on every message for 0.7 ms.
+
+**Result.** `PERF_ONLY=marketers`, same compose project and settings as `make perf`, before and after interleaved on the same host. Recipient details, ms:
+
+| Run | Before p50 / p95 | After p50 / p95 |
+|---|---|---|
+| 1 | 24.4 / 44.8 | 17.7 / 38.6 |
+| 2 | 25.0 / 48.9 | 23.0 / 52.2 (host load rose to 20 during the run; P4 also rose to 84 ms) |
+| 3 | 23.0 / 41.7 | 18.5 / 33.3 |
+| Median | 24.4 / 44.8 | 18.5 / 38.6 |
+
+The median p95 fell by 6 ms (−14%) and the median p50 by 6 ms (−24%). Earlier the same day, four baseline runs of the old code measured 46.2, 56.0, 64.2 and 79.0 ms p95 while host load ranged from 4 to 38. Under back-to-back load on this shared laptop the target is met in most runs now, but not every one: a host load spike still pushes the p95 past 50 ms. A full `make perf` (send phase first) was not re-run for this change.
