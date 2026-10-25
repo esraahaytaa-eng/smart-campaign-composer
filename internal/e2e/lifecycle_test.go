@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/time/rate"
 
@@ -421,15 +422,60 @@ func TestLifecycle_RenamedAfterApproval_SkippedThenResentOnce(t *testing.T) {
 	}
 }
 
-// L8 (Review Focus #3): cancelling mid-campaign stops it — no request leaves
-// after the cancel committed (attempts already in progress may finish, D11).
-func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
+// statusChecks records when each of the worker's per-message status checks
+// (its load of the campaign status and consent) started.
+type statusChecks struct {
+	mu sync.Mutex
+	at map[int64][]time.Time // by message ID
+}
+
+func (c *statusChecks) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(d.SQL, "m.delivery_uncertain") && len(d.Args) == 1 {
+		if id, ok := d.Args[0].(int64); ok {
+			c.mu.Lock()
+			c.at[id] = append(c.at[id], time.Now())
+			c.mu.Unlock()
+		}
+	}
+	return ctx
+}
+
+func (c *statusChecks) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// lastBefore is the start of the message's last status check before t.
+func (c *statusChecks) lastBefore(id int64, t time.Time) (time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var last time.Time
+	for _, at := range c.at[id] {
+		if at.Before(t) && at.After(last) {
+			last = at
+		}
+	}
+	return last, !last.IsZero()
+}
+
+// L8 (Review Focus #3, D11): cancelling mid-campaign stops it. A send whose
+// last status check started before the cancel committed is in progress and
+// may still leave; no send starts from a check made after the commit, since
+// that check sees the campaign cancelled.
+func TestLifecycle_CancelMidCampaign_NoNewSendAfterCancel(t *testing.T) {
 	t.Parallel() // own database; nothing shared with other tests
 	l := newLife(t)
 	l.exec(`INSERT INTO users (id, first_name, email, phone, city, language, sms_opt_in, email_opt_in, signed_up_at)
 		SELECT g, 'U', 'u' || g || '@example.com', '+90520' || g, 'Ankara', 'tr', true, true, now() FROM generate_series(100, 159) g`)
 	cid := l.campaign("{sms,email}", "Merhaba {{first_name}}", nil)
 	w := l.worker(l.provider(instant, 0), time.Second)
+	// The worker's own pool, tracing when each status check starts.
+	checks := &statusChecks{at: map[int64][]time.Time{}}
+	cfg := l.pool.Config().Copy()
+	cfg.ConnConfig.Tracer = checks
+	traced, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	w.Queue = &worker.Queue{Pool: traced}
 	w.Limiters = map[string]*rate.Limiter{"sms": rate.NewLimiter(20, 1), "email": rate.NewLimiter(20, 1)} // slow: the cancel lands mid-way
 
 	ctx, stop := context.WithCancel(context.Background())
@@ -439,7 +485,7 @@ func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
 		return l.int(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status = 'sent'`, cid) > 0
 	})
 	l.cancel(cid)
-	cancelledAt := time.Now()
+	cancelledAt := time.Now() // the cancel has committed
 	// Messages already claimed reach their cancel check as rate-limit slots come up.
 	deadline := time.Now().Add(15 * time.Second)
 	for l.int(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status IN ('pending','sending','retry_scheduled')`, cid) > 0 {
@@ -451,10 +497,32 @@ func TestLifecycle_CancelMidCampaign_NoDepartureAfterCancel(t *testing.T) {
 	stop()
 	<-done
 
-	if n := l.int(`SELECT count(*) FROM delivery_attempts a JOIN messages m ON m.id = a.message_id
-		WHERE m.campaign_id = $1 AND a.started_at > $2`, cid, cancelledAt); n != 0 {
-		t.Fatalf("%d requests left after the cancel committed", n)
+	rows, err := l.pool.Query(context.Background(), `SELECT a.message_id, a.started_at FROM delivery_attempts a
+		JOIN messages m ON m.id = a.message_id WHERE m.campaign_id = $1`, cid)
+	if err != nil {
+		t.Fatal(err)
 	}
+	attempts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[struct {
+		ID      int64
+		Started time.Time
+	}])
+	if err != nil {
+		t.Fatal(err)
+	}
+	inProgress := 0
+	for _, a := range attempts {
+		check, ok := checks.lastBefore(a.ID, a.Started)
+		if !ok {
+			t.Fatalf("message %d was sent without a status check", a.ID)
+		}
+		if check.After(cancelledAt) {
+			t.Fatalf("message %d: a send started from a status check made after the cancel committed", a.ID)
+		}
+		if a.Started.After(cancelledAt) {
+			inProgress++ // checked before the commit, left after it: allowed (D11)
+		}
+	}
+	t.Logf("%d attempts, %d of them in progress when the cancel committed", len(attempts), inProgress)
 	sent := l.int(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status = 'sent'`, cid)
 	cancelled := l.int(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status = 'cancelled'`, cid)
 	total := l.int(`SELECT count(*) FROM messages WHERE campaign_id = $1`, cid)
