@@ -236,7 +236,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Why:** CASE.md puts the core workflow first. Quality and CI guard the send path before T20 changes it, and the audit and docs come last so they describe the final product.
 - **Rejected:** *A/B and language together, unconditionally:* they multiply the content model with no outcome metric for A/B. *The UI/UX audit in T19:* T20 adds screens it would miss. *CI as a bonus:* it protects every later change.
 - **Trade-offs:** More milestones and PRs. A/B may not ship. Personal details already pushed are left as is for now (user's choice): the GitHub username and first name in `ai-sessions/04`, and the author email in commit metadata.
-- **History:** 2026-10-23 (T19 step 1). Corrected: the session exports never contained the email address; what was counted as the email was the GitHub username in the repository's PR links. The one item the history scan found, a made-up German mobile number in a test fixture (`internal/campaign/mask_test.go`, commit `236761d`), was reported and replaced going forward; history was not rewritten.
+- **History:** 2026-10-23 (T19 step 1). Corrected: the session exports never contained the email address; what was counted as the email was the GitHub username in the repository's PR links. The one item the history scan found, a made-up German mobile number in a test fixture (`internal/campaign/mask_test.go`, commit `236761d`), was reported and replaced going forward; history was not rewritten. 2026-10-25: the OpenAPI and Swagger UI part of T21 was built (D73); the UI/UX audit and the product roadmap were not.
 
 ### D54 — Campaign list paged, searched and counted on the server
 - **Status:** Accepted · 2026-10-23
@@ -634,6 +634,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *A shared rate limiter (Redis or Postgres):* a round trip per message for a limit one process already enforces. *Exiting when the lock is lost:* relies on a restart policy. *Re-checking before the cap wait:* a cancel during that wait would be missed. *Sorting recipients by `updated_at`:* changes the order of skipped and pending rows (D47). *An index on `last_attempt_at`:* an extra write per result for ~3 ms.
 - **Trade-offs:** A failed lock connection is noticed within about 1–3 s; until then, if the database already freed the lock, a second worker could send at the same time. A worker that takes the lock waits one cap window (about 1 s) before sending, so a handover can't put 200 requests in a second. A vanished host keeps the lock until the server's keepalives drop its session (about 25 s), and sending pauses meanwhile. A message failed for missing text shows the reason "retries exhausted". `last_attempt_at` duplicates `delivery_attempts`; only the worker writes attempts, and it keeps both.
 - **History:** 2026-10-24: approved by the engineer. 2026-10-24 (branch review): the handover wait and the lock connection's keepalives were added.
+
+### D73 — API reference: a hand-written OpenAPI spec, Swagger UI from a CDN
+- **Status:** Accepted · 2026-10-25
+- **Decision:** An OpenAPI 3.1 spec of every `/api` route (auth, schemas, error codes), hand-written as JSON in `internal/apidocs` and embedded in the binary. The api serves it at `/docs/openapi.json` and a Swagger UI page at `/docs`, both public. Swagger UI loads from jsDelivr at an exact version with SRI hashes, under a CSP for that page only; the app's CSP (D56) is unchanged. A test fails when a registered route and the spec differ.
+- **Why:** The API was described only in the README (D50 planned OpenAPI for T21). No dependency, no build step, no change to API behavior.
+- **Rejected:** *Vendoring swagger-ui-dist:* ~1.5 MB of third-party files in the repo and image. *An npm dependency in the web build:* a new dependency and build changes for a developer page. *Generating the spec from code:* annotations or a library across every handler.
+- **Trade-offs:** `/docs` needs internet access in the browser. The test checks routes, not every field, so response shapes can drift unnoticed. The page allows inline styles, which Swagger UI needs.
 
 ## Open Questions
 
