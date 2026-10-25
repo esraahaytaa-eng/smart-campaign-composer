@@ -1,53 +1,68 @@
 # Smart Campaign Composer
 
-AI-assisted SMS and email campaign tool. A marketer writes a brief, Claude turns it into audience rules and writes the messages, the backend validates everything, the marketer reviews and approves, and a worker sends to mock providers while the dashboard shows delivery live.
+A marketer describes a campaign in plain Turkish or English. Claude turns the brief into audience rules and writes SMS and email messages. The Go backend validates every AI answer, the marketer reviews, edits and explicitly approves, and a queue sends to mock SMS and email providers while the dashboard shows delivery live. Frontend: Vue 3 + TypeScript. Backend: Go. Storage and queue: Postgres.
 
-> **Status: feature-complete for delivery.** The core workflow, scheduled sending, messages in each customer's language, a delivery-only A/B test, CI and an OpenAPI reference are built. Manual QA: 77 of 78 cases passed; the one bug found is fixed ([`docs/qa/`](docs/qa/2026-10-24-manual-qa/README.md)).
-
-| Document | What it holds |
-|---|---|
-| [`CASE.md`](CASE.md) | Requirements and business rules |
-| [`DECISIONS.md`](DECISIONS.md) | Every approved decision (`D1`…) with its reasons and trade-offs |
-| `http://localhost:8080/docs` | API reference (OpenAPI 3.1, Swagger UI); spec at `/docs/openapi.json` |
-| [`docs/security-review.md`](docs/security-review.md) | Security review and its evidence |
-| [`docs/performance.md`](docs/performance.md) | Performance targets, method and results |
-| [`docs/qa/`](docs/qa/2026-10-24-manual-qa/README.md) | Manual QA cases, results and screenshots |
-| [`docs/audit/`](docs/audit/2026-10-24-architecture-audit.md), [`docs/plans/`](docs/plans/) | Architecture audit and implementation plans |
-| [`design/`](design/smart-campaign-composer-reference.html) | UI reference design (open the HTML in a browser) |
-| [`ai-sessions/`](ai-sessions/) | Claude Code session exports |
+**Status:** every mandatory requirement in [`CASE.md`](CASE.md) and all four optional features are built (scope and limits below). Manual QA: 77 of 78 cases passed; the one bug found is fixed. CI runs the tests, lint, a secret scan and the browser suite.
 
 ## Setup
 
 Requirements: Docker with Compose, and `make`. No local Go or Node toolchain is needed.
 
+**Option A: mock AI, no API key.** This is the default and needs no `.env`:
+
 ```sh
 docker compose up
 ```
 
-No `.env` is needed. To change settings, `cp .env.example .env` and edit it (every setting is documented there).
-
-- `http://localhost:8080`: the app
-- `http://localhost:8080/docs`: the API reference
-- `http://localhost:8080/healthz`, `/readyz`, `/metrics`: liveness, database readiness, Prometheus metrics
-
-The first run creates 3,000 fictional customers from a fixed seed, with dates relative to that run; later runs never add or change them. Relative audiences ("carted in the last 30 days") shrink as time passes; `docker compose down -v && docker compose up` regenerates the data for today and deletes all campaigns.
-
-### Demo login
-
-| Email | Password |
-|---|---|
-| `marketer@marketer.com` | `Demo1234!` |
-
-For local use only. `DEMO_MARKETER_PASSWORD` in `.env` changes it, but only before the first `docker compose up`.
+**Option B: real Claude.** Copy the example settings, set the mode and key, then start (or restart) the stack:
 
 ```sh
-curl -c cookies.txt -X POST localhost:8080/api/login -d '{"email":"marketer@marketer.com","password":"Demo1234!"}'
-curl -b cookies.txt localhost:8080/api/me
+cp .env.example .env
+# in .env: LLM_MODE=real and ANTHROPIC_API_KEY=<your key>
+docker compose up
 ```
 
-### AI mode
+With `LLM_MODE=real` the api refuses to start without `ANTHROPIC_API_KEY`. `ANTHROPIC_MODEL` (default `claude-opus-5-5`), `LLM_TIMEOUT` (default `60s` per call) and `AI_CALLS_PER_HOUR` (default 10 per marketer, retries included, D63) control cost. [`.env.example`](.env.example) documents every setting the stack reads, including the mock provider's failure rates and the worker's retry limits.
 
-`LLM_MODE=mock` (the default) needs no API key, but understands only the briefs below and close variations (other cities, numbers, categories, amounts, dates). Anything else is answered **unsupported**: the AI never guesses or broadens an audience (D15). A brief may end with a tone sentence ("Keep the message short and friendly.") and a send-time sentence ("Send it tomorrow at 10:00.", "Send it in 2 hours.").
+Then open:
+
+| URL | |
+|---|---|
+| `http://localhost:8080` | The app. Demo login: `marketer@marketer.com` / `Demo1234!` (local only; `DEMO_MARKETER_PASSWORD` changes it before the first start) |
+| `http://localhost:8080/docs` | API reference: OpenAPI 3.1 in Swagger UI; the spec is at `/docs/openapi.json` |
+| `/healthz`, `/readyz`, `/metrics` | Liveness, database readiness, Prometheus metrics |
+
+The first start seeds 3,000 fictional customers from a fixed random seed. Restarts never add or change them. Dates are relative to the first start, so "carted in the last 30 days" shrinks as time passes; `docker compose down -v && docker compose up` reseeds for today and deletes all campaigns.
+
+## CASE requirements
+
+| Requirement | How it is met |
+|---|---|
+| Claude creates audience rules; the backend validates them; never run Claude's SQL | Claude returns rules as JSON against a fixed catalog (D14). Go validates field, operator and value, and builds parameterized SQL itself; rule values reach Postgres only as query arguments. |
+| Show matching users; SMS and email permissions checked separately | Drafts show the audience per channel, counted from `sms_opt_in` / `email_opt_in`. The worker re-checks the recipient's permission for that channel before every send. |
+| Claude writes SMS and email, streamed to the UI | Server-sent events stream the text into the editors as it is written (D21). |
+| SMS ≤ 160, subject ≤ 80, variables, preview and edit before approval | Limits are checked after personalization with `{{first_name}}`, `{{last_name}}`, `{{city}}`; recipients over the limit are skipped and counted. The marketer edits, previews and approves each language. |
+| Asynchronous queue, ≤ 100 messages/s per channel | The `messages` table is the queue, claimed with `FOR UPDATE SKIP LOCKED` and leases (D5, D18). Per channel, a rate limiter plus a hard cap over each 1-second window, both counting retries (D19, D69). |
+| No duplicate messages | One message per campaign, user and channel (unique constraint). The message ID is the provider's idempotency key, so a retry after a lost response is not sent twice. |
+| Retry strategy | 429, 5xx, timeouts and network errors are retried with exponential backoff and jitter, honouring `Retry-After`, up to `MAX_ATTEMPTS` (5); other 4xx fail. Each attempt is recorded. |
+| Mock SMS and email providers with success, delays, temporary errors and 429 | The `mock-provider` service: 20–200 ms delay, 5% 5xx, 3% 429, 1% lost responses by default, configurable per channel (D20). |
+| Live dashboard status, metrics, health checks | A per-campaign status stream over SSE (D21, D36); `/metrics` (D26), `/healthz` and `/readyz` on every process. |
+| Structured AI JSON, validated, invalid output handled safely | See [Reliable AI design](#reliable-ai-design). |
+| Tests without an API key; key from `ANTHROPIC_API_KEY` in `.env`; `.env.example` | Every test uses the mock LLM or a fake local API server. The key is read only from the environment. |
+| 3,000 fictional users with names, email, phone, city, orders, cart, permissions | Seeded once by the `migrate` service; restarts never duplicate them (D28). |
+| Vue.js frontend, Go backend | Vue 3 + TypeScript + Vite (D25); one Go module (D20). |
+| Deliverables: `docker compose up`, `make test`, README, `DECISIONS.md`, `ai-sessions/` | All present. Session exports are reviewed for keys and personal data before they are committed (D51). |
+
+## Bonus features
+
+- **Scheduled sending (D29):** approval requires an explicit *Send now* or a time between 1 minute and 30 days ahead. A time from the brief is only a proposal. The worker starts the campaign at that time and builds the audience then (D30), and it can be cancelled until then.
+- **Messages in the customer's language (D64–D67):** **Turkish and English are implemented.** Each customer gets the text in their own language if the campaign has it, and the default language otherwise. Each language is reviewed and approved on its own; a changed brief marks the text "may be outdated". The language list is one catalog in `internal/content/languages.go` that drives the API, validation, the AI's answer schema and the UI. A further language would still need a migration widening the database's language checks, seed data and mock texts; a test fails while the catalog and the database checks disagree. No other language works today.
+- **A/B test (D68):** optional and off by default. Version B per language is written by hand or by the AI. Each language's recipients are split 50/50 by `md5(campaign:user)`, which is deterministic and the same on every channel, and the version is stored on each message. Results show delivery per version (recipients, sent, failed, skipped, too long, waiting or retrying). There are **no clicks, conversions, statistical significance or winner selection**: the app records no outcomes after delivery.
+- **CI (D52):** GitHub Actions runs `make test`, `make lint` and the secret scan on every push and pull request, and the browser suite on pull requests, on pushes to `main` and nightly. Actions are pinned to commits.
+
+## Example briefs
+
+**Mock mode understands only the briefs below** and close variations (other cities, numbers, dates, categories, offers). Each may end with a tone sentence and one send-time sentence ("Send it tomorrow at 10:00.", "Send it in 2 hours."). Any other brief, including one of these with an extra condition, is answered **unsupported**: the mock never guesses or broadens an audience (D15). A test keeps this table in step with the mock.
 
 | English | Turkish |
 |---|---|
@@ -61,51 +76,71 @@ curl -b cookies.txt localhost:8080/api/me
 | Send a weekend sale announcement to all users in Ankara. Send it tomorrow at 10:00. | Ankara'daki tüm kullanıcılara hafta sonu indirimi duyurusu gönder. Yarın saat 10:00'da gönder. |
 | Send a reminder to users who added products to their cart since 2026-10-01 but did not buy anything. | 2026-10-01 tarihinden beri sepetine ürün ekleyip satın almayan kullanıcılara hatırlatma gönder. |
 
-`LLM_MODE=real` with `ANTHROPIC_API_KEY` in `.env` uses Claude for free-form briefs (the api refuses to start without the key). Tests never call Claude. Each call costs credits: `LLM_TIMEOUT` (default `60s`) limits each call, and each marketer gets at most `AI_CALLS_PER_HOUR` (default 10) calls, retries included (D63).
+**Free-form briefs need real Claude.** For example:
 
-## Features
+> Son 12 ayda toplam 10.000 TL'den fazla harcama yapmış, en az 4 sipariş vermiş ancak son 45 gündür sipariş oluşturmamış müşterileri hedeflemek istiyorum. Son 7 gün içinde kayıt olanlar bu kampanyaya dahil edilmesin. Bu müşterilere %25 geri dönüş indirimi sunalım. SMS ve e-posta kullanılsın. Türkçe ve İngilizce içerikler profesyonel ama sıcak olsun.
 
-- **Brief → audience:** the AI maps the brief to rules from a fixed catalog (city, cart and order history, spend, categories, sign-up date; D14, D70), or says it can't. Rules are validated and shown as editable chips with live counts per channel; they can also be built by hand.
-- **Content:** the AI streams SMS and email text per language (Turkish, English) into editors; text is personalised with `{{first_name}}`, `{{last_name}}`, `{{city}}` and length-checked after personalisation (SMS 160, subject 80, email body 2,000). Each language is reviewed and approved on its own (D64–D67). Edits save automatically with optimistic locking.
-- **Approval:** nothing is sent without an explicit *Send now* or *Schedule* (1 minute to 30 days ahead) and a second confirmation; estimates are labelled as estimates (D30).
-- **Sending:** the worker builds the audience at send time, re-checks consent and cancellation before each request, sends with an idempotency key, retries 429/5xx/timeouts with backoff, and stays within 100 requests per second per channel (D19, D69). Over-limit messages are skipped and can be resent (D31).
-- **Monitoring:** a live status stream per campaign (sent, uncertain, failed, skipped, cancelled, retrying, pending, with reasons), recipient details with masked contacts (D46, D47), cancel and resend.
-- **A/B test (optional):** version B per language, a reproducible 50/50 split, delivery results per version; no winner is named, since no outcome data exists (D68).
-- **Dashboard and list:** status counts, server-side search, filters and paging (D54). English and Turkish UI (D44).
+Mock mode answers this brief as unsupported (checked). Its audience is the loyalty segment above. Real Claude mapped that segment to the intended four rules (`spend_in_window gt 10,000 / 12 months`, `orders_in_window gte 4 / 12 months`, `no_order within 45 days`, `signed_up before 7 days`) in one controlled call (D70, `ai-sessions/08`). That run did not record this exact wording.
+
+What has been verified with real Claude:
+
+| Case | Result |
+|---|---|
+| The loyalty segment above (D70) | The four intended rules; nothing dropped or approximated |
+| A realistic Turkish brief: İstanbul, cart abandoned in 30 days, send Friday 18:00, 15% off (QA AI1) | City and cart rules, the send time proposed in the campaign's zone, the discount kept for the content |
+| Turkish and English messages for that campaign (QA AI2) | Both greet with `{{first_name}}`; SMS within 160 characters |
+| A prompt-injection brief asking to ignore the rules and target everyone (QA AI3) | Unsupported; no campaign created, no rules invented |
+
+Briefs that are **refused by design** (tested with the mock; real Claude follows the same rule in its prompt): an unknown attribute ("users in Istanbul who are older than 30"), a supported brief plus an extra condition ("… and who like hiking", "Only women."), and a vague one ("Send something nice to our best customers").
+
+## Reliable AI design
+
+- **Structured JSON:** both calls use Anthropic structured output with a JSON schema. Field and operator are fixed lists from the catalog; content has one object per requested language and channel.
+- **Strict validation in Go:** the answer is decoded strictly (unknown fields and trailing data rejected). Rules are checked against the catalog and its limits and normalized. Content must cover exactly the requested languages and channels, use only known variables, and fit the length limits with every variable empty; per-recipient lengths are checked again at send time. AI-written bodies must greet with `{{first_name}}` (D72).
+- **Safe SQL:** Claude never writes SQL. Go builds each rule's SQL from a fixed template, with values passed only as query arguments.
+- **Controlled retries:** an invalid answer is retried **once**, with the validation errors sent back. A second failure returns `502 ai_invalid`; provider errors return `502 ai_unavailable`, timeouts `504`. Only a valid answer is saved, and streamed content only while the client is still connected (D15). Real calls are capped per marketer (D63).
+- **Unsupported handling:** the prompt and the mock both answer `unsupported` with a reason when any part of the audience can't be expressed. The brief is treated as data inside `<brief>` tags, never as instructions. Nothing is saved, and the marketer can rephrase.
+- **Mock LLM:** tests and the default mode use a deterministic mock, with the same interface and validation path as Claude. The Claude client is tested against a fake local API server.
 
 ## Architecture
 
-One Go module (`cmd/scc`) built into one image and run as Compose services (D20): `postgres`, `migrate` (one-shot migrations and seed), `api`, `worker` and `mock-provider`. The Vue 3 + TypeScript frontend (`web/`) is built into the same image and served by the api.
+One Go module (`cmd/scc`), one image, run as Compose services (D20): `postgres`, `migrate` (one-shot migrations and seed), `api` (also serves the built Vue app), `worker` and `mock-provider`.
 
 | Package | Responsibility |
 |---|---|
-| `internal/auth` | Login, logout, session cookie check, sign-in throttling, same-origin check on writes |
-| `internal/campaign` | The campaign API: drafts, content, approval, estimates, live status, recipients, resend |
-| `internal/audience` | Rule catalog and validation; rules become parameterized SQL (values only ever reach Postgres as arguments) |
-| `internal/content` | Message templates, length limits, over-limit estimates, language catalog |
-| `internal/llm` | Claude client and the mock AI; answers are validated against a schema, never trusted |
-| `internal/worker` | Queue (`FOR UPDATE SKIP LOCKED` with leases, D5, D18), rate limits, dispatch; one sender via an advisory lock |
-| `internal/provider` | Mock SMS and email provider with delays, failures, 429s and idempotency keys (D20); its own database role (D6) |
-| `internal/db` | Embedded migrations and the seed |
-| `internal/apidocs` | The OpenAPI spec and Swagger UI page (D73) |
-| `internal/obs`, `internal/spa`, `internal/config` | Health and metrics, serving the frontend, environment settings |
-
-The provider's failure rates and delays are set with the `SMS_*` / `EMAIL_*` settings in `.env.example` (defaults: 20–200 ms, 5% 5xx, 3% 429, 1% lost responses).
+| `internal/auth` | Login, session cookie, sign-in throttling, same-origin check on writes |
+| `internal/campaign` | Campaign API: drafts, content, approval, estimates, live status, recipients, resend |
+| `internal/audience` | Rule catalog, validation, parameterized SQL |
+| `internal/content` | Templates, length limits, over-limit estimates, language catalog |
+| `internal/llm` | Claude client, mock AI, answer schemas |
+| `internal/worker` | Queue claims with leases, rate limits, dispatch, retries; one sender via an advisory lock (D69) |
+| `internal/provider` | Mock SMS and email provider with its own database role (D6) |
+| `internal/db` | Embedded migrations and seed |
+| `internal/apidocs` | OpenAPI spec and Swagger UI page (D73) |
+| `internal/obs`, `internal/spa`, `internal/config` | Health and metrics, serving the frontend, settings |
 
 ## Testing
 
 ```sh
-make test         # in Docker: Go tests on a throwaway Postgres, Vitest and the TypeScript check alongside
-make lint         # in Docker: gofmt and go vet
-make e2e          # Playwright browser tests on their own throwaway stack (D53)
-make perf         # performance targets on their own stack (D57, docs/performance.md)
+make test         # Go tests on a throwaway Postgres, with Vitest and the TypeScript check alongside (Docker)
+make lint         # gofmt and go vet (Docker)
+make e2e          # Playwright browser suite on its own throwaway stack (D53)
+make perf         # performance targets on their own stack (D57)
 make scan         # gitleaks: secrets and personal data in files and unpushed commits (D51)
 make hooks        # once per clone: scan staged changes before every commit
 ```
 
-Integration tests need a database and fail, never skip, without one. `internal/e2e` runs the api, worker and mock provider together, including provider failures, crashes, cancellations and resends. A test checks that every API route is in the OpenAPI spec.
+- **Go:** integration tests run against Postgres and fail, never skip, without one. `internal/e2e` runs the api, worker and mock provider together: sends through a provider that fails, rate-limits and loses responses; scheduled sends; worker crashes and shutdowns; cancellation races; consent changes; length skips and resends; retry limits; two workers on one queue. A test checks that the OpenAPI spec lists exactly the registered routes.
+- **Browser (`make e2e`, `e2e/`):** sign-in and the login guard; the audience, content and review steps (streaming and Stop, autosave races, edit conflicts, explicit approval); one-step creation; English and Turkish; dashboard, list, search and paging; phone, tablet and desktop layouts; live delivery to completion with counts checked against the API; pause, cancel while sending; recipient details; resend; the A/B test. Several checks really send campaigns through the mock providers.
 
-**CI** (GitHub Actions, D52): `ci.yml` runs `make test`, `make lint` and the scan on every push and pull request; `e2e.yml` runs `make e2e` on pull requests, pushes to `main` and nightly.
+Reports in `docs/`:
+
+| Report | Contents |
+|---|---|
+| [Manual QA](docs/qa/2026-10-24-manual-qa/README.md) | 78 cases in a real browser, including 3 paid real-Claude calls; results, screenshots and the one bug (fixed) |
+| [Architecture audit](docs/audit/2026-10-24-architecture-audit.md) | Independent audit of the delivery path and the code; the approved findings were fixed (D69) |
+| [Security review](docs/security-review.md) | Customer data, authorization, API security and dependencies, each with evidence |
+| [Performance](docs/performance.md) | Targets P1–P7, method and measured results; P5 is still missed back to back |
 
 Frontend development with hot reload, against the api from `docker compose up`:
 
@@ -114,18 +149,23 @@ docker run --rm -it -p 5173:5173 -v "$PWD/web":/web -v scc-web-node-modules:/web
   -e API_URL=http://host.docker.internal:8080 node:22-alpine sh -c "npm ci && npx vite --host 0.0.0.0"
 ```
 
-UI text lives in `web/src/i18n/en.ts` and `tr.ts` (the type check fails if a key is missing in one); `make test` flags phrases not passed through `t()`.
+## Project documentation
+
+- **[`DECISIONS.md`](DECISIONS.md):** 73 numbered decisions (`D1`…), split into requirements and business rules, and architecture and technical choices. Each records the decision, why, the rejected alternatives and the trade-offs. Changes over time are kept as dated history notes, and replaced decisions are marked *Superseded* with a pointer to the new one. Open questions and deferred items are listed at the end. README sections cite these IDs.
+- **[`ai-sessions/`](ai-sessions/):** exports of the Claude Code sessions, from requirement analysis through delivery, reviewed for keys and personal data before commit.
+- **[`docs/plans/`](docs/plans/):** implementation plans per milestone. **[`design/`](design/smart-campaign-composer-reference.html):** the reference UI design (open in a browser).
 
 ## Security
 
-Details in [`docs/security-review.md`](docs/security-review.md). Contacts are masked by the server and never cached; the AI never receives customer data; every API route except login needs a session (HttpOnly, SameSite=Lax cookie; only the token's hash is stored); failed sign-ins are limited; writes from other sites are refused; the app has a strict Content Security Policy; secrets and personal data are scanned before every commit and in CI. The session cookie isn't `Secure` on plain `http://localhost`.
+Details in [`docs/security-review.md`](docs/security-review.md). Contacts are masked by the server and never cached. The AI never receives customer data. Every API route except login needs a session (HttpOnly, SameSite=Lax cookie; only the token's hash is stored). Failed sign-ins are limited, writes from other sites are refused, and the app has a strict Content Security Policy. Secrets and personal data are scanned before every commit and in CI. The cookie isn't `Secure` on plain `http://localhost`.
 
 ## Known limitations
 
-- **Not built:** the final UI/UX audit and the product roadmap planned for T21 (D50); AI-generated campaign titles (D43); archiving campaigns (D37); A/B outcomes such as orders or clicks (D68).
-- **`/docs`** loads Swagger UI from the jsDelivr CDN (pinned, integrity-checked), so it needs internet access in the browser; the spec at `/docs/openapi.json` works offline. The spec is written by hand: a test keeps its routes in step with the server, not every field.
-- **Per-process state:** sign-in limits and the AI call limit live in memory per api process and reset on restart; behind a proxy, all clients share its address. Metrics count per process.
-- **Status streams** share one snapshot per campaign (D59), but nothing limits how many are open. Without a running worker, a cancelled campaign's stream stays open until in-flight messages are reclaimed. A resend created in another tab after a stream ended shows on reload (D36).
-- **Recipient details** page by offset, so rows can move while a campaign sends (D47). Under back-to-back load they measured 55.4 ms p95 against a 50 ms target (`docs/performance.md`, Q6).
-- **A/B:** delivery data only; version B's over-limit estimate covers the whole audience, so it is an upper bound (D68).
+- **Not built:** the final UI/UX audit and the product roadmap planned for T21 (D50); AI-generated campaign titles (D43); archiving campaigns (D37). See the A/B and language scope above.
+- **Mock AI** understands only the documented briefs; free-form briefs need real Claude.
+- **`/docs`** loads Swagger UI from the jsDelivr CDN (pinned and integrity-checked), so it needs internet access; `/docs/openapi.json` works offline. A test keeps the spec's routes in step with the server, but not every field.
+- **Per-process state:** sign-in limits and the AI call limit are in memory per api process and reset on restart. Behind a proxy, all clients share its address. Metrics count per process.
+- **Status streams** share one snapshot per campaign (D59), but nothing limits how many are open.
+- **Recipient details** page by offset, so rows can move while a campaign sends (D47). With 10 marketers back to back, P5 measured 55.4 ms p95 against a 50 ms target; with a 1 s pause it measured 45 ms in T19, not re-measured since.
+- **A/B:** version B's over-limit estimate covers the whole audience, so it is an upper bound (D68).
 - **Frontend:** the Inter font isn't bundled; there is no frontend linter beyond the TypeScript check.
