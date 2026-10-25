@@ -190,7 +190,7 @@ docker run --rm -it -p 5173:5173 -v "$PWD/web":/web -v scc-web-node-modules:/web
 ## Project documentation
 
 - **[`DECISIONS.md`](DECISIONS.md):** 73 numbered decisions (`D1`…), split into requirements and business rules, and architecture and technical choices. Each records the decision, why, the rejected alternatives and the trade-offs. Changes over time are kept as dated history notes, and replaced decisions are marked *Superseded* with a pointer to the new one. Open questions and deferred items are listed at the end. README sections cite these IDs.
-- **[`ai-sessions/`](ai-sessions/):** exports of the Claude Code sessions, from requirement analysis through delivery, reviewed for keys and personal data before commit.
+- **[`ai-sessions/`](ai-sessions/):** exports of the Claude Code sessions, reviewed for keys and personal data before commit. The project was built in stages, with one export per stage: requirement analysis (01), architecture design (02), implementation planning (03), the foundation milestone (04), campaign development (05), live monitoring and the frontend (06), quality engineering (07), final development, QA and delivery (08), and final cleanup, the API reference and documentation (09). Separate exports make each stage easier to follow and audit. They keep the AI-assisted process, not just the final code: the questions asked, the decisions and the alternatives weighed, reviews, test failures and fixes, and the iterations in between.
 - **[`docs/plans/`](docs/plans/):** implementation plans per milestone. **[`design/`](design/smart-campaign-composer-reference.html):** the reference UI design (open in a browser).
 
 ## Security
