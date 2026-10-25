@@ -33,9 +33,11 @@ func (f *fixture) later() int64 {
 	return id
 }
 
+// allSent counts in one query: two would race the audience build, seeing no
+// unsent messages before it and some messages after it.
 func (f *fixture) allSent(id int64) func() bool {
 	return func() bool {
-		return f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1 AND status <> 'sent'`, id) == 0 && f.count(`SELECT count(*) FROM messages WHERE campaign_id = $1`, id) > 0
+		return f.count(`SELECT (count(*) > 0 AND count(*) FILTER (WHERE status <> 'sent') = 0)::int FROM messages WHERE campaign_id = $1`, id) == 1
 	}
 }
 
