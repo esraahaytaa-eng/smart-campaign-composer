@@ -78,12 +78,12 @@ func (h *Handler) generateContent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "turn on the A/B test to write version B")
 			return
 		}
-		a, err := h.loadContent(r.Context(), id, "a")
+		a, err := loadContent(r.Context(), h.Pool, id, "a")
 		if err != nil {
 			serverError(w, "load content", err)
 			return
 		}
-		b, err := h.loadContent(r.Context(), id, "b")
+		b, err := loadContent(r.Context(), h.Pool, id, "b")
 		if err != nil {
 			serverError(w, "load content", err)
 			return
@@ -445,8 +445,8 @@ func (h *Handler) saveContent(ctx context.Context, id int64, version int, s cont
 // loadContent reads one version ("a" or "b", D68) of a campaign's saved
 // content per language, including channels that aren't chosen; nil if there
 // is none.
-func (h *Handler) loadContent(ctx context.Context, id int64, variant string) (content.Variants, error) {
-	rows, err := h.Pool.Query(ctx, `SELECT language, channel, coalesce(subject, ''), body FROM campaign_content
+func loadContent(ctx context.Context, db querier, id int64, variant string) (content.Variants, error) {
+	rows, err := db.Query(ctx, `SELECT language, channel, coalesce(subject, ''), body FROM campaign_content
 		WHERE campaign_id = $1 AND variant = $2`, id, variant)
 	if err != nil {
 		return nil, err

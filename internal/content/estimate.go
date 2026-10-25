@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 )
 
 // Audience selects one channel's recipients: a WHERE clause over users "u"
@@ -29,7 +29,7 @@ type OverLimit struct {
 // language is checked against its own speakers; the default also against
 // everyone whose language has no content, as they are sent the default.
 // Only the chosen channels' text may be given.
-func EstimateOverLimit(ctx context.Context, pool *pgxpool.Pool, v Variants, def Lang, audiences map[string]Audience) (OverLimit, error) {
+func EstimateOverLimit(ctx context.Context, db Querier, v Variants, def Lang, audiences map[string]Audience) (OverLimit, error) {
 	out := OverLimit{ByLanguage: map[Lang]OverLimit{}}
 	others := []Lang{} // never nil: ANY(NULL) would match nobody
 	for l := range v {
@@ -49,14 +49,14 @@ func EstimateOverLimit(ctx context.Context, pool *pgxpool.Pool, v Variants, def 
 		}
 		var l OverLimit
 		if c.SMS != nil {
-			n, err := countOver(ctx, pool, audiences, speakers, "sms", []string{c.SMS.Body}, []int{SMSLimit})
+			n, err := countOver(ctx, db, audiences, speakers, "sms", []string{c.SMS.Body}, []int{SMSLimit})
 			if err != nil {
 				return out, err
 			}
 			l.SMS = n
 		}
 		if c.Email != nil {
-			n, err := countOver(ctx, pool, audiences, speakers, "email", []string{c.Email.Subject, c.Email.Body}, []int{SubjectLimit, EmailBodyLimit})
+			n, err := countOver(ctx, db, audiences, speakers, "email", []string{c.Email.Subject, c.Email.Body}, []int{SubjectLimit, EmailBodyLimit})
 			if err != nil {
 				return out, err
 			}
@@ -68,8 +68,13 @@ func EstimateOverLimit(ctx context.Context, pool *pgxpool.Pool, v Variants, def 
 	return out, nil
 }
 
+// Querier is a pool or a transaction.
+type Querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // countOver counts recipients for whom any template renders over its limit.
-func countOver(ctx context.Context, pool *pgxpool.Pool, audiences map[string]Audience, of func(Audience) Audience, channel string, templates []string, limits []int) (int, error) {
+func countOver(ctx context.Context, db Querier, audiences map[string]Audience, of func(Audience) Audience, channel string, templates []string, limits []int) (int, error) {
 	a, ok := audiences[channel]
 	if !ok {
 		return 0, fmt.Errorf("no audience given for %s content", channel)
@@ -85,7 +90,7 @@ func countOver(ctx context.Context, pool *pgxpool.Pool, audiences map[string]Aud
 		cond += fmt.Sprintf("char_length(%s) > %d", renderSQL(fmt.Sprintf("$%d::text", len(args))), limits[i])
 	}
 	var n int
-	err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE `+cond+`) FROM users u WHERE `+a.Where, args...).Scan(&n)
+	err := db.QueryRow(ctx, `SELECT count(*) FILTER (WHERE `+cond+`) FROM users u WHERE `+a.Where, args...).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("estimate %s over-limit messages: %w", channel, err)
 	}
