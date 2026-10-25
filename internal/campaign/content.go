@@ -496,16 +496,3 @@ func (h *Handler) loadLanguages(ctx context.Context, id int64) (map[content.Lang
 	}
 	return out, rows.Err()
 }
-
-// defaultContent is the default language's content, sent to everyone until
-// recipients get their own language (T20 Task 4); nil if there is none.
-func defaultContent(c campaignJSON, v content.Variants) *content.Content {
-	if c.DefaultLanguage == nil {
-		return nil
-	}
-	if d, ok := v[*c.DefaultLanguage]; ok {
-		d = content.ForChannels(d, c.Channels)
-		return &d
-	}
-	return nil
-}

@@ -40,6 +40,8 @@ expect mail3 email-address crm.txt "Owner: mehmet.kaya${at}company.com"
 # other contact in them is still caught.
 expect mail4 email-address ai-sessions/08.txt "Reply to zeynep.kara${at}gmail.com"
 expect phone4 phone-number ai-sessions/08.txt "Call +90 533 $(echo 246) 80 13"
+# A generic key quoted in a session export is still caught.
+expect key4 generic-api-key ai-sessions/09.txt "export SERVICE_API_KEY=$(rand 40)"
 # A Go checksum on the same line must not hide a key next to it.
 expect key3 anthropic-api-key notes.txt "example.com/mod v1.0.0 h1:uiha35bPI8zGxUpS+qJ7Ux/2hD/2k5Qo3G5L2hUQFgQ= ANTHROPIC_API_KEY=$key"
 
@@ -59,6 +61,7 @@ cp "$ROOT/.env.example" "$WORK/allowed/repo/.env.example"
 mkdir -p "$WORK/allowed/repo/ai-sessions"
 printf '%s\n' "expect mail1 \"ayse.yilmaz${at}gmail.com\"" "cut by a line wrap: ay" "se.yilmaz${at}gmail.com" "7,mehmet.kaya${at}hotmail.com" \
 	"Call +90 532 $(echo 123) 45 67, telefon: 0532 $(echo 987) 65 43" "{\"phone\":\"+49151$(echo 12345678)\"}" \
+	"1 +// Shapes of the campaign API (the OpenAPI spec: internal/api$(echo doc)" \
 	>"$WORK/allowed/repo/ai-sessions/07.txt"
 
 fail=0

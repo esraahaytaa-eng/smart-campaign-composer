@@ -44,6 +44,17 @@ Then open:
 
 A marker row makes the seed run once: restarts never add, change or duplicate customers (D28). Dates are relative to the first start, so "carted in the last 30 days" shrinks as time passes; `docker compose down -v && docker compose up` reseeds for today and deletes all campaigns.
 
+## How it works
+
+What a marketer does, from brief to resend:
+
+1. **Brief and audience.** Write a brief and pick SMS, email or both. The AI turns it into audience rules; a brief it can't fully map is reported as unsupported, never guessed (D15). The audience step shows matching customers per channel, counting only those who allowed that channel, and the rules can be edited by hand.
+2. **Messages.** Pick the languages (suggested from the audience). The AI writes each language's SMS and email live, and it can be stopped; nothing is saved from a stopped run. Edit the text with `{{first_name}}`, `{{last_name}}` and `{{city}}`, preview it for sample customers, and approve each language. An estimate warns how many messages would be over the limit once names are filled in; it doesn't block approval (D3). An A/B test is optional (D68).
+3. **Review and approval.** Choose *Send now* or a time between 1 minute and 30 days ahead, confirm that the audience and messages were checked, then confirm again. Rules and content are then locked (D11).
+4. **Sending.** When sending starts, the audience is recalculated and one message is created per customer and channel (D4, D30). Right before every attempt the worker checks again that the campaign wasn't cancelled and that the customer still allows the channel; otherwise the message is *cancelled* or *skipped (no consent)*. It fills in the customer's values and skips a message still over the limit (*skipped: too long*). It never shortens or retries such a message. Up to 100 messages per second per channel go out (D19). Temporary provider errors are retried up to 5 attempts and then marked *failed*; other 4xx responses fail at once (D7). The message ID is the provider's idempotency key, so a retry is never sent twice (D5, D6).
+5. **Monitoring.** The campaign page updates live: sent, in progress (pending or retrying), not sent (failed, skipped, cancelled) and uncertain (an attempt without a clear answer). The live updates can be paused. The campaign can be cancelled while scheduled or sending: messages not yet sent become cancelled, and sent ones stay sent. Each group opens a list of recipients with every attempt and the reason for each skip or failure.
+6. **Resend.** Once a campaign has completed or been cancelled, recipients skipped as too long on one channel can get a resend: a new linked draft for that channel, with shorter text and its own approval (D31). It never reaches anyone already sent, anyone whose delivery is uncertain, or anyone who has since withdrawn consent. There is one resend per campaign and channel, unless it is cancelled or its draft is deleted.
+
 ## CASE requirements
 
 | Requirement | How it is met |

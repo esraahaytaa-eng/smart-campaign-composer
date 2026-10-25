@@ -68,6 +68,6 @@ path = '''(?:^|/)(?:\.env(?:rc)?(?:\.[A-Za-z0-9_\-]+)*|[^/]+\.env)$''' # .env, .
 # Matched against the finding itself, not its line, so a key next to a
 # checksum is still reported.
 [allowlist]
-description = "Go module checksums (go.sum lines quoted in docs and session exports, sometimes cut off)"
+description = "Go module checksums (go.sum lines quoted in docs and session exports, sometimes cut off), and a session export's line-wrapped code comment naming the OpenAPI spec's path"
 regexTarget = "match"
-regexes = ['''h1:[A-Za-z0-9+/]{8,}''']
+regexes = ['''h1:[A-Za-z0-9+/]{8,}''', '''^OpenAPI spec: internal/apidocs?$''']
