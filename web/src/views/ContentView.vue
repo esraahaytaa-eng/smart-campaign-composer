@@ -89,8 +89,11 @@ function withB() {
   if (abTest.value) for (const l of Object.keys(drafts.value)) draftsB.value[l] ??= fromContent(null)
 }
 
+let estimateSeq = 0 // only the latest estimate is shown: saves can finish close together
 async function refreshEstimate() {
-  estimate.value = await campaigns.estimate(id).catch(() => estimate.value)
+  const mine = ++estimateSeq
+  const e = await campaigns.estimate(id).catch(() => estimate.value)
+  if (mine === estimateSeq) estimate.value = e
 }
 
 async function load() {
@@ -208,13 +211,16 @@ function share(l: Lang): string {
 }
 const recommended = (l: Lang) => campaign.value?.recommendation?.languages.includes(l) ?? false
 
-function toggle(l: Lang, on: boolean) {
-  if (on) {
+// The boxes are bound one way: a change the page doesn't make is undone on the box itself.
+function toggle(l: Lang, box: HTMLInputElement) {
+  if (box.checked) {
     drafts.value[l] ??= fromContent(null)
     withB()
     active.value = l
-  } else if (saved.value?.[l]) removeConfirm.value = l
-  else remove(l)
+  } else if (saved.value?.[l]) {
+    box.checked = true // until the removal is confirmed
+    removeConfirm.value = l
+  } else remove(l)
 }
 
 function remove(l: Lang) {
@@ -242,16 +248,19 @@ function setLanguage(to: Lang) {
 
 // Turning the A/B test on or off saves edits first; version B's text is
 // kept while it is off (D68).
-async function setAB(on: boolean) {
-  if (!(await commit())) return
-  saveError.value = null
+async function setAB(box: HTMLInputElement) {
+  const on = box.checked
   try {
+    if (!(await commit())) return
+    saveError.value = null
     await saver.save((v) => campaigns.setAB(id, v, on))
     withB()
     showB.value = on && showB.value
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return
     if (saver.state.value !== 'conflict') saveError.value = err
+  } finally {
+    box.checked = abTest.value // also when the save failed or wasn't made
   }
 }
 
@@ -330,11 +339,18 @@ function askToWrite(langs: Lang[]) {
   else write(langs, false)
 }
 
+let starting = false // saving the other edits first; streaming is set after
 async function write(langs: Lang[], replace: boolean) {
+  if (starting || streaming.value) return // a double click starts one generation
   const b = editingB.value
   regenerateConfirm.value = null
   // Other languages' edits are saved first, so they survive the AI's save.
-  await commit(true)
+  starting = true
+  try {
+    await commit(true)
+  } finally {
+    starting = false
+  }
   aiProblem.value = null
   aiProblemCode.value = null
   saveError.value = null
@@ -484,7 +500,7 @@ const statusText = computed(() => {
                 type="checkbox"
                 :checked="!!drafts[l.code]"
                 :disabled="l.code === defaultLanguage"
-                @change="toggle(l.code, ($event.target as HTMLInputElement).checked)"
+                @change="toggle(l.code, $event.target as HTMLInputElement)"
               />
               <span>{{ l.name }}</span>
               <span v-if="share(l.code)" class="muted">{{ share(l.code) }}</span>
@@ -493,7 +509,7 @@ const statusText = computed(() => {
           </div>
           <template v-if="!campaign.parent_campaign_id">
             <label class="language-option ab-switch">
-              <input type="checkbox" :checked="abTest" @change="setAB(($event.target as HTMLInputElement).checked)" />
+              <input type="checkbox" :checked="abTest" @change="setAB($event.target as HTMLInputElement)" />
               <span>{{ t('ab.switch') }}</span>
             </label>
             <p class="muted">{{ t('ab.switchHint') }}</p>

@@ -28,7 +28,14 @@ export default () =>
     // turning the test on: approval waits for version B
     await page.goto(`${BASE}/campaigns/${id}/content`)
     await page.locator('#sms-body').waitFor()
-    await page.getByLabel('Compare two versions (A/B test)').check()
+    // a failed save leaves the switch off, as saved
+    const abSwitch = page.getByLabel('Compare two versions (A/B test)')
+    await page.route(`**/api/campaigns/${id}/ab`, (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"internal error"}' }))
+    await abSwitch.click()
+    await page.getByRole('alert').first().waitFor()
+    await page.unroute(`**/api/campaigns/${id}/ab`)
+    check(!(await abSwitch.isChecked()) && (await t.get(id)).ab_test === false, 'a failed save turns the switch back off, as saved')
+    await abSwitch.check()
     await tab.getByText('Version B missing').waitFor()
     check((await t.get(id)).ab_test === true, 'the A/B test is on')
     const blocked = await page.request.post(`${BASE}/api/campaigns/${id}/approve`, { data: { version: (await t.get(id)).version, send: 'now' } })

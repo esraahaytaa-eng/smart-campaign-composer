@@ -1,6 +1,6 @@
 // Autosave and races on the audience step (T16 review): quick edits, campaign
 // switching, failures and changes made elsewhere never save wrong data.
-import { BASE, CART_BRIEF, suite, putContent } from './lib.mjs'
+import { ANKARA_BRIEF, BASE, CART_BRIEF, LONG_SMS, suite, putContent } from './lib.mjs'
 
 const keys = (c) => (c.rules ?? []).map((r) => `${r.field} ${r.op}`).sort()
 const slow = (ms, fail = false) => async (route) => {
@@ -101,5 +101,41 @@ export default () =>
       await btn.click({ force: true })
       await page.waitForTimeout(400)
       check((await t.get(id)).version === 2, 'clicking it saves nothing')
+    }
+
+    // content step: one estimate request per save, and an older estimate
+    // answering last doesn't replace the newer one
+    {
+      const id = await t.draft(ANKARA_BRIEF, ['sms'])
+      await putContent(page, id, 1, { sms: { body: 'Merhaba {{first_name}}!' } })
+      const estimates = []
+      page.on('request', (r) => r.url().endsWith(`/api/campaigns/${id}/estimate`) && estimates.push(r))
+      await page.goto(`${BASE}/campaigns/${id}/content`)
+      await page.locator('#sms-body').waitFor()
+      const loaded = estimates.length
+      let first = true
+      await page.route(`**/api/campaigns/${id}/estimate`, async (route) => {
+        const delay = first ? 3000 : 0 // the first save's estimate, taken at once, answers last
+        first = false
+        const response = await route.fetch()
+        await new Promise((r) => setTimeout(r, delay))
+        await route.fulfill({ response })
+      })
+      const skipped = page.getByText(/SMS would be skipped/)
+      await page.locator('#sms-body').fill(LONG_SMS)
+      await page.locator('#sms-body').blur()
+      await page.getByText('All changes saved').waitFor()
+      await page.locator('#sms-body').fill('Merhaba {{first_name}}, kısa!')
+      await page.locator('#sms-body').blur()
+      await page.waitForTimeout(4500) // both estimates have answered, the older one last
+      await page.unroute(`**/api/campaigns/${id}/estimate`)
+      check((await t.get(id)).content.tr.sms.body === 'Merhaba {{first_name}}, kısa!', 'test setup: the short text is saved')
+      check(estimates.length - loaded === 2, `one estimate request per save (${estimates.length - loaded} for 2 saves)`)
+      check((await skipped.count()) === 0, 'the older estimate answering last is ignored: no skipped SMS shown for the short text')
+      await page.reload()
+      await page.locator('#sms-body').fill(LONG_SMS)
+      await page.locator('#sms-body').blur()
+      await skipped.waitFor({ timeout: 10000 }).catch(() => {})
+      check(await skipped.isVisible(), 'test setup: the long text does show skipped SMS')
     }
   })

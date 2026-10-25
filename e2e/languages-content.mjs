@@ -62,6 +62,11 @@ export default () =>
     check(c.content.tr.sms.body === handTr && c.languages.tr.approved_at !== null, 'Turkish keeps its hand edit and its approval')
     check(!!c.content.en?.sms?.body && c.languages.en.approved_at === null, 'English is written and needs review')
     check((await page.locator('#sms-body').inputValue()) === c.content.en.sms.body, 'the English tab shows its text')
+
+    // unticking a written language asks first; Cancel keeps it, ticked
+    await english.click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click()
+    check((await english.isChecked()) && (await tab('English').count()) === 1, 'cancelling the removal keeps English, still ticked')
     await page.getByRole('button', { name: 'Approve English' }).click()
     await tab('English').getByText('Approved').waitFor()
 

@@ -22,6 +22,29 @@ export default () =>
     await page.waitForTimeout(1500) // a second request would have been sent by now
     check(creates.length === 1, `a double click on Interpret sends one create request (${creates.length})`)
 
+    // a double click on Write with AI while the other edits save starts one generation
+    {
+      const w = await t.draft(CART_BRIEF)
+      await putContent(page, w, 1, { sms: { body: 'Merhaba {{first_name}}!' }, email: { subject: 'İndirim', body: 'Merhaba {{first_name}}.' } })
+      const writes = []
+      page.on('request', (r) => r.method() === 'POST' && r.url().endsWith(`/api/campaigns/${w}/content`) && writes.push(r))
+      await page.goto(`${BASE}/campaigns/${w}/content`)
+      await page.locator('#sms-body').waitFor()
+      await page.getByRole('checkbox', { name: /English/ }).check()
+      // A slow save of the Turkish edit, still on its way at the second click.
+      await page.route(`**/api/campaigns/${w}/content`, async (r) => {
+        if (r.request().method() === 'PUT') await new Promise((ok) => setTimeout(ok, 1500))
+        await r.continue()
+      })
+      await page.locator('.tabs').getByRole('button', { name: /^Türkçe/ }).click()
+      await page.locator('#sms-body').fill('Merhaba {{first_name}}, edited before writing English')
+      await page.getByRole('button', { name: 'Write with AI' }).dblclick()
+      await page.locator('.ai-bar').getByText('The AI wrote the messages').waitFor({ timeout: 30000 })
+      await page.waitForTimeout(1500) // a second generation would have started by now
+      await page.unroute(`**/api/campaigns/${w}/content`)
+      check(writes.length === 1, `a double click on Write with AI starts one generation (${writes.length})`)
+    }
+
     // signing out right after typing keeps the text
     const id = await t.draft(ANKARA_BRIEF, ['sms'])
     await putContent(page, id, 1, { sms: { body: 'Merhaba {{first_name}}!' } })
