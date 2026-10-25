@@ -370,9 +370,9 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Status:** Accepted · 2026-10-21
 - **Decision:** No separate broker. Workers claim batches with `FOR UPDATE SKIP LOCKED`: messages that are `pending` or `retry_scheduled` and due, or `sending` with an expired lease. Result updates only apply while the worker still holds the lease, so a stale worker cannot overwrite a newer result.
 - **Why:** The lease, attempt count and next-attempt time (D5, D7) already live in this table. No dual write between a database and a broker, no outbox, no extra service. At most 200 messages/s is light load for Postgres.
-- **Rejected:** *Redis + asynq:* extra service and dual writes. *RabbitMQ or NATS JetStream:* extra service, dual writes, awkward delayed retries. *River:* its job table duplicates our message state machine.
+- **Rejected:** *Redis + asynq:* extra service and dual writes. *RabbitMQ or NATS JetStream:* extra service, dual writes, awkward delayed retries. *River:* its job table duplicates our message state machine. *Kafka:* an extra cluster and dual writes; a log with no per-message delayed retry or lease, so retries would still need this table.
 - **Trade-offs:** The worker polls when idle. A reviewer may expect a broker, so the reason is documented here.
-- **History:** 2026-10-24 (audit): a claim takes due messages only, in index order; expired leases are handed back by the worker's 1 s loop (D69).
+- **History:** 2026-10-24 (audit): a claim takes due messages only, in index order; expired leases are handed back by the worker's 1 s loop (D69). 2026-10-25: Kafka added to the rejected alternatives; the decision is unchanged.
 
 ### D19 — One worker with an in-process rate limiter per channel
 - **Status:** Accepted · 2026-10-21

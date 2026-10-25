@@ -2,7 +2,7 @@
 
 A marketer describes a campaign in plain Turkish or English. Claude turns the brief into audience rules and writes SMS and email messages. The Go backend validates every AI answer, the marketer reviews, edits and explicitly approves, and a queue sends to mock SMS and email providers while the dashboard shows delivery live. Frontend: Vue 3 + TypeScript. Backend: Go. Storage and queue: Postgres.
 
-**Status:** every mandatory requirement in [`CASE.md`](CASE.md) and all four optional features are built (scope and limits below). Manual QA: 77 of 78 cases passed; the one bug found is fixed. CI runs the tests, lint, a secret scan and the browser suite.
+**Status:** every mandatory requirement in [`CASE.md`](CASE.md) and all four optional features are built (scope and limits below). Manual QA: 77 of 78 cases passed in the initial run; the one failing case, a low-severity bug, was then fixed with regression tests (PR #15). CI runs the tests, lint, a secret scan and the browser suite.
 
 ## Setup
 
@@ -11,7 +11,7 @@ Requirements: Docker with Compose, and `make`. No local Go or Node toolchain is 
 **Option A: mock AI, no API key.** This is the default and needs no `.env`:
 
 ```sh
-docker compose up
+docker compose up --build
 ```
 
 **Option B: real Claude.** Copy the example settings, set the mode and key, then start (or restart) the stack:
@@ -19,7 +19,7 @@ docker compose up
 ```sh
 cp .env.example .env
 # in .env: LLM_MODE=real and ANTHROPIC_API_KEY=<your key>
-docker compose up
+docker compose up --build
 ```
 
 With `LLM_MODE=real` the api refuses to start without `ANTHROPIC_API_KEY`. `ANTHROPIC_MODEL` (default `claude-opus-5-5`), `LLM_TIMEOUT` (default `60s` per call) and `AI_CALLS_PER_HOUR` (default 10 per marketer, retries included, D63) control cost. [`.env.example`](.env.example) documents every setting the stack reads, including the mock provider's failure rates and the worker's retry limits.
@@ -32,7 +32,7 @@ Then open:
 | `http://localhost:8080/docs` | API reference: OpenAPI 3.1 in Swagger UI; the spec is at `/docs/openapi.json` |
 | `/healthz`, `/readyz`, `/metrics` | Liveness, database readiness, Prometheus metrics |
 
-**The database sets itself up.** `docker compose up` runs the one-shot `migrate` service before the api and worker start. It applies the migrations, then seeds the demo login and 3,000 fictional customers in one transaction, so no manual seed command is needed. The seed is generated from a fixed random seed (`20261021`), so every fresh start produces the same data:
+**The database sets itself up.** `docker compose up --build` runs the one-shot `migrate` service before the api and worker start. It applies the migrations, then seeds the demo login and 3,000 fictional customers in one transaction, so no manual seed command is needed. The seed is generated from a fixed random seed (`20261021`), so every fresh start produces the same data:
 
 | Seeded | Count |
 |---|---|
@@ -112,6 +112,28 @@ Briefs that are **refused by design** (tested with the mock; real Claude follows
 - **Unsupported handling:** the prompt and the mock both answer `unsupported` with a reason when any part of the audience can't be expressed. The brief is treated as data inside `<brief>` tags, never as instructions. Nothing is saved, and the marketer can rephrase.
 - **Mock LLM:** tests and the default mode use a deterministic mock, with the same interface and validation path as Claude. The Claude client is tested against a fake local API server.
 
+## API reference and error handling
+
+The full reference is at [`/docs`](http://localhost:8080/docs) (Swagger UI) and [`/docs/openapi.json`](http://localhost:8080/docs/openapi.json) (OpenAPI 3.1). Every `/api` route except `POST /api/login` needs the session cookie set by login. Successful calls answer `200`, `201` (campaign or resend created) or `204` (draft deleted, logged out). Errors are JSON: `{"error": "..."}`, with `code`, `field_errors`, `unsupported` or `retry_after_seconds` where noted.
+
+| HTTP | `code` | Meaning | Expected behavior |
+|---|---|---|---|
+| 400 | — | The body isn't one JSON object of the documented shape: unknown fields, trailing data, or over 64 KiB (4 KiB for login). At login: email or password missing | Fix the request |
+| 401 | — | No valid session (`login required`); at login, a wrong email or password (one answer for both) | Sign in again |
+| 403 | — | A POST, PUT or DELETE whose `Origin` is another site | Call from the app's own origin |
+| 404 | — | The campaign doesn't exist (or the id isn't a positive integer); the campaign has no text in that language | Reload the list |
+| 409 | — | The draft changed since it was loaded (stale `version`); the status doesn't allow it (only drafts are edited, deleted or approved; only approved or sending campaigns are cancelled); the text exists and `replace` wasn't set; resend conflicts | Reload, or confirm the replacement |
+| 422 | — | Invalid values: rules (`field_errors` with the rule's index), content (`field_errors` with the field, e.g. `en.sms.body`), channels, time zone, send time, query parameters, missing `version`, missing text or approvals, an empty audience | Correct the input |
+| 422 | — | The AI can't express the brief with the rule catalog: `"unsupported": true` and the AI's reason. Nothing is saved | Rephrase the brief or build the rules by hand |
+| 429 | — | Too many failed sign-ins: 5 per 15 minutes per email and per client address; `Retry-After` header | Wait, then retry |
+| 429 | `ai_call_limit` | Real AI only: the marketer's `AI_CALLS_PER_HOUR` limit is reached; `Retry-After` and `retry_after_seconds` | Wait; editing by hand still works |
+| 500 | — | Unexpected failure: `internal error`, details logged only | Retry later |
+| 502 | `ai_invalid` | Creating a draft or re-interpreting a brief: the AI's answer failed validation twice. Nothing is saved | Rephrase, or build the rules by hand |
+| 502 | `ai_unavailable` | Creating a draft or re-interpreting a brief: the AI call failed (for example a rejected key or an outage) | Retry later, or build the rules by hand |
+| 504 | — | Creating a draft or re-interpreting a brief: the AI didn't answer within `LLM_TIMEOUT` | Retry |
+
+Message generation (`POST /api/campaigns/{id}/content`) answers the checks above (400, 404, 409, 422, 429) before streaming. After that, failures arrive as an `error` event: `{"message", "code"?}`, with `ai_invalid` or `ai_unavailable` as above. A refusal, a timeout, the AI call limit reached during a retry, a draft changed meanwhile or an internal error carries a message without a code. Nothing is saved unless the answer is valid.
+
 ## Architecture
 
 One Go module (`cmd/scc`), one image, run as Compose services (D20): `postgres`, `migrate` (one-shot migrations and seed), `api` (also serves the built Vue app), `worker` and `mock-provider`.
@@ -128,6 +150,12 @@ One Go module (`cmd/scc`), one image, run as Compose services (D20): `postgres`,
 | `internal/db` | Embedded migrations and seed |
 | `internal/apidocs` | OpenAPI spec and Swagger UI page (D73) |
 | `internal/obs`, `internal/spa`, `internal/config` | Health and metrics, serving the frontend, settings |
+
+**Why PostgreSQL and no Redis, RabbitMQ or Kafka.** The `messages` table is the queue (D18). A message's status, lease, attempt count and next retry time live in one row, so state and queue can't disagree: no dual writes, no outbox, no extra service. At most 200 messages/s is light load for Postgres. Live status (D59) and rate limits (D69) stay in process for the same reason. They would become useful as the project grows:
+
+- **Redis:** several api replicas sharing sign-in and AI call limits, a cache, or pub/sub for live status.
+- **RabbitMQ or NATS:** several independent sending services, per-provider queues or priorities, push delivery instead of polling.
+- **Kafka:** a durable stream of delivery events (and later opens, clicks or orders) for analytics and A/B outcomes, or volumes far beyond one database's write rate.
 
 ## Testing
 
@@ -147,7 +175,7 @@ Reports in `docs/`:
 
 | Report | Contents |
 |---|---|
-| [Manual QA](docs/qa/2026-10-24-manual-qa/README.md) | 78 cases in a real browser, including 3 paid real-Claude calls; results, screenshots and the one bug (fixed) |
+| [Manual QA](docs/qa/2026-10-24-manual-qa/README.md) | 78 cases in a real browser, including 3 paid real-Claude calls: 77 passed initially, the one bug was fixed afterwards; results and screenshots |
 | [Architecture audit](docs/audit/2026-10-24-architecture-audit.md) | Independent audit of the delivery path and the code; the approved findings were fixed (D69) |
 | [Security review](docs/security-review.md) | Customer data, authorization, API security and dependencies, each with evidence |
 | [Performance](docs/performance.md) | Performance targets, method and measured results |
@@ -185,4 +213,23 @@ Details in [`docs/security-review.md`](docs/security-review.md). Contacts are ma
 ## Future technical improvements
 
 - Bundle the Inter font from the design; the app uses Inter when it is installed and the system font otherwise.
-- Add a frontend linter; today `make test` runs only the TypeScript type check and the i18n coverage scan.
+- Add a frontend linter (such as ESLint). Today the frontend is checked by the TypeScript type check (`vue-tsc`), the Vitest tests and the i18n coverage check, all run by `make test`.
+
+## Project completion summary
+
+| Scope | Item | Status |
+|---|---|---|
+| Mandatory | AI audience rules from a brief, backend validation, no AI-written SQL, matching counts | Done |
+| Mandatory | SMS and email generation, streaming, 160 / 80 character limits, variables, preview and edit | Done |
+| Mandatory | Review, edit and explicit approval before sending | Done |
+| Mandatory | Asynchronous queue, ≤ 100 messages/s per channel, no duplicates, retries | Done |
+| Mandatory | Separate SMS and email permissions, checked again before every send | Done |
+| Mandatory | Mock SMS and email providers: success, delays, temporary errors, 429 | Done |
+| Mandatory | Live delivery status, metrics and health endpoints | Done |
+| Mandatory | Structured AI JSON, validation, safe handling of invalid output, mock LLM for tests | Done |
+| Mandatory | 3,000 fictional users seeded automatically, no duplicates on restart | Done |
+| Mandatory | Vue.js frontend, Go backend, `docker compose up`, `make test`, README, `DECISIONS.md`, `ai-sessions/` | Done |
+| Bonus | Scheduled sending | Done: send now, or 1 minute to 30 days ahead; can be cancelled before and during sending |
+| Bonus | Messages in the user's language | Done for Turkish and English; others need a migration, seed data and mock texts |
+| Bonus | A/B testing | Done as delivery-only: deterministic 50/50 split and delivery per version; no clicks, conversions, significance or winner |
+| Bonus | CI pipeline | Done: tests, lint and secret scan on every push and PR; browser suite on PRs, `main` and nightly |
