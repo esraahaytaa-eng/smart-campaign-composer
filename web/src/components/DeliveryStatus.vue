@@ -6,7 +6,6 @@ import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Catalog, Channel } from '../campaign/types'
 import { languageName, orderLanguages } from '../content/languages'
-import { api } from '../api'
 import { channelRows, deliveryPhase, deliverySummary, firstNonEmpty, resendOffer, type Group, type Snapshot } from '../delivery/status'
 import { writeQuery } from '../delivery/recipients'
 import { watchStatus } from '../delivery/stream'
@@ -53,8 +52,9 @@ function connect() {
     onClosed: () => {
       reconnecting.value = false
       closed.value = true
-      // EventSource hides the status: a session check sends an expired session to sign-in.
-      api('/api/me').catch(() => {})
+      // EventSource hides the status: a request sends an expired session to sign-in
+      // (not /api/me, whose 401 api() leaves to the login guard).
+      campaigns.get(props.campaign.id).catch(() => {})
     },
   })
 }

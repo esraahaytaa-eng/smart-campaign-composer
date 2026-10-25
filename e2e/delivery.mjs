@@ -59,4 +59,20 @@ export default () =>
     check(streams.length === opened, 'the stream is not reopened after the end (D36)')
 
     // The results in Turkish are checked in live.mjs.
+
+    // a status stream refused because the session expired leads to sign-in
+    {
+      const later = await t.draft(ANKARA_BRIEF, ['sms'])
+      check((await approve(later, { at: at.toISOString() })).ok(), 'test setup: another one scheduled')
+      await page.route(`**/api/campaigns/${later}/events`, (r) => r.fulfill({ status: 401, body: '{"error":"sign in"}' }))
+      await page.goto(`${BASE}/campaigns/${later}`)
+      await page.getByText('Live updates stopped', { exact: false }).waitFor()
+      const cookies = await t.context.cookies()
+      await t.context.clearCookies() // the session expires
+      await page.getByRole('button', { name: 'Try again' }).click()
+      await page.waitForURL(/\/login/, { timeout: 10000 }).catch(() => {})
+      check(page.url().includes('/login'), 'a refused status stream with an expired session leads to sign-in')
+      await page.unroute(`**/api/campaigns/${later}/events`)
+      await t.context.addCookies(cookies)
+    }
   })
