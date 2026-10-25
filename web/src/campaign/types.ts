@@ -1,4 +1,4 @@
-// Shapes of the campaign API (README, "Campaign draft API").
+// Shapes of the campaign API (the OpenAPI spec: internal/apidocs/openapi.json, served at /docs).
 
 export type Channel = 'sms' | 'email'
 export type Status = 'draft' | 'approved' | 'sending' | 'completed' | 'cancelled'

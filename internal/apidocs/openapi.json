@@ -1,0 +1,2422 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Smart Campaign Composer API",
+    "version": "1.0.0",
+    "description": "The JSON API behind the web app: sign in, turn a brief into audience rules, write and review messages per language, approve, then follow delivery live.\n\n**Authentication.** `POST /api/login` sets the `scc_session` cookie (HttpOnly, SameSite=Lax, 12 hours from sign-in, no renewal). Every other `/api/` route needs it and answers `401` without it. In this page, sign in with *Try it out* on `/api/login`; the browser then sends the cookie with the other calls.\n\n**Writes from browsers** (POST, PUT, DELETE) must come from this site's own pages: a request with another site's `Origin` header gets `403`.\n\n**Errors** are JSON `{\"error\": \"...\"}`, sometimes with a machine-readable `code` (`ai_invalid`, `ai_unavailable`, `ai_call_limit`), `field_errors`, or `unsupported: true`.\n\n**Drafts use optimistic locking:** every edit sends the `version` it loaded and gets `409` if the campaign changed since; a successful edit returns the campaign with its new version."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "sessionCookie": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Session",
+      "description": "Sign in and out"
+    },
+    {
+      "name": "Campaigns",
+      "description": "Create, list and edit drafts"
+    },
+    {
+      "name": "Content",
+      "description": "Messages per language, review and approval"
+    },
+    {
+      "name": "Delivery",
+      "description": "Approve, cancel, resend and follow sending"
+    }
+  ],
+  "paths": {
+    "/api/login": {
+      "post": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Sign in",
+        "description": "Checks the email and password and sets the `scc_session` cookie. After 5 failed attempts in 15 minutes, per email and per client address, it answers `429` until the window passes.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in; the session cookie is set.",
+            "headers": {
+              "Set-Cookie": {
+                "description": "`scc_session=...; Path=/; Max-Age=43200; HttpOnly; SameSite=Lax`",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Marketer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Wrong email or password (the same answer for both).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "429": {
+            "description": "Too many failed sign-ins.",
+            "headers": {
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/logout": {
+      "post": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "Sign out",
+        "description": "Ends the session and clears the cookie.",
+        "responses": {
+          "204": {
+            "description": "Signed out."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": [
+          "Session"
+        ],
+        "summary": "The signed-in marketer",
+        "responses": {
+          "200": {
+            "description": "The marketer and the AI mode.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/catalog": {
+      "get": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "The audience rule language",
+        "description": "Rule fields with their operators and value types, the cities and categories rules may name, the validation limits and the supported languages.",
+        "responses": {
+          "200": {
+            "description": "The catalog.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Catalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "The six most relevant campaigns and the count per status",
+        "description": "Sending first, then drafts, approved (by send time), then the rest by last change.",
+        "responses": {
+          "200": {
+            "description": "Campaigns and counts; `total` is the number of all campaigns.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns": {
+      "get": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "List campaigns",
+        "description": "Newest first, 25 per page.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "draft",
+                "approved",
+                "sending",
+                "completed",
+                "cancelled"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search in the brief; case and Turkish letters are folded (\"isil\" finds \"Işıl\").",
+            "schema": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of campaigns and the count per status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Create a draft",
+        "description": "Without `rules`, the AI turns the brief into audience rules and may propose a send time. With `rules`, the AI is skipped. A brief the AI cannot map to the catalog answers `422` with `unsupported: true`; the AI never guesses an audience.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "request",
+                  "channels",
+                  "time_zone"
+                ],
+                "properties": {
+                  "request": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "The brief in plain language.",
+                    "example": "Customers in Istanbul who added to cart in the last 7 days but didn't order"
+                  },
+                  "channels": {
+                    "$ref": "#/components/schemas/Channels"
+                  },
+                  "time_zone": {
+                    "type": "string",
+                    "description": "IANA name; the campaign's dates are in this zone.",
+                    "example": "Europe/Istanbul"
+                  },
+                  "rules": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Rule"
+                    },
+                    "description": "Optional rules built by hand; the AI is not called."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/AICallLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "502": {
+            "$ref": "#/components/responses/AIFailed"
+          },
+          "504": {
+            "$ref": "#/components/responses/AITimeout"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "One campaign",
+        "description": "Drafts also carry the current audience counts, the language recommendation and who would get which language.",
+        "responses": {
+          "200": {
+            "description": "The campaign.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Delete a draft",
+        "description": "Drafts only; approved and later campaigns can only be cancelled.",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Version"
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/rules": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "put": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Replace a draft's audience rules",
+        "description": "Not for resends, whose audience is fixed.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "rules"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "rules": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "$ref": "#/components/schemas/Rule"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/channels": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "put": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Change a draft's channels",
+        "description": "A removed channel's text is kept and comes back with the channel, then needs review again. Not for resends.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "channels"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "channels": {
+                    "$ref": "#/components/schemas/Channels"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/ab": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "put": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Turn a draft's A/B test on or off",
+        "description": "Version B's text is kept while the test is off. Not for resends.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "enabled"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/request": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "put": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Replace a draft's brief and interpret it again",
+        "description": "The AI replaces the rules and proposed send time; the text is kept but every language needs review again. Not for resends.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "request"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "request": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/AICallLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          },
+          "502": {
+            "$ref": "#/components/responses/AIFailed"
+          },
+          "504": {
+            "$ref": "#/components/responses/AITimeout"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/schedule": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "put": {
+        "tags": [
+          "Campaigns"
+        ],
+        "summary": "Set or clear a draft's proposed send time",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "send_at": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time",
+                    "description": "RFC 3339 with an offset, between now and 30 days ahead; null clears it."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/content": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Write messages with the AI (streamed)",
+        "description": "Answers with server-sent events once the checks pass:\n\n- `delta` `{\"field\": \"en.sms.body\", \"text\": \"...\"}` while the model writes\n- `retry` `{\"errors\": [\"...\"]}` when the first answer is invalid and the AI tries once more\n- `done` `{\"content\": Variants, \"version\": n}` after the valid text is saved\n- `error` `{\"message\": \"...\", \"code\"?: \"ai_invalid\" | \"ai_unavailable\"}`\n\nOnly a valid answer is saved, and only while the client is still connected. Languages that already have text are rewritten only with `replace: true`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "languages"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "languages": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "#/components/schemas/Language"
+                    }
+                  },
+                  "default_language": {
+                    "$ref": "#/components/schemas/Language"
+                  },
+                  "replace": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Rewrite languages that already have text."
+                  },
+                  "variant": {
+                    "type": "string",
+                    "enum": [
+                      "a",
+                      "b"
+                    ],
+                    "default": "a",
+                    "description": "`b` writes an A/B test's version B; version A must exist in those languages."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The event stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: delta\ndata: {\"field\":\"en.sms.body\",\"text\":\"Hi {{first_name}}\"}\n\nevent: done\ndata: {\"content\":{\"en\":{\"sms\":{\"body\":\"Hi {{first_name}}, ...\"}}},\"version\":4}\n\n"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The campaign changed, is no longer a draft, or the text exists and `replace` is false.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/AICallLimit"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Save messages edited by hand",
+        "description": "Sends every language the campaign keeps; languages left out are removed. A language whose text changed needs review again. Without `content_b`, version B is unchanged.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "default_language",
+                  "content"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "default_language": {
+                    "$ref": "#/components/schemas/Language"
+                  },
+                  "content": {
+                    "$ref": "#/components/schemas/Variants"
+                  },
+                  "content_b": {
+                    "$ref": "#/components/schemas/Variants"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/languages/{lang}/approve": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        },
+        {
+          "name": "lang",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Language"
+          }
+        }
+      ],
+      "post": {
+        "tags": [
+          "Content"
+        ],
+        "summary": "Approve one language's text as it is",
+        "description": "Records that the marketer reviewed it. The version is checked, not bumped. `404` if the campaign has no text in that language.",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Version"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/estimate": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "Current audience and character-limit estimate",
+        "description": "For drafts and approved campaigns; the numbers can change until sending starts.",
+        "responses": {
+          "200": {
+            "description": "The estimate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Estimate"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/approve": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "Approve a draft for sending",
+        "description": "Needs text for every chosen channel, every language approved, and a non-empty audience. Stores the estimate at approval. `send` is `\"now\"` or `{\"at\": RFC 3339}`, at least 1 minute and at most 30 days ahead.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "version",
+                  "send"
+                ],
+                "properties": {
+                  "version": {
+                    "type": "integer"
+                  },
+                  "send": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "const": "now"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "at"
+                        ],
+                        "properties": {
+                          "at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "Cancel an approved or sending campaign",
+        "description": "Messages still waiting are cancelled; attempts in progress finish. No request body.",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Campaign"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/resend": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "Create a resend draft for skipped recipients",
+        "description": "For a completed or cancelled campaign: a new draft on one channel, addressed to the recipients skipped for the character limit. One active resend per channel.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "channel"
+                ],
+                "properties": {
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "sms",
+                      "email"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The resend draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/CrossSite"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/events": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "Live delivery status (streamed)",
+        "description": "Server-sent events: a `status` event with a `StatusSnapshot` at once and after each change (polled every second), then `end` `{}` when the campaign is completed or cancelled and nothing is in flight. On a server shutdown or database error the stream just closes, so `EventSource` reconnects.",
+        "responses": {
+          "200": {
+            "description": "The event stream; each `status` event's data is a StatusSnapshot.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "event: status\ndata: {\"status\":\"sending\",...}\n\n"
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    },
+    "/api/campaigns/{id}/recipients": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CampaignID"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "Recipients in one delivery group",
+        "description": "50 per page. Contacts are masked; no city, message text or provider error text is returned.",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sent",
+                "uncertain",
+                "failed",
+                "skipped",
+                "cancelled",
+                "retrying",
+                "pending"
+              ]
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sms",
+                "email"
+              ]
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "description": "A catalog language, or `und` for text written before languages were recorded.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "variant",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "a",
+                "b"
+              ]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Name search.",
+            "schema": {
+              "type": "string",
+              "maxLength": 50
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of recipients and the counts per group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recipients"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/ServerError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "scc_session",
+        "description": "Set by `POST /api/login`."
+      }
+    },
+    "parameters": {
+      "CampaignID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Anything but a positive integer answers 404.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "headers": {
+      "RetryAfter": {
+        "description": "Seconds to wait.",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "requestBodies": {
+      "Version": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "version"
+              ],
+              "properties": {
+                "version": {
+                  "type": "integer",
+                  "description": "The version the client loaded."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Campaign": {
+        "description": "The campaign after the change.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Campaign"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "The body is not one JSON object of the documented shape (unknown fields are refused; at most 64 KiB, 4 KiB for login).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "login required"
+            }
+          }
+        }
+      },
+      "CrossSite": {
+        "description": "A write whose `Origin` is another site.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "cross-site request refused"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such campaign (or language).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "campaign not found"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The campaign changed since it was loaded, or is in a status that does not allow this.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "the campaign changed since you loaded it; reload and try again"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "The values are invalid; `field_errors` lists rule or content problems, `unsupported` marks a brief the AI could not map to the catalog.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "invalid audience rules",
+              "field_errors": [
+                {
+                  "rule": 0,
+                  "message": "unknown city"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "AICallLimit": {
+        "description": "Real AI only: at most `AI_CALLS_PER_HOUR` calls per marketer in any 60 minutes.",
+        "headers": {
+          "Retry-After": {
+            "$ref": "#/components/headers/RetryAfter"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "AI call limit reached: ...",
+              "code": "ai_call_limit",
+              "retry_after_seconds": 1200
+            }
+          }
+        }
+      },
+      "AIFailed": {
+        "description": "The AI answered invalidly twice (`ai_invalid`) or could not be reached (`ai_unavailable`). Rules can still be built by hand.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "AITimeout": {
+        "description": "The AI did not answer within `LLM_TIMEOUT`.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "ServerError": {
+        "description": "Unexpected failure; details are logged, not returned.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "internal error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "A message for people."
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "ai_invalid",
+              "ai_unavailable",
+              "ai_call_limit"
+            ]
+          },
+          "unsupported": {
+            "type": "boolean",
+            "description": "The brief can't be expressed with the catalog."
+          },
+          "retry_after_seconds": {
+            "type": "integer"
+          },
+          "field_errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            }
+          }
+        }
+      },
+      "FieldError": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "description": "Rule problems carry `rule` (its index; -1 for the whole list), content problems carry `field` (\"en.sms.body\").",
+        "properties": {
+          "rule": {
+            "type": "integer"
+          },
+          "field": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Marketer": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Me": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Marketer"
+          },
+          {
+            "type": "object",
+            "required": [
+              "llm_mode"
+            ],
+            "properties": {
+              "llm_mode": {
+                "type": "string",
+                "enum": [
+                  "mock",
+                  "real"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Channels": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "enum": [
+            "sms",
+            "email"
+          ]
+        }
+      },
+      "Language": {
+        "type": "string",
+        "enum": [
+          "tr",
+          "en"
+        ],
+        "description": "A catalog language code."
+      },
+      "Rule": {
+        "type": "object",
+        "required": [
+          "field",
+          "op",
+          "value"
+        ],
+        "description": "One audience condition; a campaign's rules all must hold. `GET /api/catalog` lists each field's operators and value type.",
+        "properties": {
+          "field": {
+            "type": "string",
+            "enum": [
+              "cart_added",
+              "cart_value",
+              "carted_category",
+              "city",
+              "last_order",
+              "no_order",
+              "order_count",
+              "ordered_category",
+              "orders_in_window",
+              "signed_up",
+              "spend_in_window",
+              "total_spend"
+            ]
+          },
+          "op": {
+            "type": "string",
+            "enum": [
+              "in",
+              "within",
+              "before",
+              "after",
+              "gte",
+              "lte",
+              "gt",
+              "lt"
+            ]
+          },
+          "value": {
+            "description": "By value type: cities `[\"İstanbul\"]`; window `{\"last_days\": 7}`, `{\"last_months\": 3}` or `{\"from\": \"2026-01-01\", \"to\"?: \"...\"}`; count or amount a number; categories_window, amount_window and count_window are a window plus `categories`, `amount` or `count`."
+          }
+        },
+        "example": {
+          "field": "cart_added",
+          "op": "within",
+          "value": {
+            "last_days": 7
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "description": "May use `{{first_name}}` and the other catalog variables.",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "Email only."
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      },
+      "Content": {
+        "type": "object",
+        "properties": {
+          "sms": {
+            "$ref": "#/components/schemas/Message"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Message"
+          }
+        }
+      },
+      "Variants": {
+        "type": "object",
+        "description": "Content per language code.",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/Content"
+        },
+        "example": {
+          "en": {
+            "sms": {
+              "body": "Hi {{first_name}}, your cart is waiting."
+            }
+          }
+        }
+      },
+      "ChannelCounts": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "sms": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "integer"
+          }
+        }
+      },
+      "Counts": {
+        "type": "object",
+        "description": "Users matching the rules, in all and per channel they allowed.",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "sms": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "integer"
+          },
+          "by_language": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ChannelCounts"
+            }
+          }
+        }
+      },
+      "OverLimit": {
+        "type": "object",
+        "description": "Recipients whose rendered text would exceed the channel's character limit, and would be skipped.",
+        "properties": {
+          "sms": {
+            "type": "integer"
+          },
+          "email": {
+            "type": "integer"
+          },
+          "by_language": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OverLimit"
+            }
+          }
+        }
+      },
+      "Delivery": {
+        "type": "object",
+        "description": "channel → language → recipients getting it in their own language or as the default.",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "own": {
+                "type": "integer"
+              },
+              "fallback": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Recommendation": {
+        "type": "object",
+        "description": "Languages spoken by at least 5% of the audience; a suggestion only.",
+        "properties": {
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default": {
+            "type": "string"
+          }
+        }
+      },
+      "Campaign": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "request_text": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "sms",
+                "email"
+              ]
+            }
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "approved",
+              "sending",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "description": "Send it back with every edit."
+          },
+          "send_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "schedule_note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The AI's note on the time it proposed."
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "parent_campaign_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Set on a resend."
+          },
+          "parent_request_text": {
+            "type": "string",
+            "description": "In lists only: the original's brief."
+          },
+          "approval_estimate": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The audience and over-limit counts stored at approval."
+          },
+          "approved_by": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cancelled_by": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cancelled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "audience_built_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "default_language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content": {
+            "description": "Version A per language, including channels not chosen (kept, not sent). Single-campaign answers only.",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Variants"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "content_b": {
+            "$ref": "#/components/schemas/Variants"
+          },
+          "ab_test": {
+            "type": "boolean"
+          },
+          "languages": {
+            "type": "object",
+            "description": "Each language's review state.",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "approved_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "outdated": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "counts": {
+            "$ref": "#/components/schemas/Counts"
+          },
+          "recommendation": {
+            "$ref": "#/components/schemas/Recommendation"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/Delivery"
+          }
+        }
+      },
+      "CampaignList": {
+        "type": "object",
+        "properties": {
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Campaign"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "description": "Campaigns per status, and `all`.",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "Catalog": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "ops": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "value": {
+                  "type": "string",
+                  "enum": [
+                    "cities",
+                    "window",
+                    "categories_window",
+                    "count",
+                    "amount",
+                    "amount_window",
+                    "count_window"
+                  ]
+                }
+              }
+            }
+          },
+          "cities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_rules": {
+                "type": "integer"
+              },
+              "max_days": {
+                "type": "integer"
+              },
+              "max_months": {
+                "type": "integer"
+              },
+              "max_count": {
+                "type": "integer"
+              },
+              "max_amount": {
+                "type": "number"
+              },
+              "min_date": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Estimate": {
+        "type": "object",
+        "properties": {
+          "estimate": {
+            "type": "boolean",
+            "const": true
+          },
+          "audience": {
+            "$ref": "#/components/schemas/Counts"
+          },
+          "over_limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverLimit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "over_limit_b": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OverLimit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A/B tests with version B text only."
+          },
+          "calculated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/Delivery"
+          },
+          "recommendation": {
+            "$ref": "#/components/schemas/Recommendation"
+          }
+        }
+      },
+      "StatusSnapshot": {
+        "type": "object",
+        "description": "The data of each `status` event from `/events`.",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "send_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "audience_built_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approval_estimate": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "channels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "audience": {
+                  "type": "integer"
+                },
+                "counts": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "description": "By message status."
+                },
+                "groups": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "description": "By display group."
+                },
+                "reasons": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "retries": {
+                  "type": "integer"
+                },
+                "rate_limited": {
+                  "type": "integer"
+                },
+                "rate_limited_recent": {
+                  "type": "integer",
+                  "description": "429s from the provider in the last 5 minutes."
+                },
+                "skip_reasons": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                },
+                "by_variant": {
+                  "type": "object",
+                  "description": "A/B tests only."
+                },
+                "resendable": {
+                  "type": "integer"
+                },
+                "active_resend_id": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Recipients": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "groups": {
+            "type": "object",
+            "description": "channel → group → count.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            }
+          },
+          "reasons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "contact": {
+                  "type": "string",
+                  "description": "Masked phone or email."
+                },
+                "channel": {
+                  "type": "string",
+                  "enum": [
+                    "sms",
+                    "email"
+                  ]
+                },
+                "language": {
+                  "type": "string"
+                },
+                "variant": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "group": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "detail": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "properties": {
+                    "part": {
+                      "type": "string"
+                    },
+                    "length": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "next_attempt_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "attempts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "attempt_no": {
+                        "type": "integer"
+                      },
+                      "started_at": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "finished_at": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "format": "date-time"
+                      },
+                      "outcome": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "http_status": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"smart-campaign-composer/internal/apidocs"
 	"smart-campaign-composer/internal/auth"
 	"smart-campaign-composer/internal/campaign"
 	"smart-campaign-composer/internal/config"
@@ -96,6 +97,7 @@ func serveAPI(ctx context.Context, cfg config.Config, pool *pgxpool.Pool) error 
 	}
 	mux := http.NewServeMux()
 	obs.Routes(mux, pool)
+	apidocs.Routes(mux)
 	api := auth.Routes(mux, pool, cfg.LLMMode)
 	h := &campaign.Handler{Pool: pool, LLM: model, Timeout: cfg.LLMTimeout, Now: time.Now, Stopping: ctx.Done()}
 	if cfg.LLMMode == "real" { // mock AI costs nothing and stays unlimited (D63)

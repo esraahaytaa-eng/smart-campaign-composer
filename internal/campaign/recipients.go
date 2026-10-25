@@ -35,6 +35,14 @@ func fold(expr string) string { return strings.Replace(foldSQL, "%s", expr, 1) }
 // else "not recorded" for data with no language at all.
 const messageLangSQL = `coalesce(m.language, (SELECT default_language FROM campaigns WHERE id = m.campaign_id), 'und')`
 
+// groupStatuses are the statuses each display group (groupSQL) draws from,
+// as SQL literals. Filtering on them first lets a small group use the
+// (campaign_id, status) index instead of reading the whole campaign (P5).
+var groupStatuses = map[string]string{
+	"sent": `'sent'`, "uncertain": `'failed', 'skipped', 'cancelled'`, "failed": `'failed'`, "skipped": `'skipped'`,
+	"cancelled": `'cancelled'`, "retrying": `'retry_scheduled'`, "pending": `'pending', 'sending'`,
+}
+
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 type recipientsResponse struct {
@@ -172,9 +180,13 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 	// $1 campaign, $2 group, $3 channel ('' for both). The attempt lookups
 	// behind reasonSQL run only where a reason is needed: per message for the
 	// reason counts, and for the 50 rows of the page, never for the whole group.
-	where := ` WHERE m.campaign_id = $1 AND ` + groupSQL + ` = $2 AND ($3 = '' OR m.channel = $3)`
+	where := ` WHERE m.campaign_id = $1 AND m.status IN (` + groupStatuses[group] + `) AND ` + groupSQL + ` = $2 AND ($3 = '' OR m.channel = $3)`
 	if groupsWithReasons[group] {
-		rows, err = tx.Query(ctx, `SELECT `+reasonSQL+`, count(*) FROM messages m`+lastAttemptsSQL+where+` GROUP BY 1`, id, group, channel)
+		reasons := `SELECT ` + reasonSQL + `, count(*) FROM messages m` + lastAttemptsSQL + where + ` GROUP BY 1`
+		if group == "skipped" { // the reason is the stored skip reason: no attempt lookups (P5)
+			reasons = `SELECT m.skip_reason, count(*) FROM messages m` + where + ` GROUP BY 1`
+		}
+		rows, err = tx.Query(ctx, reasons, id, group, channel)
 		if err != nil {
 			return out, err
 		}
