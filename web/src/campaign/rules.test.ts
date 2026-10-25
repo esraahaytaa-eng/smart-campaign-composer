@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { setLocale } from '../i18n'
 import type { Catalog, Rule } from './types'
-import { addableRules, defaultForm, formProblems, fromForm, ruleErrors, ruleLabel, ruleTitle, toForm } from './rules'
+import { addableRules, defaultForm, formProblems, fromForm, ruleErrors, ruleLabel, ruleTitle, targetsEveryone, toForm } from './rules'
 
 const catalog: Catalog = {
   fields: [
+    { field: 'all_customers', ops: ['is'], value: 'all' },
     { field: 'cart_added', ops: ['within'], value: 'window' },
     { field: 'cart_value', ops: ['gte', 'gt'], value: 'amount' },
     { field: 'carted_category', ops: ['in'], value: 'categories_window' },
@@ -63,8 +64,19 @@ describe('ruleLabel', () => {
     [rule('signed_up', 'before', { last_months: 1 }), 'Signed up more than 1 month ago (counted from send time)'],
     [rule('signed_up', 'before', { from: '2026-10-01' }), 'Signed up before 1 Oct 2026'],
     [rule('last_order', 'before', { last_months: 6 }), 'Last order more than 6 months ago (counted from send time)'],
+    [rule('all_customers', 'is', true), 'All customers'],
   ])('%j reads "%s"', (r, label) => {
     expect(ruleLabel(r)).toBe(label)
+  })
+})
+
+// D14: everyone is an explicit, standalone rule.
+describe('targetsEveryone', () => {
+  it('is true only for the single All customers rule', () => {
+    expect(targetsEveryone([rule('all_customers', 'is', true)])).toBe(true)
+    expect(targetsEveryone([rule('city', 'in', ['Ankara'])])).toBe(false)
+    expect(targetsEveryone([])).toBe(false)
+    expect(targetsEveryone(null)).toBe(false)
   })
 })
 
@@ -89,6 +101,7 @@ describe('chip ↔ rule mapping', () => {
     rule('spend_in_window', 'gt', { amount: 10000, last_months: 12 }),
     rule('spend_in_window', 'lte', { amount: 99.5, from: '2026-01-01', to: '2026-06-30' }),
     rule('orders_in_window', 'gte', { count: 4, last_days: 90 }),
+    rule('all_customers', 'is', true),
   ])('round-trips %j', (r) => {
     expect(fromForm(toForm(r, catalog), catalog)).toEqual(r)
   })
@@ -146,7 +159,7 @@ describe('addableRules', () => {
     expect(offered).not.toContain('city in')
     expect(offered).not.toContain('order_count gte')
     expect(offered).toContain('order_count lte')
-    expect(offered).toHaveLength(27 - 2)
+    expect(offered).toHaveLength(28 - 2)
   })
 
   it('offers nothing at the rule limit', () => {
@@ -236,6 +249,7 @@ describe('Turkish chip labels', () => {
     [rule('signed_up', 'before', { last_days: 7 }), 'Üyeliği 7 günden daha eski (gönderim zamanına göre)'],
     [rule('signed_up', 'before', { from: '2026-10-01' }), '1 Eki 2026 tarihinden önce üye oldu'],
     [rule('last_order', 'before', { last_months: 6 }), 'Son siparişi 6 aydan daha eski (gönderim zamanına göre)'],
+    [rule('all_customers', 'is', true), 'Tüm müşteriler'],
   ])('%j reads "%s"', async (r, label) => {
     await setLocale('tr')
     expect(ruleLabel(r)).toBe(label)

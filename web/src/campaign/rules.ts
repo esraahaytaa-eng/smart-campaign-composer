@@ -52,6 +52,8 @@ export function ruleLabel(r: Rule): string {
       return t(compare, { amount: formatAmount(n), orders: t('rules.orders', { count: n }), window: total ? '' : window() })
     }
     switch (r.field) {
+      case 'all_customers':
+        return t('rule.allCustomers')
       case 'city':
         return t('rule.city', { list: formatOr(r.value as string[]) })
       case 'cart_added':
@@ -142,6 +144,8 @@ export function fromForm(form: RuleForm, catalog: Catalog): Rule {
         return { amount: form.amount, ...window() }
       case 'count_window':
         return { count: form.amount, ...window() }
+      case 'all':
+        return true
       default:
         return form.amount
     }
@@ -170,6 +174,7 @@ export function ruleErrors(errors: FieldError[]): { byRule: Map<number, string[]
 }
 
 const TITLES: Record<string, Key> = {
+  'all_customers.is': 'title.allCustomers',
   'city.in': 'title.city',
   'cart_added.within': 'title.cartAdded',
   'no_order.within': 'title.noOrder',
@@ -238,10 +243,16 @@ export function formProblems(form: RuleForm, catalog: Catalog): string[] {
 // A rule's identity: the backend allows each field and operator once (D14).
 export const ruleKey = (r: Rule) => `${r.field} ${r.op}`
 
+// targetsEveryone: the audience is the single All customers rule (D14).
+export const targetsEveryone = (rules: Rule[] | null | undefined) => rules?.length === 1 && rules[0]!.field === 'all_customers'
+
 // withRule replaces the rule with key (the one being edited) or appends a new
 // one. It is applied when a save runs, to the latest rules, so queued edits
-// never undo each other.
+// never undo each other. All customers stands alone (D14): choosing it
+// replaces the filters, and a filter replaces it.
 export function withRule(rules: Rule[], key: string | null, next: Rule): Rule[] {
+  if (next.field === 'all_customers') return [next]
+  rules = rules.filter((r) => r.field !== 'all_customers')
   const i = key === null ? -1 : rules.findIndex((r) => ruleKey(r) === key)
   return i < 0 ? [...rules, next] : rules.map((r, j) => (j === i ? next : r))
 }

@@ -135,6 +135,25 @@ func TestBuildAudience_EvaluatesAtSendTime(t *testing.T) {
 	}
 }
 
+// D14: an all_customers campaign gets one message per user who allowed the
+// channel, and nobody else.
+func TestBuildAudience_AllCustomersWithConsentOnly(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.exec(`UPDATE users SET sms_opt_in = false WHERE id = 1`)
+	id := f.approved(`[{"field":"all_customers","op":"is","value":true}]`, "{sms}", now)
+
+	f.build(now)
+
+	var messages, consenting, optedOut int
+	f.pool.QueryRow(context.Background(), `SELECT count(*) FROM messages WHERE campaign_id = $1`, id).Scan(&messages)
+	f.pool.QueryRow(context.Background(), `SELECT count(*) FROM users WHERE sms_opt_in`).Scan(&consenting)
+	f.pool.QueryRow(context.Background(), `SELECT count(*) FROM messages WHERE campaign_id = $1 AND user_id = 1`, id).Scan(&optedOut)
+	if messages == 0 || messages != consenting || optedOut != 0 {
+		t.Fatalf("want one message per consenting user (%d) and none for user 1, got %d (user 1: %d)", consenting, messages, optedOut)
+	}
+}
+
 func TestBuildAudience_CancelledIsNeverBuilt(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

@@ -1685,6 +1685,7 @@
           "field": {
             "type": "string",
             "enum": [
+              "all_customers",
               "cart_added",
               "cart_value",
               "carted_category",
@@ -1709,11 +1710,12 @@
               "gte",
               "lte",
               "gt",
-              "lt"
+              "lt",
+              "is"
             ]
           },
           "value": {
-            "description": "By value type: cities `[\"İstanbul\"]`; window `{\"last_days\": 7}`, `{\"last_months\": 3}` or `{\"from\": \"2026-01-01\", \"to\"?: \"...\"}`; count or amount a number; categories_window, amount_window and count_window are a window plus `categories`, `amount` or `count`."
+            "description": "By value type: all `true` (all_customers: every customer who allows the channel; it must be the only rule, and an empty rule list is invalid); cities `[\"İstanbul\"]`; window `{\"last_days\": 7}`, `{\"last_months\": 3}` or `{\"from\": \"2026-01-01\", \"to\"?: \"...\"}`; count or amount a number; categories_window, amount_window and count_window are a window plus `categories`, `amount` or `count`."
           }
         },
         "example": {
@@ -2082,7 +2084,8 @@
                     "count",
                     "amount",
                     "amount_window",
-                    "count_window"
+                    "count_window",
+                    "all"
                   ]
                 }
               }

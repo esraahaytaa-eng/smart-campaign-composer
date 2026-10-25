@@ -237,6 +237,29 @@ func TestCount_AbsoluteWindowFixed(t *testing.T) {
 	}
 }
 
+// all_customers is every customer who allowed the channel, never anyone else.
+func TestBuild_AllCustomersIsEveryConsentingUser(t *testing.T) {
+	pool := fixtureDB(t)
+	all := []audience.Rule{rule("all_customers", "is", `true`)}
+	for ch, col := range map[string]string{"sms": "sms_opt_in", "email": "email_opt_in"} {
+		rows, err := pool.Query(context.Background(), `SELECT first_name FROM users WHERE `+col+` ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{}
+		for rows.Next() {
+			var n string
+			rows.Scan(&n)
+			want = append(want, n)
+		}
+		rows.Close()
+		got := matching(t, pool, all, ch, now)
+		if len(got) == 0 || !slices.Equal(got, want) || slices.Contains(got, "noconsent") {
+			t.Errorf("%s: want every consenting user %v, got %v", ch, want, got)
+		}
+	}
+}
+
 func TestCount_ConsentPerChannel(t *testing.T) {
 	pool := fixtureDB(t)
 	ctx := context.Background()

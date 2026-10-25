@@ -133,10 +133,22 @@ const chipErrors = computed(() => {
 
 function editRule(index: number) {
   const r = campaign.value!.rules![index]!
+  if (r.field === 'all_customers') return // nothing to edit: its value is always true
   editor.value = { key: ruleKey(r), form: toForm(r, catalog.value!), errors: [], saving: false }
 }
+// All customers has no form: it replaces the filters, after a confirmation (D14).
+const allConfirm = ref(false)
 function addRule(field: string, op: string) {
+  if (field === 'all_customers') {
+    allConfirm.value = true
+    return
+  }
   editor.value = { key: null, form: defaultForm(field, op, catalog.value!), errors: [], saving: false }
+}
+async function useAllCustomers() {
+  allConfirm.value = false
+  const problems = await saveRules((rules) => withRule(rules, null, { field: 'all_customers', op: 'is', value: true }), null)
+  if (problems.length) rulesProblem.value = problems
 }
 
 // saveRules saves build(latest rules). The list is built when the save runs,
@@ -383,6 +395,16 @@ function reload() {
     >
       <p>{{ t('confirm.reinterpretBody') }}</p>
       <p v-if="campaign?.content">{{ t('confirm.reinterpretContent') }}</p>
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="allConfirm"
+      :title="t('confirm.allCustomersTitle')"
+      :confirm-label="t('confirm.allCustomersConfirm')"
+      @confirm="useAllCustomers"
+      @close="allConfirm = false"
+    >
+      <p>{{ t('confirm.allCustomersBody') }}</p>
     </ConfirmDialog>
 
     <ConfirmDialog

@@ -164,6 +164,12 @@ type cityIn struct{ cities []string }
 func (c cityIn) value() any            { return c.cities }
 func (c cityIn) sql(b *builder) string { return "u.city = ANY(" + b.arg(c.cities) + ")" }
 
+// allCustomers adds no condition; Build still adds the channel's consent.
+type allCustomers struct{}
+
+func (allCustomers) value() any          { return true }
+func (allCustomers) sql(*builder) string { return "TRUE" }
+
 type timeRule struct {
 	field, op string
 	w         window

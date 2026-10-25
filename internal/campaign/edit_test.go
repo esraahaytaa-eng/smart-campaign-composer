@@ -163,8 +163,8 @@ func TestCatalog(t *testing.T) {
 		Categories []string       `json:"categories"`
 		Limits     map[string]any `json:"limits"`
 	}](t, rec)
-	if len(got.Fields) != 12 || got.Fields[0].Field != "cart_added" || got.Fields[0].Value != "window" {
-		t.Fatalf("want the 12 fields sorted by name, got %+v", got.Fields)
+	if len(got.Fields) != 13 || got.Fields[0].Field != "all_customers" || got.Fields[0].Value != "all" || got.Fields[1].Field != "cart_added" {
+		t.Fatalf("want the 13 fields sorted by name, got %+v", got.Fields)
 	}
 	if strings.Join(got.Cities, ",") != "Ankara,İstanbul" || !slices.Contains(got.Categories, "books") {
 		t.Fatalf("want cities and categories from the database, got %v %v", got.Cities, got.Categories)

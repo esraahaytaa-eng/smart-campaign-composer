@@ -129,6 +129,9 @@ export const en = {
 
   'confirm.cancel': 'Cancel',
   'confirm.reinterpret': 'Re-interpret the brief?',
+  'confirm.allCustomersConfirm': 'Use all customers',
+  'confirm.allCustomersBody': 'This replaces the current audience rules with All customers: everyone who allows the channel.',
+  'confirm.allCustomersTitle': 'Send to all customers?',
   'confirm.reinterpretBody': 'The AI reads the brief again and replaces the audience rules and the proposed send time. Rules you edited by hand are lost.',
   'confirm.reinterpretContent': 'The messages are kept, but they were written for the earlier brief: review each language again before approval.',
   'confirm.reinterpretAction': 'Re-interpret',
@@ -154,10 +157,12 @@ export const en = {
   'rules.consentAlways': '(always applied)',
   'rules.consentHelp': 'Always applied. Customers without consent for a channel never receive it.',
   'rules.add': '+ Add rule',
+  'rules.allCustomersHint': 'Every customer who allows the channel. Add a rule to filter instead.',
   'rules.lastRule': 'A campaign needs at least one audience rule.',
   'rules.anotherRule': 'Another rule has a problem: {message}',
   'rules.orders': { one: '{count} order', other: '{count} orders' },
 
+  'rule.allCustomers': 'All customers',
   'rule.city': 'City is {list}',
   'rule.cartAdded': 'Added to cart {window}',
   'rule.noOrder': 'No order {window}',
@@ -194,6 +199,7 @@ export const en = {
   'window.since': 'since {date}',
   'window.range': 'from {from} to {to}',
 
+  'title.allCustomers': 'All customers',
   'title.city': 'City',
   'title.cartAdded': 'Added to cart',
   'title.noOrder': 'No order',
@@ -366,6 +372,7 @@ export const en = {
   'review.audience': 'Audience',
   'review.editRules': 'Edit rules',
   'review.estimateNow': 'Estimate · now',
+  'review.allCustomers': 'This campaign goes to all customers who allow each channel: {count} customers.',
   'review.customers': 'customers',
   'review.messageCount': '≈ {count} messages',
   'review.actual': 'Actual · when sending starts',

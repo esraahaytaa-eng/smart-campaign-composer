@@ -65,6 +65,10 @@ var MockExamples = []MockExample{
 		loyalRules},
 	{"Ankara'daki tüm kullanıcılara hafta sonu indirimi duyurusu gönder. Yarın saat 10:00'da gönder.",
 		`[{"field":"city","op":"in","value":["Ankara"]}]`},
+	{"Send a new year greeting to all customers.",
+		`[{"field":"all_customers","op":"is","value":true}]`},
+	{"Tüm müşterilere yeni yıl tebriği gönder.",
+		`[{"field":"all_customers","op":"is","value":true}]`},
 	{"2026-10-01 tarihinden beri sepetine ürün ekleyip satın almayan kullanıcılara hatırlatma gönder.",
 		`[{"field":"cart_added","op":"within","value":{"from":"2026-10-01"}},{"field":"no_order","op":"within","value":{"from":"2026-10-01"}}]`},
 }
@@ -110,6 +114,8 @@ var patterns = []pattern{
 	p(`sepetinde en az {amount} (?:tl|lira)(?:lık)? ürün olan (?:kullanıcılara|müşterilere) {offer} gönder`, amountRule("cart_value")),
 	p(`send (?:a |an )?{offer} to (?:users|customers) who signed up in the last {n} days`, signedUp),
 	p(`son {n} günde üye olan (?:kullanıcılara|müşterilere) {offer} gönder`, signedUp),
+	p(`send (?:a |an )?{offer} to (?:everyone|all (?:of )?(?:our )?(?:users|customers))`, allCustomers),
+	p(`(?:(?:tüm|bütün) (?:kullanıcılara|müşterilere)|herkese) {offer} gönder`, allCustomers),
 	p(`send (?:a |an )?{offer} to (?:all )?(?:users|customers) in {city}`, cityOnly),
 	p(`{city}{'}(?:daki|deki|taki|teki) (?:tüm )?(?:kullanıcılara|müşterilere) {offer} gönder`, cityOnly),
 	p(`send (?:a |an )?{offer} to (?:users|customers) who added (?:products|items) to their (?:cart|basket) since {date} but did not buy anything`, cartSince),
@@ -163,6 +169,11 @@ func orderedCategory(m map[string]string) (string, error) {
 
 func signedUp(m map[string]string) (string, error) {
 	return fmt.Sprintf(`[{"field":"signed_up","op":"within","value":{"last_days":%s}}]`, m["n"]), nil
+}
+
+// allCustomers is everyone, asked for explicitly; it stands alone (D14).
+func allCustomers(map[string]string) (string, error) {
+	return `[{"field":"all_customers","op":"is","value":true}]`, nil
 }
 
 func cityOnly(m map[string]string) (string, error) {

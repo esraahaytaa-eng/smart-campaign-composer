@@ -96,10 +96,31 @@ func TestMock_UnknownBrief_Unsupported(t *testing.T) {
 		"",
 		"Send a discount to users in Istanbul who are older than 30.",
 		"Send it tomorrow at 10:00.",
+		// No audience named: never all_customers (D14).
+		"Send a weekend sale announcement.",
+		"Hafta sonu indirimi duyurusu gönder.",
 	} {
 		out := runMock(t, brief)
 		if !out.Unsupported || out.Reason != MockUnsupportedReason || len(out.Rules) != 0 {
 			t.Errorf("%q: want unsupported with the mock reason and no rules, got %+v", brief, out)
+		}
+	}
+}
+
+// Everyone, said explicitly, is all_customers; "all users in a city" stays a city.
+func TestMock_AllCustomers(t *testing.T) {
+	all := `[{"field":"all_customers","op":"is","value":true}]`
+	for brief, want := range map[string]string{
+		"Send a holiday greeting to everyone.":                     all,
+		"Send a holiday greeting to all of our customers.":         all,
+		"Bütün kullanıcılara bayram tebriği gönder.":               all,
+		"Herkese bayram tebriği gönder.":                           all,
+		"Send a weekend sale announcement to all users in Ankara.": `[{"field":"city","op":"in","value":["Ankara"]}]`,
+	} {
+		out := runMock(t, brief)
+		rules, _ := json.Marshal(out.Rules)
+		if out.Unsupported || !sameJSON(t, string(rules), want) {
+			t.Errorf("%q: want %s, got %s (unsupported %v)", brief, want, rules, out.Unsupported)
 		}
 	}
 }

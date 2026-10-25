@@ -128,6 +128,9 @@ export const tr: Record<Key, Message> = {
 
   'confirm.cancel': 'Vazgeç',
   'confirm.reinterpret': 'Açıklama yeniden yorumlansın mı?',
+  'confirm.allCustomersConfirm': 'Tüm müşterileri kullan',
+  'confirm.allCustomersBody': 'Bu işlem mevcut hedef kitle kurallarını Tüm müşteriler ile değiştirir: kanala izin veren herkes.',
+  'confirm.allCustomersTitle': 'Tüm müşterilere gönderilsin mi?',
   'confirm.reinterpretBody': 'Yapay zekâ açıklamayı yeniden okur; hedef kitle kurallarını ve önerilen gönderim zamanını değiştirir. Elle düzenlediğiniz kurallar kaybolur.',
   'confirm.reinterpretContent': 'Mesajlar korunur ancak önceki açıklama için yazılmıştır: onaydan önce her dili yeniden gözden geçirin.',
   'confirm.reinterpretAction': 'Yeniden yorumla',
@@ -153,10 +156,12 @@ export const tr: Record<Key, Message> = {
   'rules.consentAlways': '(her zaman uygulanır)',
   'rules.consentHelp': 'Her zaman uygulanır. Bir kanal için izni olmayan müşteriler o kanaldan mesaj almaz.',
   'rules.add': '+ Kural ekle',
+  'rules.allCustomersHint': 'Kanala izin veren tüm müşteriler. Filtrelemek için bir kural ekleyin.',
   'rules.lastRule': 'Bir kampanyanın en az bir hedef kitle kuralı olmalı.',
   'rules.anotherRule': 'Başka bir kuralda sorun var: {message}',
   'rules.orders': { one: '{count} sipariş', other: '{count} sipariş' },
 
+  'rule.allCustomers': 'Tüm müşteriler',
   'rule.city': 'Şehir: {list}',
   'rule.cartAdded': '{window} sepete ürün ekledi',
   'rule.noOrder': '{window} sipariş vermedi',
@@ -193,6 +198,7 @@ export const tr: Record<Key, Message> = {
   'window.since': '{date} tarihinden beri',
   'window.range': '{from} ile {to} arasında',
 
+  'title.allCustomers': 'Tüm müşteriler',
   'title.city': 'Şehir',
   'title.cartAdded': 'Sepete ürün ekledi',
   'title.noOrder': 'Sipariş vermedi',
@@ -365,6 +371,7 @@ export const tr: Record<Key, Message> = {
   'review.audience': 'Hedef kitle',
   'review.editRules': 'Kuralları düzenle',
   'review.estimateNow': 'Tahmin · şimdi',
+  'review.allCustomers': 'Bu kampanya, her kanala izin veren tüm müşterilere gider: {count} müşteri.',
   'review.customers': 'müşteri',
   'review.messageCount': '≈ {count} mesaj',
   'review.actual': 'Gerçek · gönderim başladığında',

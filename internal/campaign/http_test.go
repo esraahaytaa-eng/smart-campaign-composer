@@ -359,6 +359,33 @@ func TestUpdateRules(t *testing.T) {
 	}
 }
 
+// D14: everyone is saved only as the single all_customers rule, counted with
+// consent applied; disguised match-all rules and mixes are refused.
+func TestUpdateRules_AllCustomers(t *testing.T) {
+	t.Parallel()
+	a := newApp(t, llm.NewMock())
+	d := a.newDraft()
+	path := "/api/campaigns/" + itoa(d.ID) + "/rules"
+
+	rec := a.do(http.MethodPut, path, `{"version":1,"rules":[{"field":"all_customers","op":"is","value":true}]}`)
+	got := decode[draft](t, rec)
+	sms, email := a.count(`SELECT count(*) FROM users WHERE sms_opt_in`), a.count(`SELECT count(*) FROM users WHERE email_opt_in`)
+	everyone := a.count(`SELECT count(*) FROM users WHERE sms_opt_in OR email_opt_in`)
+	if rec.Code != http.StatusOK || got.Counts.SMS != sms || got.Counts.Email != email || got.Counts.Total != everyone {
+		t.Fatalf("want every consenting user counted (sms %d, email %d, total %d), got %d %s", sms, email, everyone, rec.Code, rec.Body)
+	}
+	for name, rules := range map[string]string{
+		"match-all":           `[{"field":"order_count","op":"gte","value":0}]`,
+		"windowed match-all":  `[{"field":"spend_in_window","op":"gte","value":{"amount":0,"last_months":12}}]`,
+		"everyone and a city": `[{"field":"all_customers","op":"is","value":true},{"field":"city","op":"in","value":["Ankara"]}]`,
+		"false":               `[{"field":"all_customers","op":"is","value":false}]`,
+	} {
+		if rec := a.do(http.MethodPut, path, `{"version":2,"rules":`+rules+`}`); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: want 422, got %d %s", name, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestUpdateSchedule(t *testing.T) {
 	t.Parallel()
 	a := newApp(t, llm.NewMock())

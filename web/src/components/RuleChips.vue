@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { DropdownMenuContent, DropdownMenuItem, DropdownMenuPortal, DropdownMenuRoot, DropdownMenuTrigger } from 'reka-ui'
 import type { Catalog, Rule } from '../campaign/types'
-import { addableRules, ruleLabel, ruleTitle } from '../campaign/rules'
+import { addableRules, ruleLabel, ruleTitle, targetsEveryone } from '../campaign/rules'
 import { t } from '../i18n'
 
 const props = defineProps<{ rules: Rule[]; catalog: Catalog; errors?: Map<number, string[]>; disabled?: boolean }>()
@@ -10,6 +10,7 @@ const emit = defineEmits<{ edit: [index: number]; remove: [index: number]; add: 
 
 const addable = computed(() => addableRules(props.rules, props.catalog))
 const lastRule = computed(() => props.rules.length <= 1) // the backend needs at least one rule
+const everyone = computed(() => targetsEveryone(props.rules))
 </script>
 
 <template>
@@ -17,7 +18,9 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
     <template v-for="(r, i) in rules" :key="`${r.field} ${r.op}`">
       <span v-if="i > 0" class="and" aria-hidden="true">{{ t('rules.and') }}</span>
       <span class="chip" :class="{ invalid: errors?.has(i) }">
-        <button type="button" class="chip-label" :disabled="disabled" :aria-describedby="errors?.has(i) ? `rule-error-${i}` : undefined" @click="emit('edit', i)">
+        <!-- All customers has no value to edit (D14). -->
+        <span v-if="r.field === 'all_customers'" class="chip-label static">{{ ruleLabel(r) }}</span>
+        <button v-else type="button" class="chip-label" :disabled="disabled" :aria-describedby="errors?.has(i) ? `rule-error-${i}` : undefined" @click="emit('edit', i)">
           {{ ruleLabel(r) }}<span class="sr-only">. {{ t('rules.edit') }}</span>
         </button>
         <!-- aria-disabled keeps the button focusable, so its reason can be heard. -->
@@ -40,6 +43,7 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
       {{ t('rules.consent') }}<span class="sr-only"> {{ t('rules.consentAlways') }}</span>
     </span>
+    <span v-if="everyone" class="hint">{{ t('rules.allCustomersHint') }}</span>
     <span v-if="lastRule" id="last-rule-hint" class="hint">{{ t('rules.lastRule') }}</span>
     <DropdownMenuRoot v-if="addable.length">
       <DropdownMenuTrigger class="add" :disabled="disabled">{{ t('rules.add') }}</DropdownMenuTrigger>
@@ -96,6 +100,12 @@ const lastRule = computed(() => props.rules.length <= 1) // the backend needs at
   color: var(--ink);
   text-align: left;
   cursor: pointer;
+}
+.chip-label.static {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+  cursor: default;
 }
 .chip-remove {
   width: 30px;

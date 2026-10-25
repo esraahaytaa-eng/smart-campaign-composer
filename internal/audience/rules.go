@@ -47,6 +47,7 @@ var minDate = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // fieldOps lists every field and its allowed operators (D14).
 var fieldOps = map[string][]string{
+	"all_customers":    {"is"}, // everyone who allowed the channel, chosen explicitly (D14)
 	"city":             {"in"},
 	"cart_added":       {"within"},
 	"no_order":         {"within"},
@@ -70,10 +71,12 @@ const (
 	ValueAmount           = "amount"            // number
 	ValueAmountWindow     = "amount_window"     // a window plus "amount": number
 	ValueCountWindow      = "count_window"      // a window plus "count": whole number
+	ValueAll              = "all"               // true; the audience's only rule
 )
 
 // fieldValues is each field's value type; parse decodes exactly these shapes.
 var fieldValues = map[string]string{
+	"all_customers":    ValueAll,
 	"city":             ValueCities,
 	"cart_added":       ValueWindow,
 	"no_order":         ValueWindow,
@@ -138,6 +141,14 @@ func Validate(rules []Rule, cat Catalog) ([]Rule, []FieldError) {
 			errs = append(errs, FieldError{i, err.Error()})
 			continue
 		}
+		if _, all := c.(allCustomers); all && len(rules) > 1 {
+			errs = append(errs, FieldError{i, "all_customers must be the only rule: remove it to filter, or remove the other rules to reach everyone"})
+			continue
+		}
+		if matchesEveryone(c) {
+			errs = append(errs, FieldError{i, fmt.Sprintf("%s %s 0 matches every customer; use all_customers to target everyone", r.Field, r.Op)})
+			continue
+		}
 		value, err := json.Marshal(c.value())
 		if err != nil {
 			errs = append(errs, FieldError{i, err.Error()})
@@ -175,6 +186,16 @@ func parse(r Rule, cat *Catalog) (condition, error) {
 	}
 
 	switch r.Field {
+	case "all_customers":
+		var all bool
+		if err := decode(r, &all); err != nil {
+			return nil, err
+		}
+		if !all {
+			return nil, errors.New("all_customers takes the value true")
+		}
+		return allCustomers{}, nil
+
 	case "city":
 		var cities []string
 		if err := decode(r, &cities); err != nil {
@@ -326,6 +347,29 @@ func repeatedKey(dec *json.Decoder) error {
 	}
 	_, err = dec.Token() // the closing delimiter
 	return err
+}
+
+// matchesEveryone reports a condition every customer meets, such as at least
+// 0 orders: a disguised "everyone" that would hide what the marketer approves.
+// It is refused in Validate only, so stored rules still build (D14).
+func matchesEveryone(c condition) bool {
+	switch c := c.(type) {
+	case compare:
+		return c.op == "gte" && isZero(c.n)
+	case windowTotal:
+		return c.op == "gte" && isZero(c.n)
+	}
+	return false
+}
+
+func isZero(n any) bool {
+	switch n := n.(type) {
+	case int64:
+		return n == 0
+	case float64:
+		return n == 0
+	}
+	return false
 }
 
 // window is the last N days or calendar months, counted back from when the

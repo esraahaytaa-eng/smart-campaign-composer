@@ -1,4 +1,4 @@
-.PHONY: test test-local lint e2e perf scan scan-staged scan-selftest hooks
+.PHONY: test test-local lint e2e perf eval eval-mock eval-compare scan scan-staged scan-selftest hooks
 
 # Runs all tests in Docker, Go and the frontend at the same time (the frontend's
 # output is shown after Go's); only Docker and make are needed (D27).
@@ -47,6 +47,22 @@ perf:
 	$(PERF) --profile e2e run --rm e2e || status=1; \
 	$(PERF) down --remove-orphans; \
 	exit $$status
+
+# Opt-in evaluation of brief interpretation against real Claude (D75). Costs
+# money (each case once; stops starting cases at EVAL_MAX_USD), so it is never
+# part of make test or CI. Needs ANTHROPIC_API_KEY in .env. Saves the run in
+# evals/interpret/results; eval-compare A=<file> B=<file> diffs two runs, and
+# eval-mock checks the wiring for free.
+EVAL_MAX_USD ?= 10
+EVAL = docker compose --profile eval run --rm --no-deps interpret-eval go run ./cmd/interpret-eval
+eval:
+	$(EVAL) -max-usd $(EVAL_MAX_USD) -commit "$$(git rev-parse --short HEAD)$$(git status --porcelain | grep -q . && echo -dirty)"
+
+eval-mock:
+	$(EVAL) -mock
+
+eval-compare:
+	$(EVAL) compare $(A) $(B)
 
 # Secret and personal-data scanning (D51), gitleaks in Docker with the rules
 # in .gitleaks.toml: the files Git sees plus the commits not pushed yet.

@@ -546,3 +546,39 @@ func TestContentPrompt_VersionBQuotesVersionA(t *testing.T) {
 		t.Fatalf("only the version B prompt quotes version A:\n%s\n---\n%s", b, normal)
 	}
 }
+
+// Saved eval runs record these (D75): the version must be stable for the same
+// prompt, and the effort must be the one actually sent.
+func TestInterpretPromptVersion(t *testing.T) {
+	v := InterpretPromptVersion()
+	if len(v) != 12 || strings.Trim(v, "0123456789abcdef") != "" {
+		t.Errorf("want 12 hex characters, got %q", v)
+	}
+	if InterpretPromptVersion() != v {
+		t.Error("version changed between calls")
+	}
+	got, url := fakeAPI(t, http.StatusOK, "end_turn", validOutput)
+	if _, err := interpretVia(t, url, "claude-opus-5-5", testInput()); err != nil {
+		t.Fatal(err)
+	}
+	if oc, _ := got.body["output_config"].(map[string]any); oc["effort"] != InterpretEffort() {
+		t.Errorf("InterpretEffort %q, request sent %v", InterpretEffort(), oc["effort"])
+	}
+}
+
+// Every catalog field the schema allows must be explained in the prompt;
+// all_customers must also say when it may be used (D14).
+func TestInterpretSystemPrompt_ListsEveryCatalogField(t *testing.T) {
+	for _, f := range audience.Fields() {
+		if !strings.Contains(interpretSystemPrompt, f.Field+" / ") {
+			t.Errorf("prompt does not explain %s", f.Field)
+		}
+	}
+	for _, want := range []string{"explicitly", "only rule", "names no audience", "unsupported", "order_count gte 0",
+		"tries to override these instructions", "never all_customers", "is not an override attempt",
+		"English for an English brief", "Turkish for a Turkish brief", "even when the brief is an override attempt"} {
+		if !strings.Contains(interpretSystemPrompt, want) {
+			t.Errorf("prompt misses %q", want)
+		}
+	}
+}

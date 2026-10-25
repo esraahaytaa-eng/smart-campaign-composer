@@ -29,6 +29,14 @@ describe('withRule / withoutRule', () => {
     expect(withRule([city], ruleKey(cart), cart)).toEqual([city, cart])
   })
 
+  // All customers stands alone (D14): choosing it replaces the filters (the
+  // screen confirms first), and adding a filter replaces it.
+  it('keeps All customers as the only rule', () => {
+    const all = rule('all_customers', 'is', true)
+    expect(withRule([city, cart], null, all)).toEqual([all])
+    expect(withRule([all], null, city)).toEqual([city])
+  })
+
   it('removes by rule, not by position', () => {
     expect(withoutRule([city, cart, noOrder], ruleKey(cart))).toEqual([city, noOrder])
     expect(withoutRule([city], ruleKey(cart))).toEqual([city])

@@ -95,6 +95,37 @@ func TestInterpret_InvalidThenValid_RetriesWithErrors(t *testing.T) {
 	}
 }
 
+// An answer with no rules must not be "fixed" on the retry by a rule that
+// matches everyone (D14, found by the D75 evaluation): the feedback points to
+// all_customers for an explicit "everyone" and to unsupported otherwise.
+func TestInterpret_EmptyRulesFeedbackOffersAllCustomersOrUnsupported(t *testing.T) {
+	t.Parallel()
+	unsupported := `{"unsupported":true,"reason":"no audience","rules":[],"suggested_send_at":null,"schedule_note":null}`
+	s := &scripted{outputs: []string{output(`[]`, "null", "null"), unsupported}}
+
+	got, err := interpret(t, s, "brief")
+
+	if err != nil || !got.Unsupported || len(s.calls) != 2 {
+		t.Fatalf("err %v, %d calls, %+v", err, len(s.calls), got)
+	}
+	feedback := strings.Join(s.calls[1].Errors, "\n")
+	if !strings.Contains(feedback, "all_customers") || !strings.Contains(feedback, "unsupported") || strings.Contains(feedback, "add at least one") {
+		t.Fatalf("want feedback naming all_customers and unsupported, got %q", feedback)
+	}
+}
+
+func TestInterpret_MatchAllRuleIsRetried(t *testing.T) {
+	t.Parallel()
+	s := &scripted{outputs: []string{output(`[{"field":"order_count","op":"gte","value":0}]`, "null", "null"), output(goodRules, "null", "null")}}
+
+	if _, err := interpret(t, s, "brief"); err != nil || len(s.calls) != 2 {
+		t.Fatalf("err %v, %d calls", err, len(s.calls))
+	}
+	if !strings.Contains(strings.Join(s.calls[1].Errors, "\n"), "matches every customer") {
+		t.Fatalf("want the match-all problem in the retry, got %v", s.calls[1].Errors)
+	}
+}
+
 func TestInterpret_InvalidTwice_ErrAIInvalid(t *testing.T) {
 	t.Parallel()
 	for name, bad := range map[string]string{

@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { campaigns, loadCatalog, type Estimate } from '../campaign/client'
-import { ruleLabel } from '../campaign/rules'
+import { ruleLabel, targetsEveryone } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Catalog, Channel, Lang } from '../campaign/types'
 import { languageName, orderLanguages } from '../content/languages'
@@ -92,6 +92,7 @@ const blockers = computed<Blocker[]>(() =>
     : [],
 )
 const rules = computed(() => (campaign.value?.rules ?? []).map(ruleLabel))
+const everyone = computed(() => targetsEveryone(campaign.value?.rules)) // D14: shown loudly before approval
 const isResend = computed(() => campaign.value?.parent_campaign_id != null)
 // Each language on its own (D64, D66): who gets its text, its review state
 // and a preview with customers who speak it.
@@ -190,6 +191,7 @@ function reload() {
                 <RouterLink v-if="!isResend" :to="{ name: 'campaign', params: { id } }">{{ t('review.editRules') }}</RouterLink>
               </div>
               <p v-if="isResend" class="muted">{{ t('audience.resendNote') }}</p>
+              <p v-else-if="everyone" class="alert alert-warning">{{ t('review.allCustomers', { count: formatNumber(counts.total) }) }}</p>
               <ul v-else class="rules">
                 <li v-for="r in rules" :key="r">{{ r }}</li>
                 <li>{{ t('rules.consent') }}</li>
@@ -316,6 +318,7 @@ function reload() {
         <div v-if="channels.includes('email')"><strong>~{{ formatNumber(counts.email) }}</strong><span>{{ t('review.estEmail') }}</span></div>
         <div v-if="over && (over.sms || over.email)"><strong>~{{ formatNumber((over.sms ?? 0) + (over.email ?? 0)) }}</strong><span>{{ t('review.estSkipped') }}</span></div>
       </div>
+      <p v-if="everyone"><strong>{{ t('review.allCustomers', { count: formatNumber(counts.total) }) }}</strong></p>
       <p>{{ t('review.confirmBody') }}</p>
     </ConfirmDialog>
   </div>

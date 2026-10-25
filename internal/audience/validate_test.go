@@ -101,6 +101,15 @@ func TestValidate_Rejects(t *testing.T) {
 		{"repeated key", rule("cart_added", "within", `{"last_days": 30, "last_days": 90}`), "repeated key"},
 		{"repeated nested key", rule("ordered_category", "in", `{"categories": ["books"], "last_days": 30, "categories": ["home"]}`), "repeated key"},
 		{"orders window unknown key", rule("orders_in_window", "gte", `{"count": 1, "amount": 5, "last_days": 30}`), "value"},
+		{"all_customers false", rule("all_customers", "is", `false`), "true"},
+		{"all_customers not a boolean", rule("all_customers", "is", `"yes"`), "value"},
+		{"all_customers bad op", rule("all_customers", "in", `true`), "operator"},
+		// Disguised match-all conditions: every customer has at least 0 (D14).
+		{"order_count >= 0", rule("order_count", "gte", `0`), "matches every customer"},
+		{"total_spend >= 0", rule("total_spend", "gte", `0`), "matches every customer"},
+		{"cart_value >= 0", rule("cart_value", "gte", `0`), "matches every customer"},
+		{"spend_in_window >= 0", rule("spend_in_window", "gte", `{"amount": 0, "last_months": 12}`), "matches every customer"},
+		{"orders_in_window >= 0", rule("orders_in_window", "gte", `{"count": 0, "last_days": 30}`), "matches every customer"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -109,6 +118,42 @@ func TestValidate_Rejects(t *testing.T) {
 				t.Fatalf("want one error on rule 0 containing %q, got %v", tc.want, errs)
 			}
 		})
+	}
+}
+
+// D14: everyone is chosen explicitly, as the only rule; an empty list stays an error.
+func TestValidate_AllCustomers(t *testing.T) {
+	got, errs := audience.Validate([]audience.Rule{rule("all_customers", "is", `true`)}, catalog)
+	if len(errs) > 0 || len(got) != 1 || string(got[0].Value) != "true" {
+		t.Fatalf("want all_customers accepted alone, got %v %v", got, errs)
+	}
+	_, errs = audience.Validate([]audience.Rule{rule("city", "in", `["Ankara"]`), rule("all_customers", "is", `true`)}, catalog)
+	if len(errs) != 1 || errs[0].Rule != 1 || !strings.Contains(errs[0].Message, "only rule") {
+		t.Fatalf("want all_customers refused beside another rule, got %v", errs)
+	}
+	if _, errs := audience.Validate(nil, catalog); len(errs) != 1 || errs[0].Rule != -1 {
+		t.Fatalf("an empty list must stay an error, got %v", errs)
+	}
+}
+
+// Conditions next to the match-all ones are real filters and stay allowed.
+func TestValidate_KeepsFiltersNextToMatchAll(t *testing.T) {
+	for _, r := range []audience.Rule{
+		rule("order_count", "gt", `0`),
+		rule("order_count", "lte", `0`),
+		rule("order_count", "lt", `1`),
+		rule("total_spend", "gt", `0`),
+		rule("total_spend", "lte", `0`),
+		rule("total_spend", "gte", `0.01`),
+		rule("cart_value", "gt", `0`),
+		rule("spend_in_window", "gt", `{"amount": 0, "last_days": 30}`),
+		rule("spend_in_window", "lte", `{"amount": 0, "last_days": 30}`),
+		rule("orders_in_window", "gte", `{"count": 1, "last_days": 30}`),
+		rule("orders_in_window", "lt", `{"count": 1, "last_days": 30}`),
+	} {
+		if _, errs := audience.Validate([]audience.Rule{r}, catalog); len(errs) > 0 {
+			t.Errorf("%s %s %s: %v", r.Field, r.Op, r.Value, errs)
+		}
 	}
 }
 
@@ -191,15 +236,16 @@ func TestFields_DescribeWhatValidateAccepts(t *testing.T) {
 	samples := map[string][]string{
 		audience.ValueCities:           {`["Ankara"]`},
 		audience.ValueWindow:           {`{"last_days":30}`, `{"last_months":12}`, `{"from":"2026-10-01"}`},
-		audience.ValueAmountWindow:     {`{"amount":250.5,"last_months":12}`, `{"amount":0,"from":"2026-10-01"}`},
+		audience.ValueAmountWindow:     {`{"amount":250.5,"last_months":12}`, `{"amount":1,"from":"2026-10-01"}`},
 		audience.ValueCountWindow:      {`{"count":4,"last_days":90}`},
 		audience.ValueCategoriesWindow: {`{"categories":["books"],"last_days":30}`, `{"categories":["books"],"from":"2026-10-01"}`},
 		audience.ValueCount:            {`3`},
 		audience.ValueAmount:           {`250.5`},
+		audience.ValueAll:              {`true`},
 	}
 	fields := audience.Fields()
-	if len(fields) != 12 {
-		t.Fatalf("want the 12 catalog fields, got %d", len(fields))
+	if len(fields) != 13 {
+		t.Fatalf("want the 13 catalog fields, got %d", len(fields))
 	}
 	for i, f := range fields {
 		if i > 0 && fields[i-1].Field >= f.Field {

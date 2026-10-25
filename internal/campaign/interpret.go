@@ -154,6 +154,11 @@ func parseInterpretation(raw json.RawMessage, in llm.InterpretInput, loc *time.L
 		return Interpretation{Unsupported: true, Reason: out.Reason}, nil
 	}
 
+	// "Add at least one rule" made the model invent a rule matching everyone
+	// (D75 evaluation); it may use all_customers only when the brief asks for it.
+	if len(out.Rules) == 0 {
+		return Interpretation{}, []string{"no rules were given: use the all_customers rule only if the brief explicitly asks for every customer; otherwise answer unsupported"}
+	}
 	var problems []string
 	got := Interpretation{}
 	rules, errs := audience.Validate(out.Rules, in.Catalog)

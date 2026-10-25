@@ -45,7 +45,7 @@ export type Campaign = {
   completed_at?: string | null
 }
 
-export type ValueType = 'cities' | 'window' | 'categories_window' | 'count' | 'amount' | 'amount_window' | 'count_window'
+export type ValueType = 'cities' | 'window' | 'categories_window' | 'count' | 'amount' | 'amount_window' | 'count_window' | 'all'
 
 export type Catalog = {
   fields: { field: string; ops: string[]; value: ValueType }[]

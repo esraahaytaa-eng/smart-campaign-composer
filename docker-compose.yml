@@ -136,6 +136,22 @@ services:
       test-db:
         condition: service_healthy
 
+  # Opt-in evaluation against real Claude (make eval, D75): costs money, so it
+  # is in its own profile, never run by make test or CI. Reads the key from .env.
+  interpret-eval:
+    profiles: ["eval"]
+    image: golang:1.26-alpine
+    working_dir: /src
+    command: ["go", "run", "./cmd/interpret-eval"]
+    environment:
+      CGO_ENABLED: "0"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+    volumes:
+      - .:/src
+      - gomodcache:/go/pkg/mod
+      - gobuildcache:/root/.cache/go-build
+
   # Frontend checks (make test): the type check and Vitest.
   web-test:
     profiles: ["test"]
