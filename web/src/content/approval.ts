@@ -30,6 +30,12 @@ export type Blocker =
   | 'scheduleTooSoon'
   | 'scheduleTooLate'
 
+// The languages whose saved text still waits for the marketer's approval
+// (D66); one without saved text is not required.
+export function unapprovedLanguages(s: Pick<ApprovalState, 'content' | 'languages'>): Lang[] {
+  return Object.keys(s.content ?? {}).filter((l) => !s.languages[l]?.approved_at)
+}
+
 export function approvalBlockers(s: ApprovalState): Blocker[] {
   const out: Blocker[] = []
   const blank = (v?: string) => !v || v.trim() === ''
@@ -39,7 +45,7 @@ export function approvalBlockers(s: ApprovalState): Blocker[] {
   if (s.channels.includes('email') && all.some((c) => blank(c.email?.subject) || blank(c.email?.body))) out.push('missingEmail')
   if (s.content && Object.keys(s.content).length > 0) {
     if (s.defaultLanguage === null || s.content[s.defaultLanguage] === undefined) out.push('missingDefault')
-    if (Object.keys(s.content).some((l) => !s.languages[l]?.approved_at)) out.push('unapprovedLanguage')
+    if (unapprovedLanguages(s).length) out.push('unapprovedLanguage')
     if (s.abTest && Object.keys(s.content).some((l) => !s.contentB?.[l])) out.push('missingVersionB')
   }
   if (s.audience <= 0) out.push('noAudience')

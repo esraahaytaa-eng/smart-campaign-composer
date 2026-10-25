@@ -57,10 +57,37 @@ export default () =>
     const created = await t.get(resend)
     check(created.parent_campaign_id === id && created.channels.join() === 'sms', 'the resend is a draft linked to the campaign, SMS only')
     await page.getByText('Show original SMS').click()
-    check(await page.getByText(LONG_SMS.slice(0, 40), { exact: false }).isVisible(), 'the original SMS can be shown')
+    const original = page.locator('.original-text')
+    check((await original.innerText()) === LONG_SMS, 'the whole original SMS is shown')
+    // a long word or link in the original wraps inside the panel at phone width
+    const size = page.viewportSize()
+    await page.setViewportSize({ width: 390, height: 844 })
+    const fits = await original.evaluate((el) => {
+      const text = el.textContent
+      el.textContent = 'https://example.com/' + 'x'.repeat(300)
+      const ok = el.scrollWidth <= el.clientWidth && document.documentElement.scrollWidth <= window.innerWidth
+      el.textContent = text
+      return ok
+    })
+    check(fits, 'a long unbroken original wraps without widening the page')
+    if (size) await page.setViewportSize(size)
+    // Turkish only, as a marketer may choose: English unticked
+    const english = page.getByRole('checkbox', { name: /English/ })
+    if (await english.isChecked()) await english.uncheck()
     await page.locator('#sms-body').fill(SHORT)
     await page.locator('#sms-body').blur()
     await page.getByText('All changes saved').waitFor()
+
+    // reviewing before approving the text: the blocker names the one language to approve
+    await page.goto(`${BASE}/campaigns/${resend}/review`)
+    await page.getByRole('radio', { name: /Send now/ }).click()
+    await page.getByRole('checkbox').check()
+    await page.getByRole('button', { name: /^Approve and send/ }).click({ force: true }) // aria-disabled: a click lists what's missing
+    const blockers = await page.locator('.blockers').innerText()
+    check(blockers.includes('Approve the Türkçe text') && !blockers.includes('English'), `the review names only Türkçe to approve (${blockers.replace(/\n/g, ' / ')})`)
+    check((await t.get(resend)).status === 'draft', 'nothing is approved while the text waits for review')
+    await page.goto(`${BASE}/campaigns/${resend}/content`)
+    await page.locator('#sms-body').waitFor()
     await page.getByRole('button', { name: 'Approve Türkçe' }).click() // every language is reviewed (D66)
     await page.locator('.tabs').getByText('Approved').waitFor()
     await page.goto(`${BASE}/campaigns/${resend}/review`)
