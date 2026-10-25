@@ -907,6 +907,7 @@ const statusText = computed(() => {
 .original-text {
   margin-top: 8px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere; /* a long link or word wraps instead of widening the page */
   font-size: 14px;
   color: var(--ink-2);
 }

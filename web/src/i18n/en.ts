@@ -407,7 +407,7 @@ export const en = {
   'blocker.missingSms': 'Write the SMS.',
   'blocker.missingEmail': 'Write the email subject and body.',
   'blocker.missingDefault': 'Choose a default language that has messages.',
-  'blocker.unapprovedLanguage': 'Approve the messages of every language on the content step.',
+  'blocker.unapprovedLanguage': 'Approve the {names} text with its “Approve” button on the content step.',
   'blocker.missingVersionB': 'Write version B in every language on the content step.',
   'blocker.scheduleInvalid': 'Enter a date and time.',
   'blocker.scheduleTooSoon': 'Pick a time at least 1 minute from now.',

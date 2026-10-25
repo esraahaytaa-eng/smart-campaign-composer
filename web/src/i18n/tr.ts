@@ -406,7 +406,7 @@ export const tr: Record<Key, Message> = {
   'blocker.missingSms': 'SMS’i yazın.',
   'blocker.missingEmail': 'E-postanın konusunu ve metnini yazın.',
   'blocker.missingDefault': 'Mesajları olan bir varsayılan dil seçin.',
-  'blocker.unapprovedLanguage': 'İçerik adımında her dilin mesajlarını onaylayın.',
+  'blocker.unapprovedLanguage': '{names} metnini İçerik adımındaki “onayla” düğmesiyle onaylayın.',
   'blocker.missingVersionB': 'İçerik adımında her dil için B sürümünü yazın.',
   'blocker.scheduleInvalid': 'Bir tarih ve saat girin.',
   'blocker.scheduleTooSoon': 'En az 1 dakika sonrası için bir zaman seçin.',

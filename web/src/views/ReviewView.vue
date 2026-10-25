@@ -6,14 +6,14 @@ import { ruleLabel } from '../campaign/rules'
 import { briefTitle } from '../campaign/title'
 import type { Campaign, Catalog, Channel, Lang } from '../campaign/types'
 import { languageName, orderLanguages } from '../content/languages'
-import { approvalBlockers, type Blocker } from '../content/approval'
+import { approvalBlockers, unapprovedLanguages, type Blocker } from '../content/approval'
 import { samplesFor } from '../content/preview'
 import { outdatedLanguages } from '../content/stale'
 import { browserZone, fromLocalInput, scheduleProblem, suggestion, toLocalInput } from '../content/schedule'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import MessagePreview from '../components/MessagePreview.vue'
 import StepBar from '../components/StepBar.vue'
-import { formatDateTime, formatNumber, t } from '../i18n'
+import { formatAnd, formatDateTime, formatNumber, t } from '../i18n'
 import { errorText } from '../i18n/errors'
 import { ApiError } from '../api'
 
@@ -108,6 +108,11 @@ function stateOf(l: Lang): 'approved' | 'outdated' | 'needsReview' {
   return s?.outdated ? 'outdated' : 'needsReview'
 }
 const blockerList = ref<HTMLElement>()
+// The unapproved-language blocker names the languages, so a single one isn't read as "every language".
+const blockerText = (b: Blocker) =>
+  b === 'unapprovedLanguage' && campaign.value
+    ? t('blocker.unapprovedLanguage', { names: formatAnd(unapprovedLanguages({ content: campaign.value.content, languages: campaign.value.languages ?? {} }).map(name)) })
+    : t(`blocker.${b}`)
 
 async function openConfirm() {
   now.value = new Date()
@@ -282,7 +287,7 @@ function reload() {
               <!-- Focused (not role=alert) so it is read once, with its label. -->
               <span v-if="tried && blockers.length" id="missing-label" class="sr-only">{{ t('review.missing') }}</span>
               <ul v-if="tried && blockers.length" ref="blockerList" class="blockers" tabindex="-1" aria-labelledby="missing-label">
-                <li v-for="b in blockers" :key="b">{{ t(`blocker.${b}`) }}</li>
+                <li v-for="b in blockers" :key="b">{{ blockerText(b) }}</li>
               </ul>
               <button type="button" class="btn btn-primary btn-lg" :class="{ busy: busy || blockers.length > 0 }" :aria-disabled="busy || blockers.length > 0" @click="openConfirm">
                 {{ t(when === 'later' ? 'review.approveLater' : 'review.approveNow') }}

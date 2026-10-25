@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { approvalBlockers, type ApprovalState } from './approval'
+import { approvalBlockers, unapprovedLanguages, type ApprovalState } from './approval'
 
 const both = { sms: { body: 'Merhaba {{first_name}}' }, email: { subject: 'Konu', body: 'Merhaba' } }
 const ok = { approved_at: '2026-10-24T10:00:00Z', outdated: false }
@@ -42,6 +42,26 @@ describe('approvalBlockers', () => {
 
   it('needs only the chosen channel; kept text of another channel is ignored (D67)', () => {
     expect(approvalBlockers({ ...ready, channels: ['sms'], content: { tr: { sms: { body: 'x' }, email: { subject: '', body: '' } } }, languages: { tr: ok } })).toEqual([])
+  })
+})
+
+// Only languages with saved text need approval (D66): one ticked but never
+// written, or removed, is not required. The review step names the others.
+describe('unapprovedLanguages', () => {
+  it('names the written languages not approved yet', () => {
+    expect(unapprovedLanguages({ content: { tr: both, en: both }, languages: { tr: ok, en: { approved_at: null, outdated: true } } })).toEqual(['en'])
+  })
+
+  it('ignores a language without saved text', () => {
+    const s = { ...ready, channels: ['sms'], content: { tr: { sms: { body: 'x' } } }, languages: { tr: ok, en: { approved_at: null, outdated: false } } } as ApprovalState
+    expect(unapprovedLanguages(s)).toEqual([])
+    expect(approvalBlockers(s)).toEqual([])
+  })
+
+  it('requires the one written language of a resend', () => {
+    const s = { ...ready, channels: ['sms'], content: { tr: { sms: { body: 'x' } } }, languages: { tr: { approved_at: null, outdated: false } } } as ApprovalState
+    expect(unapprovedLanguages(s)).toEqual(['tr'])
+    expect(approvalBlockers(s)).toEqual(['unapprovedLanguage'])
   })
 })
 
