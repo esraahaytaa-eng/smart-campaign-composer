@@ -32,7 +32,17 @@ Then open:
 | `http://localhost:8080/docs` | API reference: OpenAPI 3.1 in Swagger UI; the spec is at `/docs/openapi.json` |
 | `/healthz`, `/readyz`, `/metrics` | Liveness, database readiness, Prometheus metrics |
 
-The first start seeds 3,000 fictional customers from a fixed random seed. Restarts never add or change them. Dates are relative to the first start, so "carted in the last 30 days" shrinks as time passes; `docker compose down -v && docker compose up` reseeds for today and deletes all campaigns.
+**The database sets itself up.** `docker compose up` runs the one-shot `migrate` service before the api and worker start. It applies the migrations, then seeds the demo login and 3,000 fictional customers in one transaction, so no manual seed command is needed. The seed is generated from a fixed random seed (`20261021`), so every fresh start produces the same data:
+
+| Seeded | Count |
+|---|---|
+| Customers (names, email, phone) | 3,000 across 16 cities |
+| Language | 2,672 Turkish, 328 English |
+| Channel permissions | 2,096 SMS, 2,095 email (1,650 both, 459 neither) |
+| Orders | 6,496 from 1,658 customers, in 6 product categories |
+| Cart items | 2,608 from 1,487 customers |
+
+A marker row makes the seed run once: restarts never add, change or duplicate customers (D28). Dates are relative to the first start, so "carted in the last 30 days" shrinks as time passes; `docker compose down -v && docker compose up` reseeds for today and deletes all campaigns.
 
 ## CASE requirements
 
@@ -49,7 +59,7 @@ The first start seeds 3,000 fictional customers from a fixed random seed. Restar
 | Live dashboard status, metrics, health checks | A per-campaign status stream over SSE (D21, D36); `/metrics` (D26), `/healthz` and `/readyz` on every process. |
 | Structured AI JSON, validated, invalid output handled safely | See [Reliable AI design](#reliable-ai-design). |
 | Tests without an API key; key from `ANTHROPIC_API_KEY` in `.env`; `.env.example` | Every test uses the mock LLM or a fake local API server. The key is read only from the environment. |
-| 3,000 fictional users with names, email, phone, city, orders, cart, permissions | Seeded once by the `migrate` service; restarts never duplicate them (D28). |
+| 3,000 fictional users with names, email, phone, city, orders, cart, permissions | Seeded automatically by the `migrate` service on the first `docker compose up`; restarts never duplicate them (D28). See [Setup](#setup) for the counts. |
 | Vue.js frontend, Go backend | Vue 3 + TypeScript + Vite (D25); one Go module (D20). |
 | Deliverables: `docker compose up`, `make test`, README, `DECISIONS.md`, `ai-sessions/` | All present. Session exports are reviewed for keys and personal data before they are committed (D51). |
 
@@ -80,13 +90,13 @@ The first start seeds 3,000 fictional customers from a fixed random seed. Restar
 
 > Son 12 ayda toplam 10.000 TL'den fazla harcama yapmış, en az 4 sipariş vermiş ancak son 45 gündür sipariş oluşturmamış müşterileri hedeflemek istiyorum. Son 7 gün içinde kayıt olanlar bu kampanyaya dahil edilmesin. Bu müşterilere %25 geri dönüş indirimi sunalım. SMS ve e-posta kullanılsın. Türkçe ve İngilizce içerikler profesyonel ama sıcak olsun.
 
-Mock mode answers this brief as unsupported (checked). Its audience is the loyalty segment above. Real Claude mapped that segment to the intended four rules (`spend_in_window gt 10,000 / 12 months`, `orders_in_window gte 4 / 12 months`, `no_order within 45 days`, `signed_up before 7 days`) in one controlled call (D70, `ai-sessions/08`). That run did not record this exact wording.
+Mock mode answers this brief as unsupported (checked). With real Claude this segmentation was tested manually in the app and produced the intended four rules: `spend_in_window gt 10,000 / 12 months`, `orders_in_window gte 4 / 12 months`, `no_order within 45 days` and `signed_up before 7 days`. The controlled real-Claude call for the same segment during D70 (`ai-sessions/08`) gave the same four rules.
 
 What has been verified with real Claude:
 
 | Case | Result |
 |---|---|
-| The loyalty segment above (D70) | The four intended rules; nothing dropped or approximated |
+| The Turkish segmentation brief above (manual test in the app; controlled call in D70) | The four intended rules; nothing dropped or approximated |
 | A realistic Turkish brief: İstanbul, cart abandoned in 30 days, send Friday 18:00, 15% off (QA AI1) | City and cart rules, the send time proposed in the campaign's zone, the discount kept for the content |
 | Turkish and English messages for that campaign (QA AI2) | Both greet with `{{first_name}}`; SMS within 160 characters |
 | A prompt-injection brief asking to ignore the rules and target everyone (QA AI3) | Unsupported; no campaign created, no rules invented |
