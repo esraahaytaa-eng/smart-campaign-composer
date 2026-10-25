@@ -233,6 +233,34 @@ func TestProcess_Classification(t *testing.T) {
 	}
 }
 
+// cancelAfter cancels the worker's context once the provider has answered.
+type cancelAfter struct{ cancel context.CancelFunc }
+
+func (c cancelAfter) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := http.DefaultTransport.RoundTrip(r)
+	c.cancel()
+	return resp, err
+}
+
+// A provider answer that arrives as the worker shuts down is recorded as that
+// answer: "interrupted" is only for a request that got no answer (D5 history).
+func TestProcess_AnswerDuringShutdownIsRecorded(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	p := &fakeProvider{handle: status(500)}
+	w := f.newWorker(p.serve(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Client.Transport = cancelAfter{cancel}
+	f.sendingWithContent("Merhaba {{first_name}}!")
+	job := f.claimOne("sms", 1)
+
+	w.Process(ctx, job)
+
+	if m := f.message(job.MessageID); m.Status != "retry_scheduled" || m.Outcome != "server_error" || m.HTTPStatus != 500 {
+		t.Fatalf("want the 500 recorded as a server error, got %+v", m)
+	}
+}
+
 func TestProcess_FifthFailureFails(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)

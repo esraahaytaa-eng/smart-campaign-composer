@@ -582,11 +582,11 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 		serverError(w, "load campaign", err)
 		return
 	}
-	if c.Content, err = h.loadContent(ctx, id, "a"); err != nil {
+	if c.Content, err = loadContent(ctx, h.Pool, id, "a"); err != nil {
 		serverError(w, "load content", err)
 		return
 	}
-	if c.ContentB, err = h.loadContent(ctx, id, "b"); err != nil {
+	if c.ContentB, err = loadContent(ctx, h.Pool, id, "b"); err != nil {
 		serverError(w, "load content", err)
 		return
 	}
@@ -595,7 +595,7 @@ func (h *Handler) respond(w http.ResponseWriter, ctx context.Context, status int
 		return
 	}
 	if c.Status == "draft" {
-		counts, err := h.countAudience(ctx, c, h.Now())
+		counts, err := countAudience(ctx, h.Pool, c, h.Now())
 		if err != nil {
 			serverError(w, "count audience", err)
 			return

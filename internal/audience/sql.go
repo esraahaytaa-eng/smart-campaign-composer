@@ -70,8 +70,13 @@ func Build(rules []Rule, channel string, now time.Time, loc *time.Location) (str
 	return where + " AND " + col, args, nil
 }
 
+// Querier is a pool or a transaction.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // Count returns how many users the audience reaches on each chosen channel.
-func Count(ctx context.Context, pool *pgxpool.Pool, rules []Rule, channels []string, now time.Time, loc *time.Location) (Counts, error) {
+func Count(ctx context.Context, db Querier, rules []Rule, channels []string, now time.Time, loc *time.Location) (Counts, error) {
 	if len(channels) == 0 {
 		return Counts{}, errors.New("choose at least one channel")
 	}
@@ -87,7 +92,7 @@ func Count(ctx context.Context, pool *pgxpool.Pool, rules []Rule, channels []str
 	if err != nil {
 		return Counts{}, err
 	}
-	rows, err := pool.Query(ctx, `SELECT u.language, count(*) FILTER (WHERE `+strings.Join(anyOf, " OR ")+`),
+	rows, err := db.Query(ctx, `SELECT u.language, count(*) FILTER (WHERE `+strings.Join(anyOf, " OR ")+`),
 		count(*) FILTER (WHERE u.sms_opt_in), count(*) FILTER (WHERE u.email_opt_in)
 		FROM users u WHERE `+where+` GROUP BY u.language`, args...)
 	if err != nil {

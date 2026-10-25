@@ -140,10 +140,10 @@ func (h *Handler) listRecipients(ctx context.Context, id int64, group, channel, 
 	var v, vb content.Variants
 	if group == "skipped" {
 		var err error
-		if v, err = h.loadContent(ctx, id, "a"); err != nil { // fixed after approval (D11)
+		if v, err = loadContent(ctx, h.Pool, id, "a"); err != nil { // fixed after approval (D11)
 			return out, err
 		}
-		if vb, err = h.loadContent(ctx, id, "b"); err != nil {
+		if vb, err = loadContent(ctx, h.Pool, id, "b"); err != nil {
 			return out, err
 		}
 	}

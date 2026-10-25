@@ -37,8 +37,16 @@ func channelAudience(c campaignJSON, channel string, now time.Time) (content.Aud
 	return content.Audience{Where: where, Args: args}, err
 }
 
+// querier is the pool, or the transaction of a handler holding a row lock:
+// reads there use it, so a request never holds one connection while waiting
+// for a second.
+type querier interface {
+	audience.Querier
+	content.Querier
+}
+
 // countAudience is the current audience per channel.
-func (h *Handler) countAudience(ctx context.Context, c campaignJSON, now time.Time) (audience.Counts, error) {
+func countAudience(ctx context.Context, db querier, c campaignJSON, now time.Time) (audience.Counts, error) {
 	if c.ParentCampaignID == nil {
 		if len(c.Rules) == 0 {
 			return audience.Counts{}, nil
@@ -47,14 +55,14 @@ func (h *Handler) countAudience(ctx context.Context, c campaignJSON, now time.Ti
 		if err != nil {
 			return audience.Counts{}, err
 		}
-		return audience.Count(ctx, h.Pool, c.Rules, c.Channels, now, loc)
+		return audience.Count(ctx, db, c.Rules, c.Channels, now, loc)
 	}
 	ch := c.Channels[0] // a resend has exactly one channel
 	a, err := channelAudience(c, ch, now)
 	if err != nil {
 		return audience.Counts{}, err
 	}
-	rows, err := h.Pool.Query(ctx, `SELECT u.language, count(*), count(*), count(*) FROM users u WHERE `+a.Where+` GROUP BY 1`, a.Args...)
+	rows, err := db.Query(ctx, `SELECT u.language, count(*), count(*), count(*) FROM users u WHERE `+a.Where+` GROUP BY 1`, a.Args...)
 	if err != nil {
 		return audience.Counts{}, err
 	}
@@ -64,8 +72,8 @@ func (h *Handler) countAudience(ctx context.Context, c campaignJSON, now time.Ti
 // estimateFor returns the current audience and, if there is content, the
 // over-limit counts per language and channel: both estimates of a future
 // send (D3, D30). Text of channels that aren't chosen is left out (D67).
-func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, v content.Variants, now time.Time) (audience.Counts, *content.OverLimit, error) {
-	counts, err := h.countAudience(ctx, c, now)
+func estimateFor(ctx context.Context, db querier, c campaignJSON, v content.Variants, now time.Time) (audience.Counts, *content.OverLimit, error) {
+	counts, err := countAudience(ctx, db, c, now)
 	if err != nil || v == nil || c.DefaultLanguage == nil {
 		return counts, nil, err
 	}
@@ -79,7 +87,7 @@ func (h *Handler) estimateFor(ctx context.Context, c campaignJSON, v content.Var
 	for l, x := range v {
 		chosen[l] = content.ForChannels(x, c.Channels)
 	}
-	over, err := content.EstimateOverLimit(ctx, h.Pool, chosen, *c.DefaultLanguage, audiences)
+	over, err := content.EstimateOverLimit(ctx, db, chosen, *c.DefaultLanguage, audiences)
 	return counts, &over, err
 }
 
@@ -143,7 +151,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cont, err := h.loadContent(ctx, id, "a")
+	cont, err := loadContent(ctx, tx, id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
@@ -154,7 +162,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 	}
 	errs := content.ValidateVariants(cont, c.Channels, *c.DefaultLanguage)
 	if c.ABTest {
-		b, err := h.loadContent(ctx, id, "b")
+		b, err := loadContent(ctx, tx, id, "b")
 		if err != nil {
 			serverError(w, "load content", err)
 			return
@@ -180,7 +188,7 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	counts, over, err := h.estimateFor(ctx, c, cont, now)
+	counts, over, err := estimateFor(ctx, tx, c, cont, now)
 	if err != nil {
 		serverError(w, "estimate audience", err)
 		return
@@ -327,13 +335,13 @@ func (h *Handler) estimate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "the audience is fixed once sending has started")
 		return
 	}
-	cont, err := h.loadContent(r.Context(), id, "a")
+	cont, err := loadContent(r.Context(), h.Pool, id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
 	}
 	now := h.Now()
-	counts, over, err := h.estimateFor(r.Context(), c, cont, now)
+	counts, over, err := estimateFor(r.Context(), h.Pool, c, cont, now)
 	if err != nil {
 		serverError(w, "estimate", err)
 		return
@@ -342,13 +350,13 @@ func (h *Handler) estimate(w http.ResponseWriter, r *http.Request) {
 		"delivery": deliveryFor(c, cont, counts), "recommendation": newRecommendation(counts)}
 	// Version B's text over the whole audience; about half of each language gets it (D68).
 	if c.ABTest {
-		b, err := h.loadContent(r.Context(), id, "b")
+		b, err := loadContent(r.Context(), h.Pool, id, "b")
 		if err != nil {
 			serverError(w, "load content", err)
 			return
 		}
 		if b != nil {
-			_, overB, err := h.estimateFor(r.Context(), c, b, now)
+			_, overB, err := estimateFor(r.Context(), h.Pool, c, b, now)
 			if err != nil {
 				serverError(w, "estimate", err)
 				return

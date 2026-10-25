@@ -3,10 +3,15 @@ package campaign_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"smart-campaign-composer/internal/campaign"
 	"smart-campaign-composer/internal/llm"
 )
 
@@ -145,6 +150,42 @@ func TestApprove_ConcurrentDoubleApprove(t *testing.T) {
 
 	if !(codes[0] == 200 && codes[1] == 409 || codes[0] == 409 && codes[1] == 200) {
 		t.Fatalf("want one 200 and one 409, got %v", codes)
+	}
+}
+
+// Approving reads everything on its own transaction: with one connection in
+// the pool it still finishes, so approvals at once can't each hold one and
+// wait for another, which would block the whole API.
+func TestApprove_NeedsOneConnection(t *testing.T) {
+	t.Parallel()
+	a := newAppWith(t, llm.NewMock(), func(h *campaign.Handler) {
+		cfg := h.Pool.Config().Copy()
+		cfg.MaxConns = 1
+		one, err := pgxpool.NewWithConfig(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(one.Close)
+		h.Pool = one
+	})
+	d := a.newDraft()
+	a.putContent(d.ID, `{"version":1,"default_language":"tr","content":{"tr":`+validContent+`}}`)
+	// A deadline, so a request waiting for a second connection fails instead of hanging.
+	within := func(path, body string) *httptest.ResponseRecorder {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, path, strings.NewReader(body))
+		req.AddCookie(a.cookie)
+		rec := httptest.NewRecorder()
+		a.mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := within("/api/campaigns/"+itoa(d.ID)+"/languages/tr/approve", `{"version":2}`); rec.Code != http.StatusOK {
+		t.Fatalf("approve language: want 200, got %d %s", rec.Code, rec.Body)
+	}
+	if rec := within("/api/campaigns/"+itoa(d.ID)+"/approve", `{"version":2,"send":"now"}`); rec.Code != http.StatusOK {
+		t.Fatalf("approve: want 200, got %d %s", rec.Code, rec.Body)
 	}
 }
 

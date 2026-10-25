@@ -642,6 +642,13 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 - **Rejected:** *Vendoring swagger-ui-dist:* ~1.5 MB of third-party files in the repo and image. *An npm dependency in the web build:* a new dependency and build changes for a developer page. *Generating the spec from code:* annotations or a library across every handler.
 - **Trade-offs:** `/docs` needs internet access in the browser. The test checks routes, not every field, so response shapes can drift unnoticed. The page allows inline styles, which Swagger UI needs.
 
+### D74 — Frontend lint: ESLint with the recommended Vue and TypeScript rules
+- **Status:** Accepted · 2026-10-25
+- **Decision:** ESLint with `eslint-plugin-vue` `flat/recommended` and `typescript-eslint` recommended (via `@vue/eslint-config-typescript`), exact versions as dev dependencies. `make lint` runs it in the `web-test` container after gofmt and go vet, so the CI lint job covers it; any warning fails. Six template-layout rules are off (attributes per line, newlines in elements, self-closing, indent, closing bracket).
+- **Why:** The frontend had only the type check and tests; the README listed a linter as a future improvement.
+- **Rejected:** *Auto-fixing the layout rules:* ~1,100 changes in 24 templates, and newlines inside inline elements can add visible spaces. *Warnings that don't fail:* CI would ignore new problems. *Prettier:* a formatter wasn't asked for.
+- **Trade-offs:** Template layout isn't checked. Three new dev dependencies (plus their own); none ship in the app.
+
 ## Open Questions
 
 Proposed 2026-10-23 after the step 7 measurements (`docs/performance.md`). Q1, Q2, Q5 and the first half of Q3 were approved as D59–D62.

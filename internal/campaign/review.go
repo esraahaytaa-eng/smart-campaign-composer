@@ -48,7 +48,7 @@ func (h *Handler) approveLanguage(w http.ResponseWriter, r *http.Request) {
 		serverError(w, "lock draft", err)
 		return
 	}
-	v, err := h.loadContent(ctx, id, "a")
+	v, err := loadContent(ctx, tx, id, "a")
 	if err != nil {
 		serverError(w, "load content", err)
 		return
@@ -65,7 +65,7 @@ func (h *Handler) approveLanguage(w http.ResponseWriter, r *http.Request) {
 	}
 	errs := content.ValidateVariants(content.Variants{lang: v[lang]}, channels, lang)
 	if abTest {
-		b, err := h.loadContent(ctx, id, "b")
+		b, err := loadContent(ctx, tx, id, "b")
 		if err != nil {
 			serverError(w, "load content", err)
 			return
