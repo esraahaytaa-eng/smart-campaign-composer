@@ -312,7 +312,7 @@ func (w *Worker) Process(ctx context.Context, j Job) error {
 		result.Status = "sent"
 	case attempt.Outcome == "rejected":
 		result.Status = "failed"
-	case ctx.Err() != nil:
+	case ctx.Err() != nil && attempt.HTTPStatus == 0:
 		// Shutdown mid-request: no answer, maybe delivered. Not a failure and
 		// not counted; retried at once with the same key (D5 history).
 		attempt.Outcome, attempt.Error = "interrupted", "interrupted by worker shutdown"
