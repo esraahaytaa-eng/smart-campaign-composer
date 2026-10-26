@@ -516,7 +516,7 @@ Fixed by `CASE.md`: Go backend and Vue.js frontend. Stack and component choices:
 
 ### D41 — Headless UI components (Reka UI) with our own styles
 - **Status:** Accepted · 2026-10-22
-- **Decision:** Reka UI (MIT) provides the accessible behaviour of dialogs, menus, toasts, comboboxes and tag inputs; all styling is our own CSS, built from the colours and spacing of the design reference in `design/` (README, *UI/UX design*). Tables are plain semantic HTML. Replaces PrimeVue in D25.
+- **Decision:** Reka UI (MIT) provides the accessible behaviour of dialogs, menus, toasts, comboboxes and tag inputs; all styling is our own CSS, built from the colours and spacing of the design reference in `design/` (README, *Project documentation*). Tables are plain semantic HTML. Replaces PrimeVue in D25.
 - **Why:** PrimeVue 5 needs a license key, or it shows a licence notice; a key can't be committed, so every reviewer would see the notice. The last MIT release (4.5.5) is frozen. The design is fully custom, so a headless library fits it better than a themed one.
 - **Rejected:** *PrimeVue 4.5.5:* a frozen release line, and heavy theming to match the design. *PrimeVue 5 with a Community key:* a licence notice or a key for every reviewer. *No component library:* accessibility of dialogs and menus entirely hand-built (D25's concern).
 - **Trade-offs:** More CSS to write; no ready-made data table or chart components.
