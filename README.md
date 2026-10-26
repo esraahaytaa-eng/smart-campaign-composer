@@ -2,6 +2,15 @@
 
 A marketer describes a campaign in plain Turkish or English. Claude turns the brief into audience rules and writes SMS and email messages. The Go backend validates every AI answer, the marketer reviews, edits and explicitly approves, and a queue sends to mock SMS and email providers while the dashboard shows delivery live. Frontend: Vue 3 + TypeScript. Backend: Go. Storage and queue: Postgres.
 
+## Highlights
+
+- **AI output is never trusted.** Claude answers in schema-bound JSON; Go decodes it strictly, checks every rule against a fixed catalog, and builds parameterized SQL itself. Invalid answers get one retry with the errors fed back; unclear briefs return `unsupported` instead of a guess. ([Reliable AI design](#reliable-ai-design))
+- **Measured, not just prompted.** 68 labeled briefs in Turkish and English cover boundary values, ambiguity and prompt injection. `make eval` scores real Claude against them, and tests run with a mock LLM through the same validation path. (D75)
+- **No message is sent twice.** One message per campaign, user and channel; the message ID is the provider's idempotency key; leases recover messages after a worker crash. Tests crash workers, lose provider responses and race cancellations. (D4–D6, D18)
+- **100 messages/s per channel, retries included.** A rate limiter plus a hard cap per 1-second window; exponential backoff with jitter that honours `Retry-After`. (D7, D19, D69)
+- **The marketer stays in control.** Rules shown as editable chips, content streamed live and editable, each language approved separately, nothing sent without explicit approval. (D9, D66)
+- **All four bonuses**: scheduled sending, messages in the customer's language, A/B variants and CI. [Limits](#known-limitations) are listed honestly.
+
 **Status:** every mandatory requirement in [`CASE.md`](CASE.md) and all four optional features are built (scope and limits below). Manual QA: 77 of 78 cases passed in the initial run; the one failing case, a low-severity bug, was then fixed with regression tests (PR #15). CI runs the tests, lint, a secret scan and the browser suite.
 
 ## Setup
